@@ -19,20 +19,20 @@ def invite_user_to_classroom(admin_email, classroom_id, invitee_email):
     classroom = classrooms_collection.find_one({"_id": ObjectId(classroom_id)})
 
     if not admin:
-        return False, "Administrador no encontrado"
+        return False, "Profesor no encontrado"
     if not invitee:
         return False, "Usuario invitado no encontrado"
     if not classroom:
         return False, "Clase no encontrada"
 
     # Verificar si el admin tiene permisos para invitar
-    admin_member = classroom_members_collection.find_one({
+    teacher_member = classroom_members_collection.find_one({
         "classroom_id": ObjectId(classroom_id),
         "user_id": admin["_id"],
-        "role": "admin"
+        "role": "teacher"
     })
 
-    if not admin_member:
+    if not teacher_member:
         return False, "No tienes permisos para invitar usuarios a esta clase"
 
     # Verificar si el usuario invitado ya es miembro de la clase
@@ -155,9 +155,9 @@ def accept_invitation(email, invitation_id):
 
     # Agregar al usuario como miembro del proyecto
     new_member = {
-        "classroom_id": invitation["classroom_id"],
         "user_id": user["_id"],
-        "role": "member",
+        "classroom_id": invitation["classroom_id"],
+        "role": "student",
         "joined_at": datetime.now()
     }
     classroom_members_collection.insert_one(new_member)

@@ -11,8 +11,9 @@ def verify_user_exists(email):  # Función simplificada para verificar si el usu
 
 def register_user(email, name, picture, birth_date, role):
     db = get_db()
+    classroom_members_collection = db.classroom_members
+    classroom_collection = db.classrooms
     users_collection = db.users
-    project_members_collection = db.project_members
 
     # Crear nuevo usuario
     new_user = {
@@ -25,15 +26,23 @@ def register_user(email, name, picture, birth_date, role):
     }
     user_result = users_collection.insert_one(new_user)
     user_id = user_result.inserted_id
-    user_role = role.lower()
 
-    # Asignar al usuario como administrador del proyecto
-    new_member = {
-        'user_id': user_id,
-        'role': user_role,
-        'joined_at': datetime.now()
-    }
-    project_members_collection.insert_one(new_member)
+    if role == 'teacher':
+        new_classroom = {
+            'name': name,
+            'created_at': datetime.now()
+        }
+        classroom_result = classroom_collection.insert_one(new_classroom)
+        classroom_id = classroom_result.inserted_id
+
+        # Asignar al usuario como administrador del proyecto
+        new_member = {
+            'user_id': user_id,
+            'classroom_id': classroom_id,
+            'role': 'teacher',
+            'joined_at': datetime.now()
+        }
+        classroom_members_collection.insert_one(new_member)
 
     return user_id
 
