@@ -74,7 +74,7 @@ def search_users():
     suggestions = search_users_by_partial_email(partial_email)
     return jsonify({"suggestions": suggestions}), 200
 
-@app.route('user/invite', methods=['POST'])
+@app.route('/user/invite', methods=['POST'])
 @handle_errors
 def invite_user_endpoint():
     data = request.json
@@ -149,4 +149,3 @@ def reject_classroom_invitation():
 
 if __name__ == '__main__':
     app.run(debug=True, port=5001)
-
