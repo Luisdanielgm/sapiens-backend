@@ -1,7 +1,7 @@
 from flask import Flask, jsonify, request
 from flask_cors import CORS
 from database.db_user import verify_user_exists, register_user, search_users_by_partial_email
-from database.db_projects import invite_user_to_project, accept_invitation, reject_invitation, get_user_pending_invitations
+from database.db_classrom import invite_user_to_classroom, accept_invitation, reject_invitation, get_user_pending_invitations
 from bson import ObjectId
 from functools import wraps
 
@@ -86,7 +86,7 @@ def invite_user_endpoint():
         return jsonify({"error": "Faltan parámetros requeridos"}), 400
 
     try:
-        success, message = invite_user_to_project(email, classroom_id, invitee_email)
+        success, message = invite_user_to_classroom(email, classroom_id, invitee_email)
         if success:
             return jsonify({"message": message}), 200
         else:
@@ -110,7 +110,7 @@ def get_user_invitations():
 
 @app.route('/invitations/accept', methods=['POST'])
 @handle_errors
-def accept_project_invitation():
+def accept_classroom_invitation():
     data = request.json
     email = data.get('email')
     invitation_id = data.get('invitation_id')
@@ -129,7 +129,7 @@ def accept_project_invitation():
 
 @app.route('/invitations/reject', methods=['POST'])
 @handle_errors
-def reject_project_invitation():
+def reject_classroom_invitation():
     data = request.json
     email = data.get('email')
     invitation_id = data.get('invitation_id')
