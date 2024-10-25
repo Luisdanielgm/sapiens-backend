@@ -38,11 +38,7 @@ def verify_user_endpoint():
 
     user_exists = verify_user_exists(email)
 
-    if user_exists:
-        return jsonify({'newUser': False}), 200
-    else:
-        # Si el usuario no existe, devolvemos newUser: True para que el frontend redirija al formulario de registro
-        return jsonify({'newUser': True}), 200
+    return jsonify({'userExists': user_exists}), 200
 
 @app.route('/users/register', methods=['POST'])
 def register_user_endpoint():
