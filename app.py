@@ -1,6 +1,6 @@
 from flask import Flask, jsonify, request
 from flask_cors import CORS
-from database.db_user import verify_user_exists, register_user, search_users_by_partial_email, delete_student
+from database.db_user import verify_user_exists, register_user, search_users_by_partial_email, delete_student, get_user_by_email
 from database.db_classrom import invite_user_to_classroom, accept_invitation, reject_invitation, get_user_pending_invitations, get_teacher_classrooms, get_classroom_students
 from bson import ObjectId
 from functools import wraps
@@ -202,6 +202,24 @@ def delete_student_endpoint():
         return jsonify({"message": message}), 200
     else:
         return jsonify({"error": message}), 400
+
+@app.route('/user/info', methods=['GET'])
+@handle_errors
+def get_user_info():
+    email = request.args.get('email')
+    if not email:
+        return jsonify({"error": "Se requiere el email del usuario"}), 400
+
+    try:
+        user = get_user_by_email(email)
+        if user:
+            # Serializamos el documento para manejar el ObjectId
+            user_data = serialize_doc(user)
+            return jsonify({"user": user_data}), 200
+        else:
+            return jsonify({"error": "Usuario no encontrado"}), 404
+    except Exception as e:
+        return jsonify({"error": f"Error al obtener información del usuario: {str(e)}"}), 500
 
 if __name__ == '__main__':
     app.run(debug=True, port=5001)
