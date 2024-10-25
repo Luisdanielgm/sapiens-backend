@@ -1,4 +1,4 @@
-from flask import Flask, jsonify, request
+from flask import Flask, jsonify, request, make_response
 from flask_cors import CORS
 from database.db_user import verify_user_exists, register_user, search_users_by_partial_email
 from database.db_classrom import invite_user_to_classroom, accept_invitation, reject_invitation, get_user_pending_invitations, get_teacher_classrooms, get_classroom_students
@@ -6,7 +6,29 @@ from bson import ObjectId
 from functools import wraps
 
 app = Flask(__name__)
-CORS(app, resources={r"/*": {"origins": ["http://localhost:3000", "https://portal-hubnews.vercel.app"]}}, supports_credentials=True)
+
+# Configuración de CORS más permisiva
+CORS(app, resources={
+    r"/*": {
+        "origins": [
+            "https://sapiens-frontend-coral.vercel.app",
+            "http://localhost:3000"  # para desarrollo local
+        ],
+        "methods": ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+        "allow_headers": ["Content-Type", "Authorization"],
+        "supports_credentials": True
+    }
+})
+
+# Middleware para manejar OPTIONS requests
+@app.before_request
+def handle_preflight():
+    if request.method == "OPTIONS":
+        response = make_response()
+        response.headers.add("Access-Control-Allow-Origin", "*")
+        response.headers.add("Access-Control-Allow-Headers", "*")
+        response.headers.add("Access-Control-Allow-Methods", "*")
+        return response
 
 def serialize_doc(doc):
     return {k: str(v) if isinstance(v, ObjectId) else v for k, v in doc.items()}
@@ -174,4 +196,4 @@ def get_classroom_students_endpoint():
         return jsonify({"error": f"Error al obtener estudiantes: {str(e)}"}), 500
 
 if __name__ == '__main__':
-    app.run(debug=True, port=5001)
+    app.run(debug=True)
