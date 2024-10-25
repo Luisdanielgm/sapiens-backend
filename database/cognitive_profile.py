@@ -66,24 +66,37 @@ def update_cognitive_profile(email, profile_json_string):
         print(f"Error al actualizar el perfil: {str(e)}")
         return False
 
-def create_cognitive_profile(email, profile_json_string):
-    """
-    Crea un nuevo perfil cognitivo para un usuario.
-    El perfil debe proporcionarse como un string JSON.
-    
-    Args:
-        email (str): El email del usuario.
-        profile_json_string (str): El perfil cognitivo como string JSON.
-    
-    Returns:
-        bool: True si la creación fue exitosa, False en caso contrario.
-    """
+def create_cognitive_profile(email):
     db = get_db()
     cognitive_profiles_collection = db.cognitive_profiles
+    users_collection = db.users
 
     user_id = get_user_id_by_email(email)
     if not user_id:
         return False
+
+    user = users_collection.find_one({"_id": user_id})
+    if not user:
+        return False
+
+    empty_profile = {
+        "id": str(user_id),
+        "name": user["name"],
+        "learningStyle": {
+            "visual": 0,
+            "kinesthetic": 0,
+            "auditory": 0,
+            "readingWriting": 0
+        },
+        "diagnosis": "",
+        "cognitiveStrengths": [],
+        "cognitiveDifficulties": [],
+        "personalContext": "",
+        "recommendedStrategies": []
+    }
+
+    # Convertir a string JSON
+    profile_json_string = json.dumps(empty_profile)
 
     new_profile = {
         "user_id": user_id, 
