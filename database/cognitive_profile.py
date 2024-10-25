@@ -2,7 +2,6 @@ from database.mongodb import get_db
 from database.db_user import get_user_id_by_email
 import json
 from datetime import datetime
-from bson import ObjectId
 
 def get_cognitive_profile(email):
     db = get_db()

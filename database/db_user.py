@@ -1,7 +1,7 @@
 from database.mongodb import get_db
 from datetime import datetime
 import re
-
+from database.cognitive_profile import create_cognitive_profile
 def verify_user_exists(email):
     db = get_db()
     users_collection = db.users
@@ -51,6 +51,9 @@ def register_user(email, name, picture, birth_date, role, classroom_name):
             'joined_at': datetime.now()
         }
         classroom_members_collection.insert_one(new_member)
+
+    if role == 'student':
+        create_cognitive_profile(email)
 
     return user_id
 
