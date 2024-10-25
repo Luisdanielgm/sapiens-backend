@@ -1,7 +1,7 @@
 from flask import Flask, jsonify, request
 from flask_cors import CORS
 from database.db_user import verify_user_exists, register_user, search_users_by_partial_email, delete_student, get_user_by_email
-from database.db_classrom import invite_user_to_classroom, accept_invitation, reject_invitation, get_user_pending_invitations, get_teacher_classrooms, get_classroom_students
+from database.db_classrom import invite_user_to_classroom, accept_invitation, reject_invitation, get_user_pending_invitations, get_teacher_classrooms, get_classroom_students, get_student_classrooms
 from bson import ObjectId
 from functools import wraps
 from database.cognitive_profile import get_cognitive_profile
@@ -253,6 +253,22 @@ def get_student_stats():
             return jsonify({"error": "No se pudieron obtener las estadísticas"}), 404
     except Exception as e:
         return jsonify({"error": f"Error al obtener estadísticas: {str(e)}"}), 500
+
+@app.route('/student/classrooms', methods=['GET'])
+@handle_errors
+def get_student_classrooms_endpoint():
+    email = request.args.get('email')
+    if not email:
+        return jsonify({"error": "Se requiere el email del estudiante"}), 400
+
+    try:
+        classrooms = get_student_classrooms(email)
+        return jsonify({
+            "classrooms": classrooms,
+            "count": len(classrooms)
+        }), 200
+    except Exception as e:
+        return jsonify({"error": f"Error al obtener los salones: {str(e)}"}), 500
 
 if __name__ == '__main__':
     app.run(debug=True, port=5001)
