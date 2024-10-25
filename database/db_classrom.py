@@ -3,7 +3,7 @@ from datetime import datetime
 from bson import ObjectId
 from datetime import datetime
 
-def invite_user_to_classroom(admin_email, classroom_id, invitee_email):
+def invite_user_to_classroom(teacher_email, classroom_id, invitee_email):
     db = get_db()
     users_collection = db.users
     classrooms_collection = db.classrooms
@@ -11,24 +11,28 @@ def invite_user_to_classroom(admin_email, classroom_id, invitee_email):
     classroom_invitations_collection = db.classroom_invitations
 
     # Verificar si el admin está intentando invitarse a sí mismo
-    if admin_email == invitee_email:
+    if teacher_email == invitee_email:
         return False, "No puedes invitarte a ti mismo a la clase"
 
-    admin = users_collection.find_one({"email": admin_email})
+    teacher = users_collection.find_one({"email": teacher_email})
     invitee = users_collection.find_one({"email": invitee_email})
     classroom = classrooms_collection.find_one({"_id": ObjectId(classroom_id)})
 
-    if not admin:
+    if not teacher:
         return False, "Profesor no encontrado"
     if not invitee:
         return False, "Usuario invitado no encontrado"
     if not classroom:
         return False, "Clase no encontrada"
 
+    # Verificar que el invitado no sea un profesor
+    if invitee.get('role') == 'teacher':
+        return False, "No puedes invitar a otro profesor a la clase"
+
     # Verificar si el admin tiene permisos para invitar
     teacher_member = classroom_members_collection.find_one({
         "classroom_id": ObjectId(classroom_id),
-        "user_id": admin["_id"],
+        "user_id": teacher["_id"],
         "role": "teacher"
     })
 
@@ -57,7 +61,7 @@ def invite_user_to_classroom(admin_email, classroom_id, invitee_email):
     # Crear nueva invitación
     new_invitation = {
         "classroom_id": ObjectId(classroom_id),
-        "inviter_id": admin["_id"],
+        "inviter_id": teacher["_id"],
         "invitee_id": invitee["_id"],
         "status": "pending",
         "created_at": datetime.now()
