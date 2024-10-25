@@ -1,18 +1,10 @@
 from database.mongodb import get_db
+from database.db_user import get_user_id_by_email
+import json
 from datetime import datetime
 from bson import ObjectId
-from database.db_user import get_user_id_by_email
 
 def get_cognitive_profile(email):
-    """
-    Obtiene el perfil cognitivo de un usuario por su email.
-    
-    Args:
-        email (str): El email del usuario.
-    
-    Returns:
-        dict: El perfil cognitivo del usuario o None si no se encuentra.
-    """
     db = get_db()
     cognitive_profiles_collection = db.cognitive_profiles
 
@@ -20,16 +12,26 @@ def get_cognitive_profile(email):
     if not user_id:
         return None
 
-    profile = cognitive_profiles_collection.find_one({"user_id": user_id})
-    return profile
+    profile_doc = cognitive_profiles_collection.find_one({"user_id": user_id})
+    if not profile_doc or not profile_doc.get("profile"):
+        return None
 
-def update_cognitive_profile(email, profile):
+    try:
+        # Convertir el string JSON a diccionario
+        profile_json = json.loads(profile_doc["profile"])
+        return profile_json
+    except json.JSONDecodeError as e:
+        print(f"Error al decodificar el perfil JSON: {str(e)}")
+        return None
+
+def update_cognitive_profile(email, profile_json_string):
     """
     Actualiza el perfil cognitivo de un usuario.
+    El perfil debe proporcionarse como un string JSON.
     
     Args:
         email (str): El email del usuario.
-        profile (dict): Los datos actualizados del perfil.
+        profile_json_string (str): El perfil cognitivo como string JSON.
     
     Returns:
         bool: True si la actualización fue exitosa, False en caso contrario.
@@ -42,23 +44,36 @@ def update_cognitive_profile(email, profile):
         return False
 
     try:
+        # Verificar que el string sea un JSON válido
+        json.loads(profile_json_string)
+        
+        # Actualizar el documento con el string JSON
         result = cognitive_profiles_collection.update_one(
             {"user_id": user_id},
-            {"$set": profile}
+            {
+                "$set": {
+                    "profile": profile_json_string,
+                    "updated_at": datetime.now()
+                }
+            },
+            upsert=True
         )
-        return result.modified_count > 0
+        return True
+    except json.JSONDecodeError as e:
+        print(f"Error: El string proporcionado no es un JSON válido: {str(e)}")
+        return False
     except Exception as e:
-        print(f"Error al actualizar el perfil cognitivo: {str(e)}")
+        print(f"Error al actualizar el perfil: {str(e)}")
         return False
 
-def create_cognitive_profile(email, profile, status):
+def create_cognitive_profile(email, profile_json_string):
     """
     Crea un nuevo perfil cognitivo para un usuario.
+    El perfil debe proporcionarse como un string JSON.
     
     Args:
         email (str): El email del usuario.
-        profile (str): El perfil cognitivo.
-        status (str): El estado del perfil.
+        profile_json_string (str): El perfil cognitivo como string JSON.
     
     Returns:
         bool: True si la creación fue exitosa, False en caso contrario.
@@ -72,9 +87,8 @@ def create_cognitive_profile(email, profile, status):
 
     new_profile = {
         "user_id": user_id, 
-        "status": status,
-        "profile": profile,
-        "date": datetime.now()
+        "profile": profile_json_string,
+        "updated_at": datetime.now()
     }
 
     try:
