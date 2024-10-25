@@ -76,3 +76,40 @@ def search_users_by_partial_email(partial_email):
     ).limit(5)
 
     return [user['email'] for user in users]
+
+def delete_student(email):
+    db = get_db()
+    users_collection = db.users
+    classroom_members_collection = db.classroom_members
+    cognitive_profiles_collection = db.cognitive_profiles
+    invitations_collection = db.invitations
+
+    try:
+        # Obtener el usuario y verificar que sea estudiante
+        user = users_collection.find_one({'email': email})
+        if not user or user.get('role') != 'student':
+            return False, "Usuario no encontrado o no es estudiante"
+
+        user_id = user['_id']
+
+        # Eliminar membresías de clase
+        classroom_members_collection.delete_many({'user_id': user_id})
+
+        # Eliminar invitaciones pendientes
+        invitations_collection.delete_many({
+            '$or': [
+                {'invitee_email': email},
+                {'inviter_email': email}
+            ]
+        })
+
+        # Eliminar perfil cognitivo
+        cognitive_profiles_collection.delete_one({'user_id': user_id})
+
+        # Eliminar el usuario
+        users_collection.delete_one({'_id': user_id})
+
+        return True, "Estudiante y datos asociados eliminados exitosamente"
+
+    except Exception as e:
+        return False, f"Error al eliminar estudiante: {str(e)}"

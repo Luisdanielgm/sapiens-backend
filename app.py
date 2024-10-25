@@ -1,6 +1,6 @@
 from flask import Flask, jsonify, request
 from flask_cors import CORS
-from database.db_user import verify_user_exists, register_user, search_users_by_partial_email
+from database.db_user import verify_user_exists, register_user, search_users_by_partial_email, delete_student
 from database.db_classrom import invite_user_to_classroom, accept_invitation, reject_invitation, get_user_pending_invitations, get_teacher_classrooms, get_classroom_students
 from bson import ObjectId
 from functools import wraps
@@ -189,6 +189,19 @@ def get_user_cognitive_profile():
             return jsonify({"error": "No se encontró el perfil cognitivo"}), 404
     except Exception as e:
         return jsonify({"error": f"Error al obtener el perfil cognitivo: {str(e)}"}), 500
+
+@app.route('/student/delete', methods=['DELETE'])
+@handle_errors
+def delete_student_endpoint():
+    email = request.args.get('email')
+    if not email:
+        return jsonify({"error": "Se requiere el email del estudiante"}), 400
+
+    success, message = delete_student(email)
+    if success:
+        return jsonify({"message": message}), 200
+    else:
+        return jsonify({"error": message}), 400
 
 if __name__ == '__main__':
     app.run(debug=True, port=5001)
