@@ -203,7 +203,95 @@ def get_teacher_classrooms(email):
                 "id": str(classroom["_id"]),
                 "name": classroom["name"],
                 "created_at": classroom["created_at"],
-                "student_count": student_count,  # Agregamos el contador de estudiantes
+                "student_count": student_count,
+            })
+
+    return classrooms
+
+def get_classroom_students(classroom_id):
+    """
+    Obtiene todos los estudiantes de un classroom específico.
+    
+    Args:
+        classroom_id (str): ID del classroom
+        
+    Returns:
+        list: Lista de estudiantes con sus detalles
+    """
+    db = get_db()
+    users_collection = db.users
+    classroom_members_collection = db.classroom_members
+
+    try:
+        # Buscar todos los miembros que son estudiantes
+        student_members = classroom_members_collection.find({
+            "classroom_id": ObjectId(classroom_id),
+            "role": "student"
+        })
+
+        students = []
+        for member in student_members:
+            # Obtener información detallada del usuario
+            student = users_collection.find_one({"_id": member["user_id"]})
+            if student:
+                students.append({
+                    "id": str(student["_id"]),
+                    "name": student["name"],
+                    "email": student["email"],
+                    "picture": student.get("picture"),
+                    "joined_at": member["joined_at"]
+                })
+
+        return {
+            "success": True,
+            "students": students,
+            "count": len(students)
+        }
+    except Exception as e:
+        print(f"Error al obtener estudiantes: {str(e)}")
+        return {
+            "success": False,
+            "error": "Error al obtener la lista de estudiantes",
+            "students": [],
+            "count": 0
+        }
+
+def get_student_classrooms(email):
+    db = get_db()
+    users_collection = db.users
+    classrooms_collection = db.classrooms
+    classroom_members_collection = db.classroom_members
+
+    # Verificar si el usuario existe y es estudiante
+    user = users_collection.find_one({"email": email})
+    if not user or user.get('role') != 'student':
+        return []
+
+    # Buscar todas las membresías del estudiante
+    student_memberships = classroom_members_collection.find({
+        "user_id": user["_id"],
+        "role": "student"
+    })
+
+    # Obtener los detalles de los salones
+    classrooms = []
+    for membership in student_memberships:
+        classroom = classrooms_collection.find_one({"_id": membership["classroom_id"]})
+        if classroom:
+            # Obtener información del profesor
+            teacher_member = classroom_members_collection.find_one({
+                "classroom_id": classroom["_id"],
+                "role": "teacher"
+            })
+            teacher = users_collection.find_one({"_id": teacher_member["user_id"]}) if teacher_member else None
+
+            classrooms.append({
+                "id": str(classroom["_id"]),
+                "name": classroom["name"],
+                "created_at": classroom["created_at"],
+                "joined_at": membership["joined_at"],
+                "teacher_name": teacher["name"] if teacher else "Sin profesor",
+                "teacher_email": teacher["email"] if teacher else None
             })
 
     return classrooms
