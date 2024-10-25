@@ -1,7 +1,7 @@
 from flask import Flask, jsonify, request
 from flask_cors import CORS
 from database.db_user import verify_user_exists, register_user, search_users_by_partial_email
-from database.db_classrom import invite_user_to_classroom, accept_invitation, reject_invitation, get_user_pending_invitations
+from database.db_classrom import invite_user_to_classroom, accept_invitation, reject_invitation, get_user_pending_invitations, get_teacher_classrooms
 from bson import ObjectId
 from functools import wraps
 
@@ -143,6 +143,19 @@ def reject_classroom_invitation():
     except Exception as e:
         return jsonify({"error": f"Error al rechazar la invitación: {str(e)}"}), 500
     
+
+@app.route('/teacher/classrooms', methods=['GET'])
+@handle_errors
+def get_teacher_classrooms_endpoint():
+    email = request.args.get('email')
+    if not email:
+        return jsonify({"error": "Se requiere el email del profesor"}), 400
+
+    try:
+        classrooms = get_teacher_classrooms(email)
+        return jsonify({"classrooms": classrooms}), 200
+    except Exception as e:
+        return jsonify({"error": f"Error al obtener los salones: {str(e)}"}), 500
 
 if __name__ == '__main__':
     app.run(debug=True, port=5001)

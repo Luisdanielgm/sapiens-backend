@@ -163,3 +163,43 @@ def accept_invitation(email, invitation_id):
     classroom_members_collection.insert_one(new_member)
 
     return True
+
+def get_teacher_classrooms(email):
+    db = get_db()
+    users_collection = db.users
+    classrooms_collection = db.classrooms
+    classroom_members_collection = db.classroom_members
+
+    # Verificar si el usuario existe y es profesor
+    user = users_collection.find_one({"email": email})
+    if not user or user.get('role') != 'teacher':
+        return []
+
+    # Buscar todas las membresías del profesor
+    teacher_memberships = classroom_members_collection.find({
+        "user_id": user["_id"],
+        "role": "teacher"
+    })
+
+    # Obtener los IDs de los salones
+    classroom_ids = [membership["classroom_id"] for membership in teacher_memberships]
+
+    # Buscar los detalles de los salones
+    classrooms = []
+    for classroom_id in classroom_ids:
+        classroom = classrooms_collection.find_one({"_id": classroom_id})
+        if classroom:
+            # Contar estudiantes en este classroom
+            student_count = classroom_members_collection.count_documents({
+                "classroom_id": classroom_id,
+                "role": "student"
+            })
+
+            classrooms.append({
+                "id": str(classroom["_id"]),
+                "name": classroom["name"],
+                "created_at": classroom["created_at"],
+                "student_count": student_count,  # Agregamos el contador de estudiantes
+            })
+
+    return classrooms
