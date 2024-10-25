@@ -5,6 +5,7 @@ from database.db_classrom import invite_user_to_classroom, accept_invitation, re
 from bson import ObjectId
 from functools import wraps
 from database.cognitive_profile import get_cognitive_profile
+from database.statistics import get_teacher_statistics, get_student_statistics
 
 app = Flask(__name__)
 CORS(app, resources={r"/*": {"origins": ["http://localhost:3000", "https://portal-hubnews.vercel.app"]}}, supports_credentials=True)
@@ -220,6 +221,38 @@ def get_user_info():
             return jsonify({"error": "Usuario no encontrado"}), 404
     except Exception as e:
         return jsonify({"error": f"Error al obtener información del usuario: {str(e)}"}), 500
+
+@app.route('/statistics/teacher', methods=['GET'])
+@handle_errors
+def get_teacher_stats():
+    email = request.args.get('email')
+    if not email:
+        return jsonify({"error": "Se requiere el email del profesor"}), 400
+
+    try:
+        stats = get_teacher_statistics(email)
+        if stats:
+            return jsonify({"statistics": stats}), 200
+        else:
+            return jsonify({"error": "No se pudieron obtener las estadísticas"}), 404
+    except Exception as e:
+        return jsonify({"error": f"Error al obtener estadísticas: {str(e)}"}), 500
+
+@app.route('/statistics/student', methods=['GET'])
+@handle_errors
+def get_student_stats():
+    email = request.args.get('email')
+    if not email:
+        return jsonify({"error": "Se requiere el email del estudiante"}), 400
+
+    try:
+        stats = get_student_statistics(email)
+        if stats:
+            return jsonify({"statistics": stats}), 200
+        else:
+            return jsonify({"error": "No se pudieron obtener las estadísticas"}), 404
+    except Exception as e:
+        return jsonify({"error": f"Error al obtener estadísticas: {str(e)}"}), 500
 
 if __name__ == '__main__':
     app.run(debug=True, port=5001)
