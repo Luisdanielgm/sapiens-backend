@@ -24,17 +24,6 @@ def get_cognitive_profile(email):
         return None
 
 def update_cognitive_profile(email, profile_json_string):
-    """
-    Actualiza el perfil cognitivo de un usuario.
-    El perfil debe proporcionarse como un string JSON.
-    
-    Args:
-        email (str): El email del usuario.
-        profile_json_string (str): El perfil cognitivo como string JSON.
-    
-    Returns:
-        bool: True si la actualización fue exitosa, False en caso contrario.
-    """
     db = get_db()
     cognitive_profiles_collection = db.cognitive_profiles
 
