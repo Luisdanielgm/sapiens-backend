@@ -4,8 +4,9 @@ from database.db_user import verify_user_exists, register_user, search_users_by_
 from database.db_classrom import invite_user_to_classroom, accept_invitation, reject_invitation, get_user_pending_invitations, get_teacher_classrooms, get_classroom_students, get_student_classrooms
 from bson import ObjectId
 from functools import wraps
-from database.cognitive_profile import get_cognitive_profile
+from database.cognitive_profile import get_cognitive_profile, update_cognitive_profile
 from database.statistics import get_teacher_statistics, get_student_statistics
+import json
 
 app = Flask(__name__)
 CORS(app, resources={r"/*": {"origins": ["http://localhost:3000", "https://portal-hubnews.vercel.app"]}}, supports_credentials=True)
@@ -269,6 +270,37 @@ def get_student_classrooms_endpoint():
         }), 200
     except Exception as e:
         return jsonify({"error": f"Error al obtener los salones: {str(e)}"}), 500
+
+@app.route('/cognitive-profile/update', methods=['PUT'])
+@handle_errors
+def update_cognitive_profile_endpoint():
+    data = request.get_json()
+    email = data.get('email')
+    profile = data.get('profile')
+
+    if not email or not profile:
+        return jsonify({
+            "error": "Se requiere el email del estudiante y los datos del perfil"
+        }), 400
+
+    try:
+        # Convertir el diccionario a string JSON si es necesario
+        profile_json_string = json.dumps(profile) if isinstance(profile, dict) else profile
+        
+        success = update_cognitive_profile(email, profile_json_string)
+        
+        if success:
+            return jsonify({
+                "message": "Perfil cognitivo actualizado exitosamente"
+            }), 200
+        else:
+            return jsonify({
+                "error": "No se pudo actualizar el perfil cognitivo"
+            }), 400
+    except Exception as e:
+        return jsonify({
+            "error": f"Error al actualizar el perfil cognitivo: {str(e)}"
+        }), 500
 
 if __name__ == '__main__':
     app.run(debug=True, port=5001)
