@@ -2,17 +2,14 @@ from database.mongodb import get_db
 from bson import ObjectId
 from datetime import datetime
 
-def create_content(classroom_id, title, description, content_type, file_url=None, created_by=None):
+def create_content(classroom_id, student_id, content_text):
     """
     Crea un nuevo contenido para una clase.
 
     Args:
         classroom_id (str): ID de la clase.
-        title (str): Título del contenido.
-        description (str): Descripción del contenido.
-        content_type (str): Tipo de contenido (ej. 'video', 'documento', 'tarea').
-        file_url (str, opcional): URL del archivo si es aplicable.
-        created_by (str, opcional): ID del usuario que crea el contenido.
+        student_id (str): ID del estudiante.
+        content_text (str): Contenido en formato texto.
 
     Returns:
         str: ID del contenido creado si es exitoso, None en caso contrario.
@@ -22,11 +19,8 @@ def create_content(classroom_id, title, description, content_type, file_url=None
 
     new_content = {
         "classroom_id": ObjectId(classroom_id),
-        "title": title,
-        "description": description,
-        "content_type": content_type,
-        "file_url": file_url,
-        "created_by": ObjectId(created_by) if created_by else None,
+        "student_id": ObjectId(student_id),
+        "content": content_text,
         "created_at": datetime.now(),
         "updated_at": datetime.now()
     }
@@ -38,16 +32,13 @@ def create_content(classroom_id, title, description, content_type, file_url=None
         print(f"Error al crear el contenido: {str(e)}")
         return None
 
-def update_content(content_id, title=None, description=None, content_type=None, file_url=None):
+def update_content(content_id, content_text):
     """
     Actualiza un contenido existente.
 
     Args:
         content_id (str): ID del contenido a actualizar.
-        title (str, opcional): Nuevo título del contenido.
-        description (str, opcional): Nueva descripción del contenido.
-        content_type (str, opcional): Nuevo tipo de contenido.
-        file_url (str, opcional): Nueva URL del archivo.
+        content_text (str): Nuevo contenido en formato texto.
 
     Returns:
         bool: True si la actualización fue exitosa, False en caso contrario.
@@ -55,46 +46,19 @@ def update_content(content_id, title=None, description=None, content_type=None, 
     db = get_db()
     content_collection = db.content
 
-    update_data = {}
-    if title is not None:
-        update_data["title"] = title
-    if description is not None:
-        update_data["description"] = description
-    if content_type is not None:
-        update_data["content_type"] = content_type
-    if file_url is not None:
-        update_data["file_url"] = file_url
-    
-    update_data["updated_at"] = datetime.now()
-
     try:
         result = content_collection.update_one(
             {"_id": ObjectId(content_id)},
-            {"$set": update_data}
+            {
+                "$set": {
+                    "content": content_text,
+                    "updated_at": datetime.now()
+                }
+            }
         )
         return result.modified_count > 0
     except Exception as e:
         print(f"Error al actualizar el contenido: {str(e)}")
-        return False
-
-def delete_content(content_id):
-    """
-    Elimina un contenido existente.
-
-    Args:
-        content_id (str): ID del contenido a eliminar.
-
-    Returns:
-        bool: True si la eliminación fue exitosa, False en caso contrario.
-    """
-    db = get_db()
-    content_collection = db.content
-
-    try:
-        result = content_collection.delete_one({"_id": ObjectId(content_id)})
-        return result.deleted_count > 0
-    except Exception as e:
-        print(f"Error al eliminar el contenido: {str(e)}")
         return False
 
 def get_content(content_id):
@@ -115,29 +79,60 @@ def get_content(content_id):
         if content:
             content["_id"] = str(content["_id"])
             content["classroom_id"] = str(content["classroom_id"])
-            if content["created_by"]:
-                content["created_by"] = str(content["created_by"])
+            content["student_id"] = str(content["student_id"])
         return content
     except Exception as e:
         print(f"Error al obtener el contenido: {str(e)}")
         return None
 
-def get_classroom_content(classroom_id):
+def get_student_content(student_id, classroom_id):
     """
-    Obtiene todo el contenido de una clase específica.
+    Obtiene todo el contenido de un estudiante en una clase específica.
 
     Args:
+        student_id (str): ID del estudiante.
         classroom_id (str): ID de la clase.
 
     Returns:
-        list: Lista de contenidos de la clase.
+        list: Lista de contenidos del estudiante en la clase.
     """
     db = get_db()
     content_collection = db.content
 
     try:
-        contents = content_collection.find({"classroom_id": ObjectId(classroom_id)})
-        return [{**content, "_id": str(content["_id"]), "classroom_id": str(content["classroom_id"]), "created_by": str(content["created_by"]) if content["created_by"] else None} for content in contents]
+        contents = content_collection.find({
+            "student_id": ObjectId(student_id),
+            "classroom_id": ObjectId(classroom_id)
+        }).sort("created_at", -1)  # Ordenar por fecha de creación, más reciente primero
+        
+        return [{
+            "_id": str(content["_id"]),
+            "classroom_id": str(content["classroom_id"]),
+            "student_id": str(content["student_id"]),
+            "content": content["content"],
+            "created_at": content["created_at"],
+            "updated_at": content["updated_at"]
+        } for content in contents]
     except Exception as e:
-        print(f"Error al obtener el contenido de la clase: {str(e)}")
+        print(f"Error al obtener el contenido del estudiante: {str(e)}")
         return []
+
+def delete_content(content_id):
+    """
+    Elimina un contenido existente.
+
+    Args:
+        content_id (str): ID del contenido a eliminar.
+
+    Returns:
+        bool: True si la eliminación fue exitosa, False en caso contrario.
+    """
+    db = get_db()
+    content_collection = db.content
+
+    try:
+        result = content_collection.delete_one({"_id": ObjectId(content_id)})
+        return result.deleted_count > 0
+    except Exception as e:
+        print(f"Error al eliminar el contenido: {str(e)}")
+        return False
