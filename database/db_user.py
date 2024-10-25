@@ -2,6 +2,7 @@ from database.mongodb import get_db
 from datetime import datetime
 import re
 from database.cognitive_profile import create_cognitive_profile
+
 def verify_user_exists(email):
     db = get_db()
     users_collection = db.users
@@ -63,17 +64,6 @@ def get_user_by_email(email):
 
     user = users_collection.find_one({'email': email})
     return user
-
-def get_user_id_by_email(email):
-    db = get_db()
-    users_collection = db.users
-
-    user = users_collection.find_one({"email": email}, {"_id": 1})
-    if not user:
-        print(f"No se encontró usuario con el email: {email}")
-        return None
-    user_id = user["_id"]
-    return user_id
 
 def search_users_by_partial_email(partial_email):
     db = get_db()

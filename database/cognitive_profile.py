@@ -1,5 +1,5 @@
 from database.mongodb import get_db
-from database.db_user import get_user_id_by_email
+from database.common import get_user_id_by_email
 import json
 from datetime import datetime
 
