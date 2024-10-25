@@ -4,6 +4,7 @@ from database.db_user import verify_user_exists, register_user, search_users_by_
 from database.db_classrom import invite_user_to_classroom, accept_invitation, reject_invitation, get_user_pending_invitations, get_teacher_classrooms, get_classroom_students
 from bson import ObjectId
 from functools import wraps
+from database.cognitive_profile import get_cognitive_profile
 
 app = Flask(__name__)
 CORS(app, resources={r"/*": {"origins": ["http://localhost:3000", "https://portal-hubnews.vercel.app"]}}, supports_credentials=True)
@@ -173,5 +174,21 @@ def get_classroom_students_endpoint():
     except Exception as e:
         return jsonify({"error": f"Error al obtener estudiantes: {str(e)}"}), 500
 
+@app.route('/user/cognitive-profile', methods=['GET'])
+@handle_errors
+def get_user_cognitive_profile():
+    email = request.args.get('email')
+    if not email:
+        return jsonify({"error": "Se requiere el email del usuario"}), 400
+
+    try:
+        profile = get_cognitive_profile(email)
+        if profile:
+            return jsonify({"profile": profile}), 200
+        else:
+            return jsonify({"error": "No se encontró el perfil cognitivo"}), 404
+    except Exception as e:
+        return jsonify({"error": f"Error al obtener el perfil cognitivo: {str(e)}"}), 500
+
 if __name__ == '__main__':
-    app.run(debug=True)
+    app.run(debug=True, port=5001)
