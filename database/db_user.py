@@ -17,7 +17,7 @@ def verify_user_exists(email):
         'role': None
     }
 
-def register_user(email, name, picture, birth_date, role):
+def register_user(email, name, picture, birth_date, role, classroom_name):
     db = get_db()
     classroom_members_collection = db.classroom_members
     classroom_collection = db.classrooms
@@ -37,7 +37,7 @@ def register_user(email, name, picture, birth_date, role):
 
     if role == 'teacher':
         new_classroom = {
-            'name': name,
+            'name': classroom_name,
             'created_at': datetime.now()
         }
         classroom_result = classroom_collection.insert_one(new_classroom)

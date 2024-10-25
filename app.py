@@ -47,12 +47,13 @@ def register_user_endpoint():
     name = data.get('name')
     picture = data.get('picture')
     birth_date = data.get('birthDate')
+    classroom_name = data.get('classroomName')
     role = data.get('role')
 
-    if not email or not name or not picture or not birth_date or not role:
+    if not email or not name or not picture or not birth_date or not role or not classroom_name:
         return jsonify({'error': 'Missing required fields'}), 400
 
-    result = register_user(email, name, picture, birth_date, role)
+    result = register_user(email, name, picture, birth_date, role, classroom_name)
 
     if result:
         return jsonify({'message': 'User registered successfully'}), 200
