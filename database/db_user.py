@@ -2,12 +2,20 @@ from database.mongodb import get_db
 from datetime import datetime
 import re
 
-def verify_user_exists(email):  # Función simplificada para verificar si el usuario existe
+def verify_user_exists(email):
     db = get_db()
     users_collection = db.users
 
     existing_user = users_collection.find_one({'email': email})
-    return bool(existing_user)
+    if existing_user:
+        return {
+            'exists': True,
+            'role': existing_user.get('role', 'student')  # valor por defecto 'student'
+        }
+    return {
+        'exists': False,
+        'role': None
+    }
 
 def register_user(email, name, picture, birth_date, role):
     db = get_db()
