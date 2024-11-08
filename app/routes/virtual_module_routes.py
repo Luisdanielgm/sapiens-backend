@@ -1,9 +1,7 @@
 from flask import Blueprint, jsonify, request
 from app.utils.decorators import handle_errors
-from database.cognitive_profile import get_cognitive_profile
 from database.virtual_module import (
     create_virtual_module,
-    create_personalized_module,
     get_virtual_module,
     get_personalized_module,
     get_student_modules,
@@ -11,7 +9,6 @@ from database.virtual_module import (
     add_module_resource,
     get_module_resources
 )
-from app.utils.ai_content_generator import generate_personalized_content
 
 virtual_module_bp = Blueprint('virtual_module', __name__)
 
@@ -32,37 +29,6 @@ def create_virtual_module_endpoint():
         return jsonify({
             "message": "Módulo virtual creado exitosamente",
             "module_id": str(module_id)
-        }), 201
-        
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
-
-@handle_errors
-def create_personalized_module_endpoint():
-    """Crea un módulo personalizado para un estudiante"""
-    data = request.get_json()
-    
-    try:
-        # Obtener módulo virtual y perfil cognitivo del estudiante
-        virtual_module = get_virtual_module(data['virtual_module_id'])
-        cognitive_profile = get_cognitive_profile(data['email'])
-        
-        # Generar contenido personalizado usando IA
-        personalized_content = generate_personalized_content(
-            virtual_module['content'],
-            cognitive_profile
-        )
-        
-        # Crear módulo personalizado
-        personalized_module_id = create_personalized_module(
-            virtual_module_id=data['virtual_module_id'],
-            student_id=data['student_id'],
-            adaptive_content=personalized_content
-        )
-        
-        return jsonify({
-            "message": "Módulo personalizado creado exitosamente",
-            "module_id": str(personalized_module_id)
         }), 201
         
     except Exception as e:
@@ -186,33 +152,6 @@ def get_module_resources_endpoint(module_id):
         return jsonify({"error": str(e)}), 500
 
 @handle_errors
-def generate_module_content_endpoint():
-    """Genera contenido personalizado usando IA"""
-    data = request.get_json()
-    
-    try:
-        # Obtener datos necesarios
-        virtual_module = get_virtual_module(data['virtual_module_id'])
-        cognitive_profile = get_cognitive_profile(data['email'])
-        
-        # Generar contenido personalizado
-        personalized_content = generate_personalized_content(
-            base_content=virtual_module['content'],
-            cognitive_profile=cognitive_profile,
-            learning_objectives=data.get('learning_objectives'),
-            difficulty_level=data.get('difficulty_level'),
-            preferred_learning_style=data.get('preferred_learning_style')
-        )
-        
-        return jsonify({
-            "content": personalized_content,
-            "message": "Contenido generado exitosamente"
-        }), 200
-        
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
-
-@handle_errors
 def add_batch_resources_endpoint():
     """Añade múltiples recursos a un módulo virtual"""
     if 'files[]' not in request.files:
@@ -248,13 +187,6 @@ def register_virtual_module_routes(bp):
         '/virtual-module/create',
         'create_virtual_module',
         create_virtual_module_endpoint,
-        methods=['POST']
-    )
-    
-    bp.add_url_rule(
-        '/virtual-module/personalize',
-        'create_personalized_module',
-        create_personalized_module_endpoint,
         methods=['POST']
     )
     
@@ -299,14 +231,7 @@ def register_virtual_module_routes(bp):
         get_module_resources_endpoint,
         methods=['GET']
     )
-    
-    bp.add_url_rule(
-        '/virtual-module/generate-content',
-        'generate_module_content',
-        generate_module_content_endpoint,
-        methods=['POST']
-    )
-    
+
     bp.add_url_rule(
         '/virtual-module/batch-resources',
         'add_batch_resources',

@@ -15,20 +15,6 @@ def create_virtual_module(module_id, name, description, created_by, content):
     result = db.virtual_modules.insert_one(virtual_module)
     return result.inserted_id
 
-def create_personalized_module(virtual_module_id, student_id, adaptive_content):
-    db = get_db()
-    personalized_module = {
-        "virtual_module_id": ObjectId(virtual_module_id),
-        "student_id": ObjectId(student_id),
-        "status": "in_progress",
-        "progress": 0.0,
-        "adaptive_content": adaptive_content,
-        "created_at": datetime.utcnow(),
-        "updated_at": datetime.utcnow()
-    }
-    result = db.personalized_modules.insert_one(personalized_module)
-    return result.inserted_id
-
 def get_virtual_module(virtual_module_id):
     db = get_db()
     return db.virtual_modules.find_one({"_id": ObjectId(virtual_module_id)})
