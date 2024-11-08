@@ -1,6 +1,5 @@
 from flask import jsonify, request
 from app.utils.decorators import handle_errors
-from database.study_plan.document_processor import process_uploaded_document
 from database.study_plan.db_evaluations import (
     create_evaluation_plan,
     create_evaluation,
@@ -17,24 +16,21 @@ from database.study_plan.db_evaluations import (
 
 @handle_errors
 def upload_evaluation_plan():
-    """Procesa documento de evaluaciones y crea plan de evaluación"""
-    if 'file' not in request.files:
-        return jsonify({"error": "No se encontró archivo"}), 400
+    """Crea plan de evaluación a partir de datos JSON"""
+    data = request.get_json()
+    classroom_ids = data.get('classroom_ids', [])
+    evaluations_data = data.get('evaluations', [])
     
-    file = request.files['file']
-    classroom_ids = request.form.getlist('classroom_ids')
-    
-    if not file or not classroom_ids:
+    if not classroom_ids or not evaluations_data:
         return jsonify({"error": "Faltan datos requeridos"}), 400
     
     try:
-        processed_data = process_uploaded_document(file)
         evaluation_plan_id = create_evaluation_plan(
             classroom_ids=classroom_ids,
-            document_url=processed_data['document_url']
+            document_url=None  # O eliminar este campo si ya no es necesario
         )
         
-        for eval_data in processed_data['evaluations']:
+        for eval_data in evaluations_data:
             create_evaluation(
                 evaluation_plan_id=evaluation_plan_id,
                 module_id=eval_data['module_id'],

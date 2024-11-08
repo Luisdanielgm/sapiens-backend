@@ -1,6 +1,4 @@
 from database.mongodb import get_db
-from database.common import get_user_id_by_email
-from bson import ObjectId
 from datetime import datetime
 
 def get_teacher_profile(email):

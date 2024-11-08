@@ -2,7 +2,6 @@ from .db_basic import *
 from .db_modules import *
 from .db_topics import *
 from .db_evaluations import *
-from .document_processor import process_uploaded_document
 
 __all__ = [
     'create_study_plan', 'get_study_plan', 'update_study_plan', 'delete_study_plan',

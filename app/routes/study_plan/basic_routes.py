@@ -1,6 +1,5 @@
 from flask import jsonify, request
 from app.utils.decorators import handle_errors
-from database.study_plan.document_processor import process_uploaded_document
 from database.study_plan.db_basic import (
     create_study_plan,
     get_study_plan,
@@ -10,23 +9,21 @@ from database.study_plan.db_basic import (
 
 @handle_errors
 def upload_study_plan():
-    """Procesa documento subido (PDF/Excel) y crea plan de estudios"""
-    if 'file' not in request.files:
-        return jsonify({"error": "No se encontró archivo"}), 400
+    """Crea plan de estudios a partir de datos JSON"""
+    data = request.get_json()
+    classroom_id = data.get('classroom_id')
+    name = data.get('name')
+    description = data.get('description')
     
-    file = request.files['file']
-    classroom_id = request.form.get('classroom_id')
-    
-    if not file or not classroom_id:
+    if not all([classroom_id, name, description]):
         return jsonify({"error": "Faltan datos requeridos"}), 400
     
     try:
-        processed_data = process_uploaded_document(file)
         study_plan_id = create_study_plan(
             classroom_id=classroom_id,
-            name=processed_data['name'],
-            description=processed_data['description'],
-            document_url=processed_data['document_url']
+            name=name,
+            description=description,
+            document_url=None  # O eliminar si ya no es necesario
         )
         
         return jsonify({
