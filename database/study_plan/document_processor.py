@@ -1,5 +1,5 @@
 from PyPDF2 import PdfReader
-import pandas as pd
+from openpyxl import load_workbook
 import os
 from werkzeug.utils import secure_filename
 
@@ -46,14 +46,56 @@ def _process_pdf(file_path):
 
 def _process_excel(file_path):
     """Procesa archivo Excel y extrae información estructurada"""
-    df = pd.read_excel(file_path)
+    wb = load_workbook(file_path, read_only=True)
+    sheet = wb.active
     
-    # Implementar lógica de extracción específica
+    # Obtener los encabezados (primera fila)
+    headers = [cell.value for cell in next(sheet.rows)]
+    
+    # Convertir filas a diccionarios
+    rows = []
+    for row in sheet.rows:
+        row_dict = {}
+        for header, cell in zip(headers, row):
+            row_dict[header] = cell.value
+        rows.append(row_dict)
+    
+    if not rows:
+        return {
+            'name': '',
+            'description': '',
+            'modules': []
+        }
+    
+    # Extraer información del plan
     return {
-        'name': df.iloc[0]['nombre_plan'],
-        'description': df.iloc[0]['descripcion'],
-        'modules': []  # Implementar extracción de módulos
+        'name': rows[0].get('nombre_plan', ''),
+        'description': rows[0].get('descripcion', ''),
+        'modules': [
+            {
+                'name': row.get('nombre_modulo', ''),
+                'start_date': str(row.get('fecha_inicio', '')),
+                'end_date': str(row.get('fecha_fin', '')),
+                'objectives': row.get('objetivos', '').split(',') if row.get('objetivos') else [],
+                'topics': _get_topics_from_excel(rows, row.get('id_modulo'))
+            }
+            for row in rows
+        ]
     }
+
+def _get_topics_from_excel(rows, module_id):
+    """Extrae los temas relacionados a un módulo del Excel"""
+    # Filtrar temas por module_id
+    topics = []
+    for row in rows:
+        if row.get('id_modulo') == module_id:
+            topics.append({
+                'name': row.get('nombre_tema', 'Tema desde Excel'),
+                'description': row.get('descripcion_tema', 'Descripción del tema'),
+                'date_range': f"{row.get('fecha_inicio_tema', '2024-01-01')}/{row.get('fecha_fin_tema', '2024-01-15')}",
+                'class_schedule': row.get('horario_clase', 'Lunes y Miércoles 10:00-12:00')
+            })
+    return topics
 
 def _upload_to_storage(file_path):
     """Sube el archivo a almacenamiento permanente"""
