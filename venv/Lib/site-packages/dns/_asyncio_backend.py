@@ -7,7 +7,9 @@ import socket
 import sys
 
 import dns._asyncbackend
+import dns._features
 import dns.exception
+import dns.inet
 
 _is_win32 = sys.platform == "win32"
 
@@ -40,7 +42,7 @@ class _DatagramProtocol:
             if exc is None:
                 # EOF we triggered.  Is there a better way to do this?
                 try:
-                    raise EOFError
+                    raise EOFError("EOF")
                 except EOFError as e:
                     self.recvfrom.set_exception(e)
             else:
@@ -62,7 +64,7 @@ async def _maybe_wait_for(awaitable, timeout):
 
 class DatagramSocket(dns._asyncbackend.DatagramSocket):
     def __init__(self, family, transport, protocol):
-        super().__init__(family)
+        super().__init__(family, socket.SOCK_DGRAM)
         self.transport = transport
         self.protocol = protocol
 
@@ -97,7 +99,7 @@ class DatagramSocket(dns._asyncbackend.DatagramSocket):
 
 class StreamSocket(dns._asyncbackend.StreamSocket):
     def __init__(self, af, reader, writer):
-        self.family = af
+        super().__init__(af, socket.SOCK_STREAM)
         self.reader = reader
         self.writer = writer
 
@@ -121,7 +123,7 @@ class StreamSocket(dns._asyncbackend.StreamSocket):
         return self.writer.get_extra_info("peercert")
 
 
-try:
+if dns._features.have("doh"):
     import anyio
     import httpcore
     import httpcore._backends.anyio
@@ -195,7 +197,7 @@ try:
             family=socket.AF_UNSPEC,
             **kwargs,
         ):
-            if resolver is None:
+            if resolver is None and bootstrap_address is None:
                 # pylint: disable=import-outside-toplevel,redefined-outer-name
                 import dns.asyncresolver
 
@@ -205,7 +207,7 @@ try:
                 resolver, local_port, bootstrap_address, family
             )
 
-except ImportError:
+else:
     _HTTPTransport = dns._asyncbackend.NullTransport  # type: ignore
 
 
@@ -224,14 +226,12 @@ class Backend(dns._asyncbackend.Backend):
         ssl_context=None,
         server_hostname=None,
     ):
-        if destination is None and socktype == socket.SOCK_DGRAM and _is_win32:
-            raise NotImplementedError(
-                "destinationless datagram sockets "
-                "are not supported by asyncio "
-                "on Windows"
-            )
         loop = _get_running_loop()
         if socktype == socket.SOCK_DGRAM:
+            if _is_win32 and source is None:
+                # Win32 wants explicit binding before recvfrom().  This is the
+                # proper fix for [#637].
+                source = (dns.inet.any_for_af(af), 0)
             transport, protocol = await loop.create_datagram_endpoint(
                 _DatagramProtocol,
                 source,
@@ -266,7 +266,7 @@ class Backend(dns._asyncbackend.Backend):
         await asyncio.sleep(interval)
 
     def datagram_connection_required(self):
-        return _is_win32
+        return False
 
     def get_transport_class(self):
         return _HTTPTransport

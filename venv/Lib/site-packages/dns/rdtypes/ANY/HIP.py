@@ -27,7 +27,6 @@ import dns.rdatatype
 
 @dns.immutable.immutable
 class HIP(dns.rdata.Rdata):
-
     """HIP record"""
 
     # see: RFC 5205
@@ -49,7 +48,7 @@ class HIP(dns.rdata.Rdata):
         for server in self.servers:
             servers.append(server.choose_relativity(origin, relativize))
         if len(servers) > 0:
-            text += " " + " ".join((x.to_unicode() for x in servers))
+            text += " " + " ".join(x.to_unicode() for x in servers)
         return "%u %s %s%s" % (self.algorithm, hit, key, text)
 
     @classmethod

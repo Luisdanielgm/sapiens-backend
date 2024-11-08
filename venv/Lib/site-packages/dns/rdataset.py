@@ -28,6 +28,7 @@ import dns.name
 import dns.rdata
 import dns.rdataclass
 import dns.rdatatype
+import dns.renderer
 import dns.set
 import dns.ttl
 
@@ -45,7 +46,6 @@ class IncompatibleTypes(dns.exception.DNSException):
 
 
 class Rdataset(dns.set.Set):
-
     """A DNS rdataset."""
 
     __slots__ = ["rdclass", "rdtype", "covers", "ttl"]
@@ -160,7 +160,7 @@ class Rdataset(dns.set.Set):
                 return s[:100] + "..."
             return s
 
-        return "[%s]" % ", ".join("<%s>" % maybe_truncate(str(rr)) for rr in self)
+        return "[" + ", ".join(f"<{maybe_truncate(str(rr))}>" for rr in self) + "]"
 
     def __repr__(self):
         if self.covers == 0:
@@ -248,12 +248,8 @@ class Rdataset(dns.set.Set):
             # (which is meaningless anyway).
             #
             s.write(
-                "{}{}{} {}\n".format(
-                    ntext,
-                    pad,
-                    dns.rdataclass.to_text(rdclass),
-                    dns.rdatatype.to_text(self.rdtype),
-                )
+                f"{ntext}{pad}{dns.rdataclass.to_text(rdclass)} "
+                f"{dns.rdatatype.to_text(self.rdtype)}\n"
             )
         else:
             for rd in self:
@@ -316,11 +312,9 @@ class Rdataset(dns.set.Set):
             want_shuffle = False
         else:
             rdclass = self.rdclass
-        file.seek(0, io.SEEK_END)
         if len(self) == 0:
             name.to_wire(file, compress, origin)
-            stuff = struct.pack("!HHIH", self.rdtype, rdclass, 0, 0)
-            file.write(stuff)
+            file.write(struct.pack("!HHIH", self.rdtype, rdclass, 0, 0))
             return 1
         else:
             l: Union[Rdataset, List[dns.rdata.Rdata]]
@@ -331,16 +325,9 @@ class Rdataset(dns.set.Set):
                 l = self
             for rd in l:
                 name.to_wire(file, compress, origin)
-                stuff = struct.pack("!HHIH", self.rdtype, rdclass, self.ttl, 0)
-                file.write(stuff)
-                start = file.tell()
-                rd.to_wire(file, compress, origin)
-                end = file.tell()
-                assert end - start < 65536
-                file.seek(start - 2)
-                stuff = struct.pack("!H", end - start)
-                file.write(stuff)
-                file.seek(0, io.SEEK_END)
+                file.write(struct.pack("!HHI", self.rdtype, rdclass, self.ttl))
+                with dns.renderer.prefixed_length(file, 2):
+                    rd.to_wire(file, compress, origin)
             return len(self)
 
     def match(
@@ -373,7 +360,6 @@ class Rdataset(dns.set.Set):
 
 @dns.immutable.immutable
 class ImmutableRdataset(Rdataset):  # lgtm[py/missing-equals]
-
     """An immutable DNS rdataset."""
 
     _clone_class = Rdataset

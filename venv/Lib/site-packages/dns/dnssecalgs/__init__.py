@@ -1,9 +1,12 @@
 from typing import Dict, Optional, Tuple, Type, Union
 
 import dns.name
+from dns.dnssecalgs.base import GenericPrivateKey
+from dns.dnssectypes import Algorithm
+from dns.exception import UnsupportedAlgorithm
+from dns.rdtypes.ANY.DNSKEY import DNSKEY
 
-try:
-    from dns.dnssecalgs.base import GenericPrivateKey
+if dns._features.have("dnssec"):
     from dns.dnssecalgs.dsa import PrivateDSA, PrivateDSANSEC3SHA1
     from dns.dnssecalgs.ecdsa import PrivateECDSAP256SHA256, PrivateECDSAP384SHA384
     from dns.dnssecalgs.eddsa import PrivateED448, PrivateED25519
@@ -16,17 +19,14 @@ try:
     )
 
     _have_cryptography = True
-except ImportError:
+else:
     _have_cryptography = False
-
-from dns.dnssectypes import Algorithm
-from dns.exception import UnsupportedAlgorithm
-from dns.rdtypes.ANY.DNSKEY import DNSKEY
 
 AlgorithmPrefix = Optional[Union[bytes, dns.name.Name]]
 
 algorithms: Dict[Tuple[Algorithm, AlgorithmPrefix], Type[GenericPrivateKey]] = {}
 if _have_cryptography:
+    # pylint: disable=possibly-used-before-assignment
     algorithms.update(
         {
             (Algorithm.RSAMD5, None): PrivateRSAMD5,
@@ -60,7 +60,7 @@ def get_algorithm_cls(
     if cls:
         return cls
     raise UnsupportedAlgorithm(
-        'algorithm "%s" not supported by dnspython' % Algorithm.to_text(algorithm)
+        f'algorithm "{Algorithm.to_text(algorithm)}" not supported by dnspython'
     )
 
 
