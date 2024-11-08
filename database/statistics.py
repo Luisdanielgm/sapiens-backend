@@ -94,3 +94,56 @@ def get_student_statistics(email):
     except Exception as e:
         print(f"Error al obtener estadísticas del estudiante: {str(e)}")
         return None
+
+def get_institute_statistics(institute_id):
+    """
+    Obtiene estadísticas para un instituto:
+    - Número total de programas
+    - Número total de profesores
+    - Número total de estudiantes
+    - Número total de classrooms activos
+    """
+    db = get_db()
+
+    try:
+        # Total de programas
+        total_programs = db.educational_programs.count_documents({
+            "institute_id": ObjectId(institute_id)
+        })
+
+        # Total de profesores
+        total_teachers = db.institute_members.count_documents({
+            "institute_id": ObjectId(institute_id),
+            "role": "teacher"
+        })
+
+        # Obtener IDs de todos los classrooms del instituto
+        classrooms = db.classrooms.find({"institute_id": ObjectId(institute_id)})
+        classroom_ids = [c["_id"] for c in classrooms]
+
+        # Total de estudiantes únicos
+        student_pipeline = [
+            {"$match": {
+                "classroom_id": {"$in": classroom_ids},
+                "role": "student"
+            }},
+            {"$group": {
+                "_id": "$user_id"
+            }},
+            {"$count": "total"}
+        ]
+        student_result = list(db.classroom_members.aggregate(student_pipeline))
+        total_students = student_result[0]["total"] if student_result else 0
+
+        # Total de classrooms activos
+        total_classrooms = len(classroom_ids)
+
+        return {
+            "total_programs": total_programs,
+            "total_teachers": total_teachers,
+            "total_students": total_students,
+            "total_classrooms": total_classrooms
+        }
+    except Exception as e:
+        print(f"Error al obtener estadísticas del instituto: {str(e)}")
+        return None

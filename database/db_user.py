@@ -2,6 +2,7 @@ from database.mongodb import get_db
 from datetime import datetime
 import re
 from database.cognitive_profile import create_cognitive_profile
+from bson.objectid import ObjectId
 
 def verify_user_exists(email):
     db = get_db()
@@ -18,45 +19,50 @@ def verify_user_exists(email):
         'role': None
     }
 
-def register_user(email, name, picture, birth_date, role, classroom_name):
+def register_user(email, name, picture, birth_date, role, institute_id=None):
     db = get_db()
-    classroom_members_collection = db.classroom_members
-    classroom_collection = db.classrooms
     users_collection = db.users
+    institute_members_collection = db.institute_members
 
-    # Crear nuevo usuario
+    # Validar rol
+    valid_roles = ['admin', 'institute_admin', 'teacher', 'student']
+    if role not in valid_roles:
+        return False, "Rol inválido"
+
+    # Verificar si ya existe el email
+    if users_collection.find_one({'email': email}):
+        return False, "El email ya está registrado"
+
     new_user = {
         'email': email,
         'name': name,
         'picture': picture,
-        'birthDate': birth_date,
+        'birthdate': birth_date,
         'role': role,
-        'created_at': datetime.now()
+        'created_at': datetime.now(),
+        'status': 'active'
     }
-    user_result = users_collection.insert_one(new_user)
-    user_id = user_result.inserted_id
 
-    if role == 'teacher':
-        new_classroom = {
-            'name': classroom_name,
-            'created_at': datetime.now()
-        }
-        classroom_result = classroom_collection.insert_one(new_classroom)
-        classroom_id = classroom_result.inserted_id
+    try:
+        user_result = users_collection.insert_one(new_user)
+        user_id = user_result.inserted_id
 
-        # Asignar al usuario como administrador del proyecto
-        new_member = {
-            'user_id': user_id,
-            'classroom_id': classroom_id,
-            'role': 'teacher',
-            'joined_at': datetime.now()
-        }
-        classroom_members_collection.insert_one(new_member)
+        # Si es profesor o admin de instituto, crear relación con el instituto
+        if role in ['teacher', 'institute_admin'] and institute_id:
+            new_member = {
+                'institute_id': ObjectId(institute_id),
+                'user_id': user_id,
+                'role': role,
+                'joined_at': datetime.now()
+            }
+            institute_members_collection.insert_one(new_member)
 
-    if role == 'student':
-        create_cognitive_profile(email)
+        if role == 'student':
+            create_cognitive_profile(user_id)
 
-    return user_id
+        return True, str(user_id)
+    except Exception as e:
+        return False, str(e)
 
 def get_user_by_email(email):
     db = get_db()
@@ -82,7 +88,8 @@ def delete_student(email):
     users_collection = db.users
     classroom_members_collection = db.classroom_members
     cognitive_profiles_collection = db.cognitive_profiles
-    invitations_collection = db.invitations
+    classroom_invitations_collection = db.classroom_invitations
+    contents_collection = db.contents
 
     try:
         # Obtener el usuario y verificar que sea estudiante
@@ -96,15 +103,18 @@ def delete_student(email):
         classroom_members_collection.delete_many({'user_id': user_id})
 
         # Eliminar invitaciones pendientes
-        invitations_collection.delete_many({
+        classroom_invitations_collection.delete_many({
             '$or': [
-                {'invitee_email': email},
-                {'inviter_email': email}
+                {'invitee_id': user_id},
+                {'inviter_id': user_id}
             ]
         })
 
+        # Eliminar contenidos del estudiante
+        contents_collection.delete_many({'student_id': user_id})
+
         # Eliminar perfil cognitivo
-        cognitive_profiles_collection.delete_one({'user_id': user_id})
+        cognitive_profiles_collection.delete_one({'student_id': user_id})  # Cambiado de user_id a student_id
 
         # Eliminar el usuario
         users_collection.delete_one({'_id': user_id})

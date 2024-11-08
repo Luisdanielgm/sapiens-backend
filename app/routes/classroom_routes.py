@@ -1,6 +1,6 @@
 from flask import Blueprint, jsonify, request
 from app.utils.decorators import handle_errors
-from database.db_classrom import (
+from database.db_classroom import (
     get_teacher_classrooms,
     get_classroom_students,
     get_student_classrooms
