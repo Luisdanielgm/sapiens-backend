@@ -19,9 +19,10 @@ def verify_user_exists(email):
         'role': None
     }
 
-def register_user(email, name, picture, birth_date, role, institute_id=None):
+def register_user(email, name, picture, birth_date, role, institute_name=None):
     db = get_db()
     users_collection = db.users
+    institutes_collection = db.institutes
     institute_members_collection = db.institute_members
 
     # Validar rol
@@ -32,6 +33,10 @@ def register_user(email, name, picture, birth_date, role, institute_id=None):
     # Verificar si ya existe el email
     if users_collection.find_one({'email': email}):
         return False, "El email ya está registrado"
+
+    # Validar que si es institute_admin venga el institute_name
+    if role == 'institute_admin' and not institute_name:
+        return False, "Se requiere el nombre del instituto para administradores de instituto"
 
     new_user = {
         'email': email,
@@ -44,19 +49,30 @@ def register_user(email, name, picture, birth_date, role, institute_id=None):
     }
 
     try:
+        # Crear usuario
         user_result = users_collection.insert_one(new_user)
         user_id = user_result.inserted_id
 
-        # Si es profesor o admin de instituto, crear relación con el instituto
-        if role in ['teacher', 'institute_admin'] and institute_id:
+        # Si es institute_admin, crear instituto y relación
+        if role == 'institute_admin':
+            new_institute = {
+                'name': institute_name,
+                'created_at': datetime.now(),
+                'status': 'active'
+            }
+            institute_result = institutes_collection.insert_one(new_institute)
+            institute_id = institute_result.inserted_id
+
+            # Crear relación en institute_members
             new_member = {
-                'institute_id': ObjectId(institute_id),
+                'institute_id': institute_id,
                 'user_id': user_id,
                 'role': role,
                 'joined_at': datetime.now()
             }
             institute_members_collection.insert_one(new_member)
 
+        # Solo crear perfil cognitivo si es estudiante
         if role == 'student':
             create_cognitive_profile(user_id)
 

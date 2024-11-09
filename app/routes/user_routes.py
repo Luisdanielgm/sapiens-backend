@@ -33,11 +33,21 @@ def register_user_endpoint():
         'name': data.get('name'),
         'picture': data.get('picture'),
         'birthDate': data.get('birthDate'),
-        'classroomName': data.get('classroomName'),
         'role': data.get('role')
     }
+
+    institute_name = ''
     
+    # Validar campos requeridos básicos
     missing_fields = [field for field, value in required_fields.items() if not value]
+    
+    # Validar institute_name si el rol es institute_admin
+    if required_fields['role'] == 'institute_admin':
+        institute_name = data.get('instituteName')
+        if not institute_name:
+            missing_fields.append('instituteName')
+    else:
+        institute_name = None
     
     if missing_fields:
         return jsonify({
@@ -51,7 +61,7 @@ def register_user_endpoint():
         required_fields['picture'],
         required_fields['birthDate'],
         required_fields['role'],
-        required_fields['classroomName']
+        institute_name
     )
     
     if result:
