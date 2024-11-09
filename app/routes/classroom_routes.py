@@ -17,6 +17,7 @@ def get_teacher_classrooms_endpoint():
 
     try:
         classrooms = get_teacher_classrooms(email)
+        print(f"Classrooms: {classrooms}")
         return jsonify({"classrooms": classrooms}), 200
     except Exception as e:
         return jsonify({"error": f"Error al obtener los salones: {str(e)}"}), 500
@@ -27,6 +28,7 @@ def get_classroom_students_endpoint():
     try:
         classroom_id = request.args.get('classroomId')
         result = get_classroom_students(classroom_id)
+        print(f"Result: {result}")
         if result["success"]:
             return jsonify({
                 "students": result["students"],

@@ -235,6 +235,8 @@ def accept_invitation(email, invitation_id):
     return True
 
 def get_teacher_classrooms(email):
+    print(f"\n=== Iniciando búsqueda de classrooms para email: {email} ===")
+    
     db = get_db()
     users_collection = db.users
     classrooms_collection = db.classrooms
@@ -245,51 +247,80 @@ def get_teacher_classrooms(email):
 
     # Verificar si el usuario existe y es profesor
     user = users_collection.find_one({"email": email})
-    if not user or user.get('role') != 'teacher':
+    print(f"Usuario encontrado: {user}")
+    
+    if not user:
+        print("No se encontró el usuario")
+        return []
+    if user.get('role') != 'TEACHER':  # Nota: verificar si es 'TEACHER' en mayúsculas
+        print(f"El usuario no es profesor. Rol actual: {user.get('role')}")
         return []
 
     # Buscar todas las membresías del profesor
     teacher_memberships = classroom_members_collection.find({
         "user_id": user["_id"],
-        "role": "teacher"
+        "role": "TEACHER"  # Nota: verificar si es 'TEACHER' en mayúsculas
     })
+    
+    memberships_list = list(teacher_memberships)
+    print(f"Membresías encontradas: {len(memberships_list)}")
+    print(f"Membresías: {memberships_list}")
 
     # Obtener los detalles de los salones
     classrooms = []
-    for membership in teacher_memberships:
+    for membership in memberships_list:
+        print(f"\nProcesando membresía: {membership}")
+        
         classroom = classrooms_collection.find_one({"_id": membership["classroom_id"]})
+        print(f"Classroom encontrado: {classroom}")
+        
         if classroom:
-            # Obtener información adicional
-            subject = subjects_collection.find_one({"_id": classroom["subject_id"]})
-            section = sections_collection.find_one({"_id": classroom["section_id"]})
-            period = periods_collection.find_one({"_id": classroom["period_id"]})
+            try:
+                # Obtener información adicional
+                subject = subjects_collection.find_one({"_id": classroom["subject_id"]})
+                print(f"Subject encontrado: {subject}")
+                
+                section = sections_collection.find_one({"_id": classroom["section_id"]})
+                print(f"Section encontrada: {section}")
+                
+                period = periods_collection.find_one({"_id": classroom["period_id"]})
+                print(f"Period encontrado: {period}")
 
-            # Contar estudiantes
-            student_count = classroom_members_collection.count_documents({
-                "classroom_id": classroom["_id"],
-                "role": "student"
-            })
+                # Contar estudiantes
+                student_count = classroom_members_collection.count_documents({
+                    "classroom_id": classroom["_id"],
+                    "role": "STUDENT"  # Nota: verificar si es 'STUDENT' en mayúsculas
+                })
+                print(f"Cantidad de estudiantes: {student_count}")
 
-            classrooms.append({
-                "id": str(classroom["_id"]),
-                "name": classroom["name"],
-                "created_at": classroom["created_at"],
-                "student_count": student_count,
-                "subject": {
-                    "id": str(subject["_id"]),
-                    "name": subject["name"]
-                },
-                "section": {
-                    "id": str(section["_id"]),
-                    "name": section["name"]
-                },
-                "period": {
-                    "id": str(period["_id"]),
-                    "name": period["name"],
-                    "type": period["type"]
+                classroom_data = {
+                    "id": str(classroom["_id"]),
+                    "name": classroom["name"],
+                    "created_at": classroom["created_at"],
+                    "student_count": student_count,
+                    "subject": {
+                        "id": str(subject["_id"]),
+                        "name": subject["name"]
+                    } if subject else None,
+                    "section": {
+                        "id": str(section["_id"]),
+                        "name": section["name"]
+                    } if section else None,
+                    "period": {
+                        "id": str(period["_id"]),
+                        "name": period["name"],
+                        "type": period["type"]
+                    } if period else None
                 }
-            })
+                
+                classrooms.append(classroom_data)
+                print(f"Classroom agregado: {classroom_data}")
+                
+            except Exception as e:
+                print(f"Error procesando classroom: {str(e)}")
+                continue
 
+    print(f"\n=== Total de classrooms encontrados: {len(classrooms)} ===")
     return classrooms
 
 def get_classroom_students(classroom_id):
@@ -310,7 +341,7 @@ def get_classroom_students(classroom_id):
         # Buscar todos los miembros que son estudiantes
         student_members = classroom_members_collection.find({
             "classroom_id": ObjectId(classroom_id),
-            "role": "student"
+            "role": "STUDENT"
         })
 
         students = []
