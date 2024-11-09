@@ -674,13 +674,14 @@ def get_institute_by_email(email):
         if not institute:
             return None
 
-        # Obtener programas del instituto
-        programs = list(programs_collection.find({"institute_id": institute["_id"]}))
-        
-        # Convertir ObjectId a string para todos los programas
-        for program in programs:
-            program["_id"] = str(program["_id"])
-            program["institute_id"] = str(program["institute_id"])
+        # Obtener programas del instituto (si existen)
+        programs = []
+        if programs_collection.count_documents({"institute_id": institute["_id"]}) > 0:
+            programs = list(programs_collection.find({"institute_id": institute["_id"]}))
+            # Convertir ObjectId a string para todos los programas
+            for program in programs:
+                program["_id"] = str(program["_id"])
+                program["institute_id"] = str(program["institute_id"])
 
         # Obtener miembros del instituto
         members = institute_members_collection.find({"institute_id": institute["_id"]})
@@ -690,25 +691,30 @@ def get_institute_by_email(email):
             if user_info:
                 member_details.append({
                     "id": str(user_info["_id"]),
-                    "name": user_info["name"],
-                    "email": user_info["email"],
-                    "role": member["role"],
-                    "joined_at": member["joined_at"]
+                    "name": user_info.get("name", ""),
+                    "email": user_info.get("email", ""),
+                    "role": member.get("role", ""),
+                    "joined_at": member.get("joined_at", datetime.now())
                 })
 
-        # Preparar respuesta
+        # Preparar respuesta con campos opcionales
         institute_data = {
             "id": str(institute["_id"]),
-            "name": institute["name"],
-            "address": institute.get("address"),
-            "phone": institute.get("phone"),
-            "email": institute.get("email"),
-            "website": institute.get("website"),
-            "status": institute.get("status"),
-            "created_at": institute.get("created_at"),
-            "programs": programs,
-            "members": member_details
+            "name": institute.get("name", ""),
+            "status": institute.get("status", "pending")
         }
+
+        # Agregar campos opcionales solo si existen
+        optional_fields = ["address", "phone", "email", "website", "created_at"]
+        for field in optional_fields:
+            if field in institute and institute[field]:
+                institute_data[field] = institute[field]
+
+        # Agregar listas solo si tienen elementos
+        if programs:
+            institute_data["programs"] = programs
+        if member_details:
+            institute_data["members"] = member_details
 
         return institute_data
 
