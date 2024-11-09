@@ -37,6 +37,8 @@ def register_user(email, name, picture, birth_date, role, institute_name=None):
     # Validar que si es institute_admin venga el institute_name
     if role == 'institute_admin' and not institute_name:
         return False, "Se requiere el nombre del instituto para administradores de instituto"
+    
+    role = role.upper()
 
     new_user = {
         'email': email,
