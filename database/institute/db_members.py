@@ -22,7 +22,7 @@ def invite_to_institute(admin_email, invitee_email, institute_id, role):
     admin_member = institute_members_collection.find_one({
         "institute_id": ObjectId(institute_id),
         "user_id": admin["_id"],
-        "role": "institute_admin"
+        "role": "INSTITUTE_ADMIN"
     })
 
     if not admin_member:
