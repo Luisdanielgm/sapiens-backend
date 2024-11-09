@@ -58,7 +58,7 @@ def register_user(email, name, picture, birth_date, role, institute_name=None):
             new_institute = {
                 'name': institute_name,
                 'created_at': datetime.now(),
-                'status': 'active'
+                'status': 'pending'
             }
             institute_result = institutes_collection.insert_one(new_institute)
             institute_id = institute_result.inserted_id
