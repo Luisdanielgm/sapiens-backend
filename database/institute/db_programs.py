@@ -106,3 +106,42 @@ def get_institute_programs(institute_id):
     except Exception as e:
         print(f"Error al obtener programas: {str(e)}")
         return []
+
+def get_program_by_id(program_id):
+    """Obtiene un programa educativo por su ID"""
+    db = get_db()
+    programs_collection = db.educational_programs
+
+    try:
+        # Validar que el program_id sea un ObjectId válido
+        if not ObjectId.is_valid(program_id):
+            print(f"ID de programa inválido: {program_id}")
+            return None
+
+        program = programs_collection.find_one({
+            "_id": ObjectId(program_id)
+        })
+        
+        if not program:
+            return None
+            
+        # Convertir ObjectId a string para la serialización
+        program['_id'] = str(program['_id'])
+        program['institute_id'] = str(program['institute_id'])
+        
+        # Agregar campos adicionales si existen
+        program_data = {
+            "id": program['_id'],
+            "institute_id": program['institute_id'],
+            "name": program.get('name', ''),
+            "type": program.get('type', ''),
+            "description": program.get('description', ''),
+            "created_at": program.get('created_at'),
+            "updated_at": program.get('updated_at')
+        }
+            
+        return program_data
+        
+    except Exception as e:
+        print(f"Error al obtener programa: {str(e)}")
+        return None

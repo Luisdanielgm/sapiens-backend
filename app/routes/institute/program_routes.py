@@ -4,7 +4,8 @@ from database.institute.db_programs import (
     create_educational_program,
     update_educational_program,
     delete_educational_program,
-    get_institute_programs
+    get_institute_programs,
+    get_program_by_id
 )
 from bson.objectid import ObjectId
 
@@ -74,6 +75,33 @@ def delete_program_endpoint(program_id):
         return jsonify({"message": message}), 200
     return jsonify({"error": message}), 400
 
+@handle_errors
+def get_program_by_id_endpoint(program_id):
+    """Obtiene los detalles de un programa específico"""
+    try:
+        if not ObjectId.is_valid(program_id):
+            return jsonify({
+                "error": "ID de programa inválido"
+            }), 400
+            
+        program = get_program_by_id(program_id)
+        if program:
+            return jsonify({
+                "program": program,
+                "message": "Programa encontrado exitosamente"
+            }), 200
+            
+        return jsonify({
+            "error": "Programa no encontrado"
+        }), 404
+        
+    except Exception as e:
+        print(f"Error en get_program_by_id_endpoint: {str(e)}")
+        return jsonify({
+            "error": "Error al obtener el programa",
+            "details": str(e)
+        }), 500
+
 def register_program_routes(bp):
     """Registra las rutas de programas educativos"""
     bp.add_url_rule(
@@ -102,4 +130,11 @@ def register_program_routes(bp):
         'delete_program',
         delete_program_endpoint,
         methods=['DELETE']
+    )
+    
+    bp.add_url_rule(
+        '/program/<program_id>',
+        'get_program_by_id',
+        get_program_by_id_endpoint,
+        methods=['GET']
     )

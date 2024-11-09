@@ -150,7 +150,7 @@ def register_period_routes(bp):
     """Registra las rutas de periodos académicos"""
     # Rutas de periodos
     bp.add_url_rule(
-        '/institute/periods/<program_id>',
+        '/institute/periods',
         'get_program_periods',
         get_program_periods_endpoint,
         methods=['GET']
