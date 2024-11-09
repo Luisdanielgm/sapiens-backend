@@ -12,6 +12,8 @@ from database.institute.db_periods import (
     get_period_sections,
     get_period_subjects
 )
+from bson import ObjectId
+import traceback
 
 @handle_errors
 def create_period_endpoint():
@@ -121,12 +123,40 @@ def update_subject_endpoint(subject_id):
 
 @handle_errors
 def get_program_periods_endpoint():
-    program_id = request.args.get('program_id')
-    if not program_id:
-        return jsonify({"error": "Se requiere el ID del programa"}), 400
+    """Obtiene los períodos académicos de un programa"""
+    try:
+        program_id = request.args.get('program_id')
+        print(f"Program ID recibido: {program_id}")  # Debug
+        
+        if not program_id:
+            return jsonify({
+                "error": "Se requiere el ID del programa",
+                "periods": []
+            }), 400
 
-    periods = get_institute_periods(program_id)
-    return jsonify({"periods": periods}), 200
+        # Validar formato del ID
+        if not ObjectId.is_valid(program_id):
+            return jsonify({
+                "error": "ID de programa inválido",
+                "periods": []
+            }), 400
+
+        periods = get_institute_periods(program_id)
+        print(f"Períodos obtenidos: {periods}")  # Debug
+        
+        return jsonify({
+            "periods": periods,
+            "program_id": program_id,
+            "message": "Períodos obtenidos exitosamente"
+        }), 200
+        
+    except Exception as e:
+        print(f"Error en get_program_periods_endpoint: {str(e)}")
+        traceback.print_exc()  # Imprime el stack trace completo
+        return jsonify({
+            "error": f"Error al obtener períodos: {str(e)}",
+            "periods": []
+        }), 500
 
 @handle_errors
 def get_period_sections_endpoint():

@@ -1,6 +1,7 @@
 from database.mongodb import get_db
 from datetime import datetime
 from bson import ObjectId
+import traceback
 
 def create_academic_period(program_id, name, period_type):
     """Crea un nuevo periodo académico"""
@@ -82,17 +83,48 @@ def delete_academic_period(period_id, admin_email):
         return False, str(e)
 
 def get_institute_periods(program_id):
-    """Obtiene todos los periodos de un programa"""
+    """Obtiene todos los períodos de un programa"""
     db = get_db()
     periods_collection = db.academic_periods
 
     try:
+        print(f"Buscando períodos para programa: {program_id}")  # Debug
+        
+        # Validar que el program_id sea un ObjectId válido
+        if not ObjectId.is_valid(program_id):
+            print(f"ID de programa inválido: {program_id}")
+            return []
+
+        # Verificar si la colección existe
+        if 'academic_periods' not in db.list_collection_names():
+            print("La colección academic_periods no existe")
+            return []
+
+        # Buscar períodos
         periods = periods_collection.find({
             "program_id": ObjectId(program_id)
-        }).sort("name", 1)
-        return list(periods)
+        })
+        
+        # Convertir cursor a lista y procesar
+        periods_list = []
+        for period in periods:
+            period_data = {
+                "id": str(period["_id"]),
+                "program_id": str(period["program_id"]),
+                "name": period.get("name", ""),
+                "start_date": period.get("start_date"),
+                "end_date": period.get("end_date"),
+                "status": period.get("status", "active"),
+                "created_at": period.get("created_at", datetime.now())
+            }
+            periods_list.append(period_data)
+            
+        print(f"Períodos encontrados: {len(periods_list)}")  # Debug
+        return periods_list
+        
     except Exception as e:
-        print(f"Error al obtener periodos: {str(e)}")
+        print(f"Error detallado al obtener períodos: {str(e)}")
+        traceback.print_exc()  # Imprime el stack trace completo
         return []
 
 def get_period_sections(period_id):
