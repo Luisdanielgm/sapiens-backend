@@ -2,6 +2,94 @@ from database.mongodb import get_db
 from datetime import datetime
 from bson import ObjectId
 
+def get_institute_by_email(email):
+    """Obtiene la información del instituto asociado al email del usuario"""
+    db = get_db()
+    users_collection = db.users
+    institute_members_collection = db.institute_members
+    institutes_collection = db.institutes
+    programs_collection = db.educational_programs
+
+    try:
+        # Debug: Imprimir colecciones
+        print(f"Colecciones disponibles: {db.list_collection_names()}")
+        
+        # Buscar el usuario por email
+        user = users_collection.find_one({"email": email})
+        print(f"Usuario encontrado: {user}")  # Debug
+        
+        if not user:
+            print(f"No se encontró usuario con email: {email}")  # Debug
+            return None
+
+        # Convertir _id a string
+        user_id = user["_id"]
+        
+        # Buscar la membresía del usuario en algún instituto
+        member = institute_members_collection.find_one({"user_id": user_id})
+        print(f"Membresía encontrada: {member}")  # Debug
+        
+        if not member:
+            print(f"No se encontró membresía para el usuario: {user_id}")  # Debug
+            return None
+
+        # Obtener información del instituto
+        institute = institutes_collection.find_one({"_id": member["institute_id"]})
+        print(f"Instituto encontrado: {institute}")  # Debug
+        
+        if not institute:
+            print(f"No se encontró instituto con id: {member['institute_id']}")  # Debug
+            return None
+
+        # Preparar respuesta base
+        institute_data = {
+            "id": str(institute["_id"]),
+            "name": institute.get("name", ""),
+            "status": institute.get("status", "pending")
+        }
+
+        # Agregar campos opcionales solo si existen
+        optional_fields = ["address", "phone", "email", "website", "created_at"]
+        for field in optional_fields:
+            if field in institute and institute[field]:
+                institute_data[field] = institute[field]
+
+        # Obtener programas si existen
+        if programs_collection.count_documents({"institute_id": institute["_id"]}) > 0:
+            programs = list(programs_collection.find({"institute_id": institute["_id"]}))
+            institute_data["programs"] = [{
+                "id": str(p["_id"]),
+                "name": p.get("name", ""),
+                "type": p.get("type", ""),
+                "institute_id": str(p["institute_id"])
+            } for p in programs]
+
+        # Obtener miembros
+        members = institute_members_collection.find({"institute_id": institute["_id"]})
+        member_details = []
+        for m in members:
+            user_info = users_collection.find_one({"_id": m["user_id"]})
+            if user_info:
+                member_details.append({
+                    "id": str(user_info["_id"]),
+                    "name": user_info.get("name", ""),
+                    "email": user_info.get("email", ""),
+                    "role": m.get("role", ""),
+                    "joined_at": m.get("joined_at", datetime.now())
+                })
+        
+        if member_details:
+            institute_data["members"] = member_details
+
+        print(f"Datos del instituto preparados: {institute_data}")  # Debug
+        return institute_data
+
+    except Exception as e:
+        print(f"Error detallado en get_institute_by_email: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        return None
+
 def create_institute(name, address, phone, email, website, admin_email):
     """Crea un nuevo instituto y asigna un administrador"""
     db = get_db()

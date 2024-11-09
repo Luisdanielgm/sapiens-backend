@@ -73,14 +73,35 @@ def get_institute_statistics_endpoint(institute_id):
 @handle_errors
 def get_institute_by_email_endpoint():
     """Obtiene los detalles del instituto asociado al email del usuario"""
-    email = request.args.get('email')
-    if not email:
-        return jsonify({"error": "Se requiere el email del usuario"}), 400
+    try:
+        email = request.args.get('email')
+        print(f"Email recibido: {email}")  # Debug
         
-    details = get_institute_by_email(email)
-    if details:
-        return jsonify({"institute": details}), 200
-    return jsonify({"error": "No se encontró instituto asociado al usuario"}), 404
+        if not email:
+            return jsonify({"error": "Se requiere el email del usuario"}), 400
+            
+        details = get_institute_by_email(email)
+        print(f"Detalles obtenidos: {details}")  # Debug
+        
+        if details:
+            return jsonify({
+                "institute": details,
+                "message": "Instituto encontrado exitosamente"
+            }), 200
+            
+        return jsonify({
+            "error": "No se encontró instituto asociado al usuario",
+            "email": email
+        }), 404
+        
+    except Exception as e:
+        print(f"Error en endpoint get_institute_by_email: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({
+            "error": "Error interno del servidor",
+            "details": str(e)
+        }), 500
 
 def register_basic_routes(bp):
     """Registra las rutas básicas del instituto"""
