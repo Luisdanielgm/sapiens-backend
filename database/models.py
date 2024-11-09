@@ -50,6 +50,7 @@ from datetime import datetime
     "institute_id": ObjectId,
     "name": str,
     "type": str,  # "primary", "highschool", "undergraduate", "postgraduate", "other"
+    "description": str,
     "created_at": datetime
 }
 

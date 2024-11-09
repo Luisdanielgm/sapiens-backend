@@ -338,6 +338,7 @@ def update_educational_program(program_id, data, admin_email):
         update_data = {
             "name": data.get("name"),
             "type": data.get("type"),
+            "description": data.get("description"),
             "updated_at": datetime.now()
         }
         update_data = {k: v for k, v in update_data.items() if v is not None}
