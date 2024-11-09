@@ -104,7 +104,7 @@ def get_institute_programs(institute_id):
 
     return list(programs)
 
-def create_educational_program(institute_id, name, program_type):
+def create_educational_program(institute_id, name, program_type, description):
     """Crea un nuevo programa educativo"""
     db = get_db()
     programs_collection = db.educational_programs
@@ -113,6 +113,7 @@ def create_educational_program(institute_id, name, program_type):
         "institute_id": ObjectId(institute_id),
         "name": name,
         "type": program_type,
+        "description": description,
         "created_at": datetime.now()
     }
 

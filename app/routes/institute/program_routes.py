@@ -19,7 +19,7 @@ def get_institute_programs_endpoint():
 @handle_errors
 def create_program_endpoint():
     data = request.get_json()
-    required_fields = ['institute_id', 'name', 'type']
+    required_fields = ['institute_id', 'name', 'type', 'description']
     
     if not all(field in data for field in required_fields):
         return jsonify({"error": "Se requieren los campos: institute_id, name, type"}), 400
@@ -27,7 +27,8 @@ def create_program_endpoint():
     success, result = create_educational_program(
         data['institute_id'],
         data['name'],
-        data['type']
+        data['type'],
+        data['description']
     )
 
     if success:
