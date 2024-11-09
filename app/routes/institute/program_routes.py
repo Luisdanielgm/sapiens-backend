@@ -6,15 +6,29 @@ from database.institute.db_programs import (
     delete_educational_program,
     get_institute_programs
 )
+from bson.objectid import ObjectId
 
 @handle_errors
 def get_institute_programs_endpoint():
     institute_id = request.args.get('institute_id')
     if not institute_id:
-        return jsonify({"error": "Se requiere el ID del instituto"}), 400
+        return jsonify({
+            "error": "Se requiere el ID del instituto",
+            "programs": []
+        }), 400
+
+    # Validar formato del ID
+    if not ObjectId.is_valid(institute_id):
+        return jsonify({
+            "error": "ID de instituto inválido",
+            "programs": []
+        }), 400
 
     programs = get_institute_programs(institute_id)
-    return jsonify({"programs": programs}), 200
+    return jsonify({
+        "programs": programs,
+        "institute_id": institute_id
+    }), 200
 
 @handle_errors
 def create_program_endpoint():
@@ -22,7 +36,7 @@ def create_program_endpoint():
     required_fields = ['institute_id', 'name', 'type', 'description']
     
     if not all(field in data for field in required_fields):
-        return jsonify({"error": "Se requieren los campos: institute_id, name, type"}), 400
+        return jsonify({"error": "Se requieren los campos: institute_id, name, type y description"}), 400
 
     success, result = create_educational_program(
         data['institute_id'],

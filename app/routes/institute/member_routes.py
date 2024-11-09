@@ -78,6 +78,7 @@ def get_institute_members_endpoint():
         return jsonify({"error": "Se requiere el ID del instituto"}), 400
 
     members = get_institute_members(institute_id)
+    print(f"Members: {members}")
     return jsonify({"members": members}), 200
 
 @handle_errors

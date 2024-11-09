@@ -2,7 +2,7 @@ from database.mongodb import get_db
 from datetime import datetime
 from bson import ObjectId
 
-def create_educational_program(institute_id, name, program_type):
+def create_educational_program(institute_id, name, program_type, description):
     """Crea un nuevo programa educativo"""
     db = get_db()
     programs_collection = db.educational_programs
@@ -11,6 +11,7 @@ def create_educational_program(institute_id, name, program_type):
         "institute_id": ObjectId(institute_id),
         "name": name,
         "type": program_type,
+        "description": description,
         "created_at": datetime.now()
     }
 
@@ -35,6 +36,7 @@ def update_educational_program(program_id, data, admin_email):
         update_data = {
             "name": data.get("name"),
             "type": data.get("type"),
+            "description": data.get("description"),
             "updated_at": datetime.now()
         }
         update_data = {k: v for k, v in update_data.items() if v is not None}
@@ -84,10 +86,23 @@ def get_institute_programs(institute_id):
     programs_collection = db.educational_programs
 
     try:
+        # Validar que el institute_id sea un ObjectId válido
+        if not ObjectId.is_valid(institute_id):
+            print(f"ID de instituto inválido: {institute_id}")
+            return []
+
         programs = programs_collection.find({
             "institute_id": ObjectId(institute_id)
         })
-        return list(programs)
+        
+        # Convertir ObjectId a string para la serialización
+        programs_list = []
+        for program in programs:
+            program['_id'] = str(program['_id'])
+            program['institute_id'] = str(program['institute_id'])
+            programs_list.append(program)
+            
+        return programs_list
     except Exception as e:
         print(f"Error al obtener programas: {str(e)}")
         return []
