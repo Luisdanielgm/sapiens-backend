@@ -5,7 +5,8 @@ from database.institute.db_basic import (
     update_institute,
     delete_institute,
     get_institute_details,
-    get_institute_statistics
+    get_institute_statistics,
+    get_institute_by_email
 )
 from bson import ObjectId
 
@@ -69,6 +70,18 @@ def get_institute_statistics_endpoint(institute_id):
         return jsonify({"statistics": stats}), 200
     return jsonify({"error": "No se pudieron obtener las estadísticas"}), 404
 
+@handle_errors
+def get_institute_by_email_endpoint():
+    """Obtiene los detalles del instituto asociado al email del usuario"""
+    email = request.args.get('email')
+    if not email:
+        return jsonify({"error": "Se requiere el email del usuario"}), 400
+        
+    details = get_institute_by_email(email)
+    if details:
+        return jsonify({"institute": details}), 200
+    return jsonify({"error": "No se encontró instituto asociado al usuario"}), 404
+
 def register_basic_routes(bp):
     """Registra las rutas básicas del instituto"""
     bp.add_url_rule(
@@ -103,5 +116,12 @@ def register_basic_routes(bp):
         '/institute/statistics/<institute_id>',
         'get_institute_statistics',
         get_institute_statistics_endpoint,
+        methods=['GET']
+    )
+    
+    bp.add_url_rule(
+        '/institute/by-email',
+        'get_institute_by_email',
+        get_institute_by_email_endpoint,
         methods=['GET']
     )

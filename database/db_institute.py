@@ -649,3 +649,69 @@ def reject_institute_invitation(email, invitation_id):
         return True, "Invitación rechazada exitosamente"
     except Exception as e:
         return False, f"Error al rechazar la invitación: {str(e)}"
+
+def get_institute_by_email(email):
+    """Obtiene la información del instituto asociado al email del usuario"""
+    db = get_db()
+    users_collection = db.users
+    institute_members_collection = db.institute_members
+    institutes_collection = db.institutes
+    programs_collection = db.educational_programs
+
+    try:
+        # Buscar el usuario por email
+        user = users_collection.find_one({"email": email})
+        if not user:
+            return None
+
+        # Buscar la membresía del usuario en algún instituto
+        member = institute_members_collection.find_one({"user_id": user["_id"]})
+        if not member:
+            return None
+
+        # Obtener información del instituto
+        institute = institutes_collection.find_one({"_id": member["institute_id"]})
+        if not institute:
+            return None
+
+        # Obtener programas del instituto
+        programs = list(programs_collection.find({"institute_id": institute["_id"]}))
+        
+        # Convertir ObjectId a string para todos los programas
+        for program in programs:
+            program["_id"] = str(program["_id"])
+            program["institute_id"] = str(program["institute_id"])
+
+        # Obtener miembros del instituto
+        members = institute_members_collection.find({"institute_id": institute["_id"]})
+        member_details = []
+        for member in members:
+            user_info = users_collection.find_one({"_id": member["user_id"]})
+            if user_info:
+                member_details.append({
+                    "id": str(user_info["_id"]),
+                    "name": user_info["name"],
+                    "email": user_info["email"],
+                    "role": member["role"],
+                    "joined_at": member["joined_at"]
+                })
+
+        # Preparar respuesta
+        institute_data = {
+            "id": str(institute["_id"]),
+            "name": institute["name"],
+            "address": institute.get("address"),
+            "phone": institute.get("phone"),
+            "email": institute.get("email"),
+            "website": institute.get("website"),
+            "status": institute.get("status"),
+            "created_at": institute.get("created_at"),
+            "programs": programs,
+            "members": member_details
+        }
+
+        return institute_data
+
+    except Exception as e:
+        print(f"Error al obtener instituto por email: {str(e)}")
+        return None
