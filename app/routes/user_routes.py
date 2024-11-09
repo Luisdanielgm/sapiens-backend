@@ -28,21 +28,35 @@ def verify_user_endpoint():
 @user_bp.route('/users/register', methods=['POST'])
 def register_user_endpoint():
     data = request.get_json()
-    email = data.get('email')
-    name = data.get('name')
-    picture = data.get('picture')
-    birth_date = data.get('birthDate')
-    classroom_name = data.get('classroomName')
-    role = data.get('role')
+    required_fields = {
+        'email': data.get('email'),
+        'name': data.get('name'),
+        'picture': data.get('picture'),
+        'birthDate': data.get('birthDate'),
+        'classroomName': data.get('classroomName'),
+        'role': data.get('role')
+    }
+    
+    missing_fields = [field for field, value in required_fields.items() if not value]
+    
+    if missing_fields:
+        return jsonify({
+            'error': 'Campos requeridos faltantes',
+            'missing_fields': missing_fields
+        }), 400
 
-    if not all([email, name, picture, birth_date, role, classroom_name]):
-        return jsonify({'error': 'Missing required fields'}), 400
-
-    result = register_user(email, name, picture, birth_date, role, classroom_name)
+    result = register_user(
+        required_fields['email'],
+        required_fields['name'],
+        required_fields['picture'],
+        required_fields['birthDate'],
+        required_fields['role'],
+        required_fields['classroomName']
+    )
     
     if result:
-        return jsonify({'message': 'User registered successfully'}), 200
-    return jsonify({'error': 'Failed to register user'}), 500
+        return jsonify({'message': 'Usuario registrado exitosamente'}), 200
+    return jsonify({'error': 'Error al registrar usuario'}), 500
 
 @user_bp.route('/users/search', methods=['GET'])
 @handle_errors
