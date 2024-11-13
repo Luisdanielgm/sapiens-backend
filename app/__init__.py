@@ -26,7 +26,7 @@ def create_app():
     app.register_blueprint(profile_bp)
     app.register_blueprint(study_plan_bp)
     app.register_blueprint(virtual_module_bp)
-    app.register_blueprint(dashboard_bp, url_prefix='/api')
+    app.register_blueprint(dashboard_bp)
 
     @app.route('/')
     def index():

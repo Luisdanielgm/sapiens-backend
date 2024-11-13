@@ -10,111 +10,195 @@ def get_student_dashboard_stats(student_id, period_id=None):
     db = get_db()
     
     try:
-        query = {"student_id": ObjectId(student_id)}
-        if period_id:
-            query["period_id"] = ObjectId(period_id)
-            
+        # Estructura base de estadísticas
         stats = {
-            # Resumen académico actual
             "current_period": {
                 "grade_average": 0.0,
-                "subjects": [],  # Lista de materias con sus promedios
+                "subjects": [],  # Aquí guardaremos los classrooms y materias
                 "attendance_rate": 0.0
             },
-            
-            # Actividades pendientes
             "pending_activities": {
-                "evaluations": [],  # Próximas evaluaciones
-                "assignments": [],  # Tareas pendientes
-                "study_content": []  # Contenido por revisar
+                "evaluations": [],
+                "assignments": [],
+                "study_content": []
             },
-            
-            # Progreso personal
             "progress": {
                 "completed_activities": 0,
                 "total_activities": 0,
                 "completion_percentage": 0
             }
         }
-        
-        # Calcular promedios por materia
-        subject_grades = db.grades.aggregate([
-            {"$match": query},
-            {"$group": {
-                "_id": "$subject_id",
-                "average": {"$avg": "$score"},
-                "evaluations_count": {"$sum": 1}
-            }}
-        ])
-        
-        total_average = 0
-        subjects_count = 0
-        
-        for subject in subject_grades:
-            subject_info = db.subjects.find_one({"_id": subject["_id"]})
-            if subject_info:
-                subjects_count += 1
-                total_average += subject["average"]
-                stats["current_period"]["subjects"].append({
-                    "name": subject_info["name"],
-                    "average": round(subject["average"], 2),
-                    "evaluations": subject["evaluations_count"]
-                })
-        
-        if subjects_count > 0:
-            stats["current_period"]["grade_average"] = round(total_average / subjects_count, 2)
-            
-        # Obtener próximas evaluaciones (próximos 7 días)
-        next_week = datetime.now() + timedelta(days=7)
-        pending_evaluations = db.evaluations.find({
-            **query,
-            "date": {"$gte": datetime.now(), "$lte": next_week},
-            "status": "pending"
-        }).limit(5)
-        
-        for eval in pending_evaluations:
-            subject = db.subjects.find_one({"_id": eval["subject_id"]})
-            stats["pending_activities"]["evaluations"].append({
-                "subject": subject["name"] if subject else "Sin materia",
-                "title": eval["title"],
-                "date": eval["date"],
-                "type": eval["type"]  # parcial, quiz, etc.
-            })
-            
-        # Obtener tareas pendientes
-        pending_assignments = db.assignments.find({
-            **query,
-            "due_date": {"$gte": datetime.now()},
-            "status": "pending"
-        }).limit(5)
-        
-        for assignment in pending_assignments:
-            subject = db.subjects.find_one({"_id": assignment["subject_id"]})
-            stats["pending_activities"]["assignments"].append({
-                "subject": subject["name"] if subject else "Sin materia",
-                "title": assignment["title"],
-                "due_date": assignment["due_date"]
-            })
-            
-        # Calcular progreso general
-        total_activities = db.study_plan_progress.count_documents(query)
-        completed_activities = db.study_plan_progress.count_documents({
-            **query,
-            "status": "completed"
+
+        # Primero obtenemos los classrooms del estudiante
+        classroom_memberships = db.classroom_members.find({
+            "user_id": ObjectId(student_id),
+            "role": "STUDENT"
         })
         
-        stats["progress"]["total_activities"] = total_activities
-        stats["progress"]["completed_activities"] = completed_activities
-        if total_activities > 0:
-            stats["progress"]["completion_percentage"] = round(
-                (completed_activities / total_activities) * 100, 1
+        # Si no hay memberships, devolvemos las estadísticas vacías
+        if not classroom_memberships:
+            return stats
+
+        classroom_ids = []
+        
+        # Obtener información básica de cada classroom y su materia asociada
+        for membership in classroom_memberships:
+            classroom = db.classrooms.find_one({"_id": membership["classroom_id"]})
+            if classroom:
+                classroom_ids.append(classroom["_id"])
+                
+                # Obtener información de la materia
+                subject = db.subjects.find_one({"_id": classroom["subject_id"]})
+                
+                # Agregar información básica del classroom/materia
+                classroom_info = {
+                    "classroom_id": str(classroom["_id"]),
+                    "classroom_name": classroom["name"],
+                    "subject_name": subject["name"] if subject else "Sin materia",
+                    "subject_id": str(classroom["subject_id"]),
+                    "average": 0.0,
+                    "evaluations": 0
+                }
+                
+                # Intentar obtener calificaciones si existen
+                try:
+                    grades = db.grades.aggregate([
+                        {
+                            "$match": {
+                                "classroom_id": classroom["_id"],
+                                "student_id": ObjectId(student_id)
+                            }
+                        },
+                        {
+                            "$group": {
+                                "_id": None,
+                                "average": {"$avg": "$score"},
+                                "evaluations_count": {"$sum": 1}
+                            }
+                        }
+                    ]).next()
+                    
+                    if grades:
+                        classroom_info["average"] = round(grades["average"], 2)
+                        classroom_info["evaluations"] = grades["evaluations_count"]
+                except:
+                    pass  # Si no hay calificaciones, mantener los valores por defecto
+                
+                stats["current_period"]["subjects"].append(classroom_info)
+
+        # Si hay classrooms, intentar obtener el resto de información
+        if classroom_ids:
+            # Próximas evaluaciones
+            next_week = datetime.now() + timedelta(days=7)
+            pending_evaluations = db.evaluations.find({
+                "classroom_id": {"$in": classroom_ids},
+                "date": {"$gte": datetime.now(), "$lte": next_week},
+                "status": "pending"
+            }).limit(5)
+            
+            for eval in pending_evaluations:
+                classroom = db.classrooms.find_one({"_id": eval["classroom_id"]})
+                subject = db.subjects.find_one({"_id": classroom["subject_id"]}) if classroom else None
+                
+                stats["pending_activities"]["evaluations"].append({
+                    "subject": subject["name"] if subject else "Sin materia",
+                    "classroom": classroom["name"] if classroom else "Sin grupo",
+                    "title": eval["title"],
+                    "date": eval["date"],
+                    "type": eval["type"]
+                })
+
+            # Obtener tareas pendientes
+            pending_assignments = db.assignments.find({
+                "classroom_id": {"$in": classroom_ids},
+                "due_date": {"$gte": datetime.now()},
+                "status": "pending"
+            }).limit(5)
+            
+            for assignment in pending_assignments:
+                classroom = db.classrooms.find_one({"_id": assignment["classroom_id"]})
+                subject = db.subjects.find_one({"_id": classroom["subject_id"]}) if classroom else None
+                
+                stats["pending_activities"]["assignments"].append({
+                    "subject": subject["name"] if subject else "Sin materia",
+                    "classroom": classroom["name"] if classroom else "Sin grupo",
+                    "title": assignment["title"],
+                    "due_date": assignment["due_date"]
+                })
+
+            # Calcular progreso general
+            total_activities = db.study_plan_progress.count_documents({
+                "classroom_id": {"$in": classroom_ids}
+            })
+            
+            completed_activities = db.study_plan_progress.count_documents({
+                "classroom_id": {"$in": classroom_ids},
+                "status": "completed"
+            })
+            
+            stats["progress"]["total_activities"] = total_activities
+            stats["progress"]["completed_activities"] = completed_activities
+            if total_activities > 0:
+                stats["progress"]["completion_percentage"] = round(
+                    (completed_activities / total_activities) * 100, 1
+                )
+
+        # Calcular promedio general si hay materias con calificaciones
+        subjects_with_grades = [s for s in stats["current_period"]["subjects"] if s["average"] > 0]
+        if subjects_with_grades:
+            total_average = sum(s["average"] for s in subjects_with_grades)
+            stats["current_period"]["grade_average"] = round(
+                total_average / len(subjects_with_grades), 
+                2
             )
             
         return stats
         
     except Exception as e:
         print(f"Error al obtener estadísticas del estudiante: {str(e)}")
-        return None
+        # Aún en caso de error, intentar devolver al menos los classrooms básicos
+        try:
+            basic_stats = {
+                "current_period": {
+                    "grade_average": 0.0,
+                    "subjects": [],
+                    "attendance_rate": 0.0
+                },
+                "pending_activities": {
+                    "evaluations": [],
+                    "assignments": [],
+                    "study_content": []
+                },
+                "progress": {
+                    "completed_activities": 0,
+                    "total_activities": 0,
+                    "completion_percentage": 0
+                }
+            }
+            
+            memberships = db.classroom_members.find({
+                "user_id": ObjectId(student_id),
+                "role": "STUDENT"
+            })
+            
+            for membership in memberships:
+                classroom = db.classrooms.find_one({"_id": membership["classroom_id"]})
+                if classroom:
+                    subject = db.subjects.find_one({"_id": classroom["subject_id"]})
+                    basic_stats["current_period"]["subjects"].append({
+                        "classroom_id": str(classroom["_id"]),
+                        "classroom_name": classroom["name"],
+                        "subject_name": subject["name"] if subject else "Sin materia",
+                        "subject_id": str(classroom["subject_id"]),
+                        "average": 0.0,
+                        "evaluations": 0
+                    })
+            
+            return basic_stats
+            
+        except Exception as inner_e:
+            print(f"Error al obtener información básica: {str(inner_e)}")
+            return None
 
 def get_teacher_dashboard_stats(teacher_id, period_id=None):
     """
