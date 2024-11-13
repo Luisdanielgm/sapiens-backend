@@ -92,14 +92,14 @@ def invite_user_to_classroom(teacher_email, classroom_id, invitee_email):
         return False, "Clase no encontrada"
 
     # Verificar que el invitado no sea un profesor
-    if invitee.get('role') == 'teacher':
+    if invitee.get('role') == 'TEACHER':
         return False, "No puedes invitar a otro profesor a la clase"
 
     # Verificar si el admin tiene permisos para invitar
     teacher_member = classroom_members_collection.find_one({
         "classroom_id": ObjectId(classroom_id),
         "user_id": teacher["_id"],
-        "role": "teacher"
+        "role": "TEACHER"
     })
 
     if not teacher_member:
@@ -227,7 +227,7 @@ def accept_invitation(email, invitation_id):
     new_member = {
         "user_id": user["_id"],
         "classroom_id": invitation["classroom_id"],
-        "role": "student",
+        "role": "STUDENT",
         "joined_at": datetime.now()
     }
     classroom_members_collection.insert_one(new_member)
@@ -379,13 +379,13 @@ def get_student_classrooms(email):
 
     # Verificar si el usuario existe y es estudiante
     user = users_collection.find_one({"email": email})
-    if not user or user.get('role') != 'student':
+    if not user or user.get('role') != 'STUDENT':
         return []
 
     # Buscar todas las membresías del estudiante
     student_memberships = classroom_members_collection.find({
         "user_id": user["_id"],
-        "role": "student"
+        "role": "STUDENT"
     })
 
     # Obtener los detalles de los salones
@@ -396,7 +396,7 @@ def get_student_classrooms(email):
             # Obtener información del profesor
             teacher_member = classroom_members_collection.find_one({
                 "classroom_id": classroom["_id"],
-                "role": "teacher"
+                "role": "TEACHER"
             })
             teacher = users_collection.find_one({"_id": teacher_member["user_id"]}) if teacher_member else None
 
