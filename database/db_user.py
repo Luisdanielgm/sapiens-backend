@@ -25,35 +25,42 @@ def register_user(email, name, picture, birth_date, role, institute_name=None):
     institutes_collection = db.institutes
     institute_members_collection = db.institute_members
 
-    # Validar rol
-    valid_roles = ['ADMIN', 'INSTITUTE_ADMIN', 'TEACHER', 'STUDENT']
-    if role not in valid_roles:
-        return False, "Rol inválido"
-
-    # Verificar si ya existe el email
-    if users_collection.find_one({'email': email}):
-        return False, "El email ya está registrado"
-
-    # Validar que si es institute_admin venga el institute_name
-    if role == 'INSTITUTE_ADMIN' and not institute_name:
-        return False, "Se requiere el nombre del instituto para administradores de instituto"
-    
-    role = role.upper()
-
-    new_user = {
-        'email': email,
-        'name': name,
-        'picture': picture,
-        'birthdate': birth_date,
-        'role': role,
-        'created_at': datetime.now(),
-        'status': 'active'
-    }
-
     try:
+        # Validar rol
+        valid_roles = ['ADMIN', 'INSTITUTE_ADMIN', 'TEACHER', 'STUDENT']
+        if role.upper() not in valid_roles:
+            return False, "Rol inválido"
+
+        # Verificar si ya existe el email
+        if users_collection.find_one({'email': email}):
+            return False, "El email ya está registrado"
+
+        # Validar que si es institute_admin venga el institute_name
+        if role.upper() == 'INSTITUTE_ADMIN' and not institute_name:
+            return False, "Se requiere el nombre del instituto para administradores de instituto"
+        
+        role = role.upper()
+
+        # Crear el documento del usuario
+        new_user = {
+            'email': email,
+            'name': name,
+            'picture': picture,
+            'birthdate': birth_date,
+            'role': role,
+            'created_at': datetime.now(),
+            'status': 'active'
+        }
+
+        print(f"Intentando crear usuario: {new_user}")  # Debug log
+
         # Crear usuario
         user_result = users_collection.insert_one(new_user)
+        if not user_result.inserted_id:
+            return False, "Error al crear el usuario en la base de datos"
+
         user_id = user_result.inserted_id
+        print(f"Usuario creado con ID: {user_id}")  # Debug log
 
         # Si es institute_admin, crear instituto y relación
         if role == 'INSTITUTE_ADMIN':
@@ -76,11 +83,25 @@ def register_user(email, name, picture, birth_date, role, institute_name=None):
 
         # Solo crear perfil cognitivo si es estudiante
         if role == 'STUDENT':
-            create_cognitive_profile(user_id)
+            print(f"Creando perfil cognitivo para estudiante ID: {user_id}")
+            profile_created = create_cognitive_profile(user_id)
+            if not profile_created:
+                # Si falla la creación del perfil, eliminamos el usuario
+                users_collection.delete_one({'_id': user_id})
+                return False, "Error al crear el perfil cognitivo"
+            print("Perfil cognitivo creado exitosamente")
 
         return True, str(user_id)
+
     except Exception as e:
-        return False, str(e)
+        print(f"Error en register_user: {str(e)}")
+        # Intentar limpiar si algo falló
+        if 'user_id' in locals():
+            try:
+                users_collection.delete_one({'_id': user_id})
+            except:
+                pass
+        return False, f"Error al registrar usuario: {str(e)}"
 
 def get_user_by_email(email):
     db = get_db()
@@ -112,7 +133,7 @@ def delete_student(email):
     try:
         # Obtener el usuario y verificar que sea estudiante
         user = users_collection.find_one({'email': email})
-        if not user or user.get('role') != 'student':
+        if not user or user.get('role') != 'STUDENT':
             return False, "Usuario no encontrado o no es estudiante"
 
         user_id = user['_id']

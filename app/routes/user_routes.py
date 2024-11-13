@@ -27,46 +27,56 @@ def verify_user_endpoint():
 
 @user_bp.route('/users/register', methods=['POST'])
 def register_user_endpoint():
-    data = request.get_json()
-    required_fields = {
-        'email': data.get('email'),
-        'name': data.get('name'),
-        'picture': data.get('picture'),
-        'birthDate': data.get('birthDate'),
-        'role': data.get('role')
-    }
+    try:
+        data = request.get_json()
+        if not data:
+            return jsonify({'error': 'No se recibieron datos'}), 400
 
-    institute_name = ''
-    
-    # Validar campos requeridos básicos
-    missing_fields = [field for field, value in required_fields.items() if not value]
-    
-    # Validar institute_name si el rol es institute_admin
-    if required_fields['role'] == 'institute_admin':
+        print(f"Datos recibidos: {data}")  # Debug log
+
+        required_fields = {
+            'email': data.get('email'),
+            'name': data.get('name'),
+            'picture': data.get('picture'),
+            'birthDate': data.get('birthDate'),
+            'role': data.get('role', 'STUDENT')  # Default a STUDENT si no se especifica
+        }
+
+        # Validar campos requeridos básicos
+        missing_fields = [field for field, value in required_fields.items() if not value]
+        
         institute_name = data.get('instituteName')
-        if not institute_name:
-            missing_fields.append('instituteName')
-    else:
-        institute_name = None
-    
-    if missing_fields:
-        return jsonify({
-            'error': 'Campos requeridos faltantes',
-            'missing_fields': missing_fields
-        }), 400
+        # Validar institute_name si el rol es institute_admin
+        if required_fields['role'].upper() == 'INSTITUTE_ADMIN':
+            if not institute_name:
+                missing_fields.append('instituteName')
+        
+        if missing_fields:
+            return jsonify({
+                'error': 'Campos requeridos faltantes',
+                'missing_fields': missing_fields
+            }), 400
 
-    result = register_user(
-        required_fields['email'],
-        required_fields['name'],
-        required_fields['picture'],
-        required_fields['birthDate'],
-        required_fields['role'],
-        institute_name
-    )
-    
-    if result:
-        return jsonify({'message': 'Usuario registrado exitosamente'}), 200
-    return jsonify({'error': 'Error al registrar usuario'}), 500
+        success, result = register_user(
+            required_fields['email'],
+            required_fields['name'],
+            required_fields['picture'],
+            required_fields['birthDate'],
+            required_fields['role'],
+            institute_name
+        )
+        
+        if success:
+            return jsonify({
+                'message': 'Usuario registrado exitosamente',
+                'user_id': result
+            }), 200
+        else:
+            return jsonify({'error': result}), 400
+
+    except Exception as e:
+        print(f"Error en register_user_endpoint: {str(e)}")  # Debug log
+        return jsonify({'error': f'Error al procesar la solicitud: {str(e)}'}), 500
 
 @user_bp.route('/users/search', methods=['GET'])
 @handle_errors
