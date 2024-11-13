@@ -12,7 +12,7 @@ def verify_user_exists(email):
     if existing_user:
         return {
             'exists': True,
-            'role': existing_user.get('role', 'student')  # valor por defecto 'student'
+            'role': existing_user.get('role', 'STUDENT')  # valor por defecto 'student'
         }
     return {
         'exists': False,
@@ -26,7 +26,7 @@ def register_user(email, name, picture, birth_date, role, institute_name=None):
     institute_members_collection = db.institute_members
 
     # Validar rol
-    valid_roles = ['admin', 'institute_admin', 'teacher', 'student']
+    valid_roles = ['ADMIN', 'INSTITUTE_ADMIN', 'TEACHER', 'STUDENT']
     if role not in valid_roles:
         return False, "Rol inválido"
 
@@ -35,7 +35,7 @@ def register_user(email, name, picture, birth_date, role, institute_name=None):
         return False, "El email ya está registrado"
 
     # Validar que si es institute_admin venga el institute_name
-    if role == 'institute_admin' and not institute_name:
+    if role == 'INSTITUTE_ADMIN' and not institute_name:
         return False, "Se requiere el nombre del instituto para administradores de instituto"
     
     role = role.upper()
@@ -56,7 +56,7 @@ def register_user(email, name, picture, birth_date, role, institute_name=None):
         user_id = user_result.inserted_id
 
         # Si es institute_admin, crear instituto y relación
-        if role == 'institute_admin':
+        if role == 'INSTITUTE_ADMIN':
             new_institute = {
                 'name': institute_name,
                 'created_at': datetime.now(),
@@ -75,7 +75,7 @@ def register_user(email, name, picture, birth_date, role, institute_name=None):
             institute_members_collection.insert_one(new_member)
 
         # Solo crear perfil cognitivo si es estudiante
-        if role == 'student':
+        if role == 'STUDENT':
             create_cognitive_profile(user_id)
 
         return True, str(user_id)
