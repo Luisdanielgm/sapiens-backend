@@ -2,37 +2,59 @@ from flask import jsonify, request
 from app.utils.decorators import handle_errors
 from database.study_plan.db_basic import (
     create_study_plan,
+    assign_study_plan,
     get_study_plan,
+    get_study_plan_assignments,
     update_study_plan,
-    delete_study_plan
+    update_study_plan_assignment,
+    delete_study_plan,
+    remove_study_plan_assignment
 )
 
 @handle_errors
-def upload_study_plan():
-    """Crea plan de estudios a partir de datos JSON"""
+def create_study_plan_endpoint():
     data = request.get_json()
-    classroom_id = data.get('classroom_id')
-    name = data.get('name')
-    description = data.get('description')
+    required_fields = ['name', 'description', 'created_by']
     
-    if not all([classroom_id, name, description]):
+    if not all(field in data for field in required_fields):
+        return jsonify({"error": "Faltan campos requeridos"}), 400
+    
+    study_plan_id = create_study_plan(
+        name=data['name'],
+        description=data['description'],
+        created_by=data['created_by'],
+        is_template=data.get('is_template', False),
+        document_url=data.get('document_url')
+    )
+    
+    return jsonify({
+        "message": "Plan de estudios creado exitosamente",
+        "study_plan_id": str(study_plan_id)
+    }), 201
+
+@handle_errors
+def assign_study_plan_endpoint():
+    data = request.get_json()
+    if not all(k in data for k in ['study_plan_id', 'classroom_id']):
         return jsonify({"error": "Faltan datos requeridos"}), 400
+        
+    assignment_id = assign_study_plan(
+        data['study_plan_id'],
+        data['classroom_id']
+    )
     
-    try:
-        study_plan_id = create_study_plan(
-            classroom_id=classroom_id,
-            name=name,
-            description=description,
-            document_url=None  # O eliminar si ya no es necesario
-        )
-        
-        return jsonify({
-            "message": "Plan de estudios creado exitosamente",
-            "study_plan_id": str(study_plan_id)
-        }), 201
-        
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
+    return jsonify({
+        "message": "Plan de estudios asignado exitosamente",
+        "assignment_id": str(assignment_id)
+    }), 201
+
+@handle_errors
+def get_study_plan_assignments_endpoint():
+    study_plan_id = request.args.get('study_plan_id')
+    classroom_id = request.args.get('classroom_id')
+    
+    assignments = get_study_plan_assignments(study_plan_id, classroom_id)
+    return jsonify({"assignments": assignments}), 200
 
 @handle_errors
 def get_study_plan_endpoint():
@@ -69,11 +91,26 @@ def delete_study_plan_endpoint():
 def register_basic_routes(bp):
     """Registra las rutas básicas del plan de estudios"""
     bp.add_url_rule(
-        '/study-plan/upload',
-        'upload_study_plan',
-        upload_study_plan,
+        '/study-plan',
+        'create_study_plan',
+        create_study_plan_endpoint,
         methods=['POST']
     )
+    
+    bp.add_url_rule(
+        '/study-plan/assign',
+        'assign_study_plan',
+        assign_study_plan_endpoint,
+        methods=['POST']
+    )
+    
+    bp.add_url_rule(
+        '/study-plan/assignments',
+        'get_study_plan_assignments',
+        get_study_plan_assignments_endpoint,
+        methods=['GET']
+    )
+    
     bp.add_url_rule(
         '/study-plan',
         'get_study_plan',

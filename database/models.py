@@ -164,21 +164,32 @@ from datetime import datetime
     "updated_at": datetime
 }
 
-# study_plans (Plan de estudios/contenido)
+# study_plans
 {
     "_id": ObjectId,
-    "classroom_id": ObjectId,
     "name": str,
     "description": str,
-    "document_url": str,  # URL del documento original (PDF/Excel)
+    "created_by": str,  # email del profesor
+    "is_template": bool,
+    "status": str,  # "active", "archived"
+    "document_url": str,  # URL del documento original (opcional)
     "created_at": datetime,
     "updated_at": datetime
+}
+
+# study_plan_assignments
+{
+    "_id": ObjectId,
+    "study_plan_id": ObjectId,
+    "classroom_id": ObjectId,
+    "assigned_at": datetime,
+    "status": str,  # "active", "completed", "cancelled"
 }
 
 # modules (Lapsos o módulos del plan de estudio)
 {
     "_id": ObjectId,
-    "study_plan_id": ObjectId,
+    "study_plan_id": ObjectId,  # Ahora se vincula al plan de estudio, no a la sección
     "name": str,  # "Primer Lapso", "Módulo 1", etc.
     "start_date": datetime,
     "end_date": datetime,
@@ -216,13 +227,26 @@ from datetime import datetime
 # evaluation_plans
 {
     "_id": ObjectId,
-    "classroom_ids": [ObjectId],  # Puede aplicar a varios salones
-    "document_url": str,
+    "name": str,
+    "description": str,
+    "created_by": str,  # email del profesor
+    "is_template": bool,
+    "status": str,  # "active", "archived"
+    "document_url": str,  # URL del documento original (opcional)
     "created_at": datetime,
     "updated_at": datetime
 }
 
-# evaluations
+# evaluation_plan_assignments
+{
+    "_id": ObjectId,
+    "evaluation_plan_id": ObjectId,
+    "classroom_id": ObjectId,
+    "assigned_at": datetime,
+    "status": str,  # "active", "completed", "cancelled"
+}
+
+# evaluations (se mantiene pero ajustada al nuevo modelo)
 {
     "_id": ObjectId,
     "evaluation_plan_id": ObjectId,
@@ -233,10 +257,11 @@ from datetime import datetime
     "methodology": str,
     "weight": float,  # Ponderación
     "date": datetime,
-    "created_at": datetime
+    "created_at": datetime,
+    "status": str  # "active", "archived"
 }
 
-# student_evaluations
+# student_evaluations (se mantiene igual)
 {
     "_id": ObjectId,
     "evaluation_id": ObjectId,
@@ -246,7 +271,7 @@ from datetime import datetime
     "created_at": datetime
 }
 
-# virtual_modules (Módulos virtuales generados)
+# virtual_modules (se mantiene igual)
 {
     "_id": ObjectId,
     "module_id": ObjectId,
@@ -257,7 +282,7 @@ from datetime import datetime
     "created_at": datetime
 }
 
-# personalized_modules (Módulos personalizados para cada estudiante)
+# personalized_modules (se mantiene igual)
 {
     "_id": ObjectId,
     "virtual_module_id": ObjectId,
@@ -275,7 +300,7 @@ from datetime import datetime
     "updated_at": datetime
 }
 
-# module_resources (Recursos adicionales cargados por el profesor)
+# module_resources (se mantiene igual)
 {
     "_id": ObjectId,
     "virtual_module_id": ObjectId,
