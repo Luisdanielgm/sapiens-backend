@@ -11,36 +11,27 @@ from database.study_plan.db_evaluations import (
     delete_evaluation,
     get_evaluation_by_id,
     get_evaluations_by_module,
-    get_evaluations_by_topic
+    get_evaluations_by_topic,
+    assign_evaluation_plan
 )
 
 @handle_errors
 def upload_evaluation_plan():
     """Crea plan de evaluación a partir de datos JSON"""
     data = request.get_json()
-    classroom_ids = data.get('classroom_ids', [])
-    evaluations_data = data.get('evaluations', [])
+    required_fields = ['name', 'description', 'created_by']
     
-    if not classroom_ids or not evaluations_data:
+    if not all(field in data for field in required_fields):
         return jsonify({"error": "Faltan datos requeridos"}), 400
     
     try:
         evaluation_plan_id = create_evaluation_plan(
-            classroom_ids=classroom_ids,
-            document_url=None  # O eliminar este campo si ya no es necesario
+            name=data['name'],
+            description=data['description'],
+            created_by=data['created_by'],
+            is_template=data.get('is_template', False),
+            document_url=data.get('document_url')
         )
-        
-        for eval_data in evaluations_data:
-            create_evaluation(
-                evaluation_plan_id=evaluation_plan_id,
-                module_id=eval_data['module_id'],
-                topic_ids=eval_data['topic_ids'],
-                name=eval_data['name'],
-                description=eval_data['description'],
-                methodology=eval_data['methodology'],
-                weight=eval_data['weight'],
-                date=eval_data['date']
-            )
         
         return jsonify({
             "message": "Plan de evaluación creado exitosamente",
@@ -49,6 +40,23 @@ def upload_evaluation_plan():
         
     except Exception as e:
         return jsonify({"error": str(e)}), 500
+
+@handle_errors
+def assign_evaluation_plan_endpoint():
+    """Asigna un plan de evaluación a un aula"""
+    data = request.get_json()
+    if not all(k in data for k in ['evaluation_plan_id', 'classroom_id']):
+        return jsonify({"error": "Faltan datos requeridos"}), 400
+        
+    assignment_id = assign_evaluation_plan(
+        data['evaluation_plan_id'],
+        data['classroom_id']
+    )
+    
+    return jsonify({
+        "message": "Plan de evaluación asignado exitosamente",
+        "assignment_id": str(assignment_id)
+    }), 201
 
 @handle_errors
 def get_evaluation_plan_details(evaluation_plan_id):
@@ -158,9 +166,16 @@ def register_evaluation_routes(bp):
     """Registra las rutas relacionadas con evaluaciones"""
     # Rutas para Plan de Evaluación
     bp.add_url_rule(
-        '/evaluation-plan/upload',
-        'upload_evaluation_plan',
+        '/evaluation-plan',
+        'create_evaluation_plan',
         upload_evaluation_plan,
+        methods=['POST']
+    )
+    
+    bp.add_url_rule(
+        '/evaluation-plan/assign',
+        'assign_evaluation_plan',
+        assign_evaluation_plan_endpoint,
         methods=['POST']
     )
     

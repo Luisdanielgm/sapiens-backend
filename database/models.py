@@ -189,7 +189,7 @@ from datetime import datetime
 # modules (Lapsos o módulos del plan de estudio)
 {
     "_id": ObjectId,
-    "study_plan_id": ObjectId,  # Ahora se vincula al plan de estudio, no a la sección
+    "study_plan_id": ObjectId,  # Vinculado al plan de estudio
     "name": str,  # "Primer Lapso", "Módulo 1", etc.
     "start_date": datetime,
     "end_date": datetime,
@@ -246,7 +246,7 @@ from datetime import datetime
     "status": str,  # "active", "completed", "cancelled"
 }
 
-# evaluations (se mantiene pero ajustada al nuevo modelo)
+# evaluations
 {
     "_id": ObjectId,
     "evaluation_plan_id": ObjectId,
@@ -257,21 +257,23 @@ from datetime import datetime
     "methodology": str,
     "weight": float,  # Ponderación
     "date": datetime,
+    "status": str,  # "pending", "completed", "cancelled"
     "created_at": datetime,
-    "status": str  # "active", "archived"
+    "updated_at": datetime
 }
 
-# student_evaluations (se mantiene igual)
+# student_evaluations
 {
     "_id": ObjectId,
     "evaluation_id": ObjectId,
     "student_id": ObjectId,
     "score": float,
     "feedback": str,
-    "created_at": datetime
+    "created_at": datetime,
+    "updated_at": datetime
 }
 
-# virtual_modules (se mantiene igual)
+# virtual_modules
 {
     "_id": ObjectId,
     "module_id": ObjectId,
@@ -282,7 +284,7 @@ from datetime import datetime
     "created_at": datetime
 }
 
-# personalized_modules (se mantiene igual)
+# personalized_modules
 {
     "_id": ObjectId,
     "virtual_module_id": ObjectId,
@@ -300,7 +302,7 @@ from datetime import datetime
     "updated_at": datetime
 }
 
-# module_resources (se mantiene igual)
+# module_resources
 {
     "_id": ObjectId,
     "virtual_module_id": ObjectId,

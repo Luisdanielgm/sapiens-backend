@@ -2,26 +2,53 @@ from bson import ObjectId
 from datetime import datetime
 from database.mongodb import get_db
 
-def create_evaluation_plan(classroom_ids, document_url):
+def create_evaluation_plan(name, description, created_by, is_template=False, document_url=None):
     """
     Crea un nuevo plan de evaluación
     
     Args:
-        classroom_ids (list): Lista de IDs de las aulas
-        document_url (str): URL del documento procesado
+        name (str): Nombre del plan
+        description (str): Descripción del plan
+        created_by (str): Email del profesor que crea el plan
+        is_template (bool): Indica si es una plantilla reutilizable
+        document_url (str, optional): URL del documento original
         
     Returns:
         ObjectId: ID del plan de evaluación creado
     """
     db = get_db()
     evaluation_plan = {
-        "classroom_ids": [ObjectId(id) for id in classroom_ids],
-        "document_url": document_url,
+        "name": name,
+        "description": description,
+        "created_by": created_by,
+        "is_template": is_template,
         "status": "active",
+        "document_url": document_url,
         "created_at": datetime.utcnow(),
         "updated_at": datetime.utcnow()
     }
     result = db.evaluation_plans.insert_one(evaluation_plan)
+    return result.inserted_id
+
+def assign_evaluation_plan(evaluation_plan_id, classroom_id):
+    """
+    Asigna un plan de evaluación a un aula
+    
+    Args:
+        evaluation_plan_id (str): ID del plan de evaluación
+        classroom_id (str): ID del aula
+        
+    Returns:
+        ObjectId: ID de la asignación creada
+    """
+    db = get_db()
+    assignment = {
+        "evaluation_plan_id": ObjectId(evaluation_plan_id),
+        "classroom_id": ObjectId(classroom_id),
+        "assigned_at": datetime.utcnow(),
+        "status": "active"
+    }
+    result = db.evaluation_plan_assignments.insert_one(assignment)
     return result.inserted_id
 
 def create_evaluation(evaluation_plan_id, module_id, topic_ids, name, description, 

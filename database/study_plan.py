@@ -2,17 +2,30 @@ from bson import ObjectId
 from datetime import datetime
 from database.mongodb import get_db
 
-def create_study_plan(classroom_id, name, description, document_url):
+def create_study_plan(name, description, created_by, is_template=False, document_url=None):
     db = get_db()
     study_plan = {
-        "classroom_id": ObjectId(classroom_id),
         "name": name,
         "description": description,
+        "created_by": created_by,
+        "is_template": is_template,
+        "status": "active",
         "document_url": document_url,
         "created_at": datetime.utcnow(),
         "updated_at": datetime.utcnow()
     }
     result = db.study_plans.insert_one(study_plan)
+    return result.inserted_id
+
+def assign_study_plan(study_plan_id, classroom_id):
+    db = get_db()
+    assignment = {
+        "study_plan_id": ObjectId(study_plan_id),
+        "classroom_id": ObjectId(classroom_id),
+        "assigned_at": datetime.utcnow(),
+        "status": "active"
+    }
+    result = db.study_plan_assignments.insert_one(assignment)
     return result.inserted_id
 
 def create_module(study_plan_id, name, start_date, end_date, objectives):
@@ -41,10 +54,14 @@ def create_topic(module_id, name, description, date_range, class_schedule):
     result = db.topics.insert_one(topic)
     return result.inserted_id
 
-def create_evaluation_plan(classroom_ids, document_url):
+def create_evaluation_plan(name, description, created_by, is_template=False, document_url=None):
     db = get_db()
     evaluation_plan = {
-        "classroom_ids": [ObjectId(id) for id in classroom_ids],
+        "name": name,
+        "description": description,
+        "created_by": created_by,
+        "is_template": is_template,
+        "status": "active",
         "document_url": document_url,
         "created_at": datetime.utcnow(),
         "updated_at": datetime.utcnow()
@@ -52,26 +69,30 @@ def create_evaluation_plan(classroom_ids, document_url):
     result = db.evaluation_plans.insert_one(evaluation_plan)
     return result.inserted_id
 
-def create_evaluation(evaluation_plan_id, module_id, topic_ids, name, description, methodology, weight, date):
+def assign_evaluation_plan(evaluation_plan_id, classroom_id):
     db = get_db()
-    evaluation = {
+    assignment = {
         "evaluation_plan_id": ObjectId(evaluation_plan_id),
-        "module_id": ObjectId(module_id),
-        "topic_ids": [ObjectId(id) for id in topic_ids],
-        "name": name,
-        "description": description,
-        "methodology": methodology,
-        "weight": weight,
-        "date": date,
-        "created_at": datetime.utcnow()
+        "classroom_id": ObjectId(classroom_id),
+        "assigned_at": datetime.utcnow(),
+        "status": "active"
     }
-    result = db.evaluations.insert_one(evaluation)
+    result = db.evaluation_plan_assignments.insert_one(assignment)
     return result.inserted_id
 
 # Funciones GET
 def get_study_plan(study_plan_id):
     db = get_db()
     return db.study_plans.find_one({"_id": ObjectId(study_plan_id)})
+
+def get_study_plan_assignments(study_plan_id=None, classroom_id=None):
+    db = get_db()
+    query = {}
+    if study_plan_id:
+        query["study_plan_id"] = ObjectId(study_plan_id)
+    if classroom_id:
+        query["classroom_id"] = ObjectId(classroom_id)
+    return list(db.study_plan_assignments.find(query))
 
 def get_modules(study_plan_id):
     db = get_db()
@@ -135,11 +156,18 @@ def update_evaluation(evaluation_id, updates):
 # Funciones DELETE
 def delete_study_plan(study_plan_id):
     db = get_db()
-    result = db.study_plans.delete_one({"_id": ObjectId(study_plan_id)})
-    return result.deleted_count > 0
+    # Actualizar estado en lugar de eliminar
+    result = db.study_plans.update_one(
+        {"_id": ObjectId(study_plan_id)},
+        {"$set": {"status": "archived"}}
+    )
+    return result.modified_count > 0
 
 def delete_module(module_id):
     db = get_db()
+    # Primero eliminar todos los temas asociados
+    db.topics.delete_many({"module_id": ObjectId(module_id)})
+    # Luego eliminar el módulo
     result = db.modules.delete_one({"_id": ObjectId(module_id)})
     return result.deleted_count > 0
 
