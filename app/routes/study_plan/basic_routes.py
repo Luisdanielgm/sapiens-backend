@@ -8,29 +8,46 @@ from database.study_plan.db_basic import (
     update_study_plan,
     update_study_plan_assignment,
     delete_study_plan,
-    remove_study_plan_assignment
+    remove_study_plan_assignment,
+    process_study_plan_document
 )
 
 @handle_errors
 def create_study_plan_endpoint():
+    """Crea un plan de estudio con su contenido completo"""
     data = request.get_json()
-    required_fields = ['name', 'description', 'created_by']
+    required_fields = ['name', 'description', 'created_by', 'modules']
     
     if not all(field in data for field in required_fields):
         return jsonify({"error": "Faltan campos requeridos"}), 400
     
-    study_plan_id = create_study_plan(
-        name=data['name'],
-        description=data['description'],
-        created_by=data['created_by'],
-        is_template=data.get('is_template', False),
-        document_url=data.get('document_url')
-    )
-    
-    return jsonify({
-        "message": "Plan de estudios creado exitosamente",
-        "study_plan_id": str(study_plan_id)
-    }), 201
+    try:
+        # 1. Crear el plan base
+        study_plan_id = create_study_plan(
+            name=data['name'],
+            description=data['description'],
+            created_by=data['created_by'],
+            is_template=data.get('is_template', False),
+            document_url=data.get('document_url')  # Opcional
+        )
+        
+        # 2. Procesar los módulos y temas
+        success, message = process_study_plan_document(
+            str(study_plan_id),
+            {"modules": data['modules']}
+        )
+        
+        if not success:
+            delete_study_plan(str(study_plan_id))
+            return jsonify({"error": message}), 400
+            
+        return jsonify({
+            "message": "Plan de estudios creado exitosamente",
+            "study_plan_id": str(study_plan_id)
+        }), 201
+        
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
 
 @handle_errors
 def assign_study_plan_endpoint():
@@ -88,6 +105,96 @@ def delete_study_plan_endpoint():
     delete_study_plan(study_plan_id)
     return jsonify({"message": "Plan de estudios eliminado exitosamente"}), 200
 
+@handle_errors
+def process_study_plan_content():
+    """Procesa el contenido del plan de estudios"""
+    data = request.get_json()
+    
+    if not all(k in data for k in ['study_plan_id', 'content']):
+        return jsonify({"error": "Se requiere study_plan_id y content"}), 400
+        
+    success, message = process_study_plan_document(
+        data['study_plan_id'],
+        data['content']
+    )
+    
+    if success:
+        return jsonify({"message": message}), 200
+    return jsonify({"error": message}), 400
+
+@handle_errors
+def create_complete_study_plan():
+    """Crea un plan de estudio completo con módulos y temas"""
+    data = request.get_json()
+    required_fields = ['name', 'description', 'created_by', 'modules']
+    
+    if not all(field in data for field in required_fields):
+        return jsonify({"error": "Faltan campos requeridos"}), 400
+    
+    try:
+        # 1. Crear el plan base
+        study_plan_id = create_study_plan(
+            name=data['name'],
+            description=data['description'],
+            created_by=data['created_by'],
+            is_template=data.get('is_template', False)
+        )
+        
+        # 2. Procesar los módulos y temas
+        success, message = process_study_plan_document(
+            str(study_plan_id),
+            {"modules": data['modules']}
+        )
+        
+        if not success:
+            # Si falla, eliminar el plan creado
+            delete_study_plan(str(study_plan_id))
+            return jsonify({"error": message}), 400
+            
+        return jsonify({
+            "message": "Plan de estudios creado exitosamente",
+            "study_plan_id": str(study_plan_id)
+        }), 201
+        
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+@handle_errors
+def create_study_plan_from_document():
+    """Crea un plan de estudio desde un documento procesado"""
+    # Asumiendo que el frontend envía el documento procesado
+    data = request.get_json()
+    required_fields = ['name', 'description', 'created_by', 'processed_content']
+    
+    if not all(field in data for field in required_fields):
+        return jsonify({"error": "Faltan campos requeridos"}), 400
+    
+    try:
+        # 1. Crear el plan base
+        study_plan_id = create_study_plan(
+            name=data['name'],
+            description=data['description'],
+            created_by=data['created_by']
+        )
+        
+        # 2. Procesar el contenido extraído
+        success, message = process_study_plan_document(
+            str(study_plan_id),
+            data['processed_content']
+        )
+        
+        if not success:
+            delete_study_plan(str(study_plan_id))
+            return jsonify({"error": message}), 400
+            
+        return jsonify({
+            "message": "Plan de estudios creado exitosamente",
+            "study_plan_id": str(study_plan_id)
+        }), 201
+        
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
 def register_basic_routes(bp):
     """Registra las rutas básicas del plan de estudios"""
     bp.add_url_rule(
@@ -128,4 +235,22 @@ def register_basic_routes(bp):
         'delete_study_plan',
         delete_study_plan_endpoint,
         methods=['DELETE']
+    )
+    bp.add_url_rule(
+        '/study-plan/process-content',
+        'process_study_plan_content',
+        process_study_plan_content,
+        methods=['POST']
+    )
+    bp.add_url_rule(
+        '/study-plan/complete',
+        'create_complete_study_plan',
+        create_complete_study_plan,
+        methods=['POST']
+    )
+    bp.add_url_rule(
+        '/study-plan/from-document',
+        'create_study_plan_from_document',
+        create_study_plan_from_document,
+        methods=['POST']
     )
