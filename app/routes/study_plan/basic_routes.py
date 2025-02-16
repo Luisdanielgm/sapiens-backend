@@ -14,7 +14,7 @@ from database.study_plan.db_basic import (
 
 @handle_errors
 def create_study_plan_endpoint():
-    """Crea un plan de estudio con su contenido completo"""
+    """Crea un plan de estudio integrado con evaluaciones"""
     data = request.get_json()
     required_fields = ['name', 'description', 'created_by', 'modules']
     
@@ -22,16 +22,23 @@ def create_study_plan_endpoint():
         return jsonify({"error": "Faltan campos requeridos"}), 400
     
     try:
-        # 1. Crear el plan base
+        # Validar estructura de evaluaciones
+        for module in data['modules']:
+            if 'evaluation_activities' not in module:
+                return jsonify({"error": f"Faltan actividades de evaluación en módulo {module['name']}"}), 400
+            
+            total_weight = sum(activity['weight'] for activity in module['evaluation_activities'])
+            if total_weight != 100:
+                return jsonify({"error": f"La suma de ponderaciones debe ser 100% en módulo {module['name']}"}), 400
+
         study_plan_id = create_study_plan(
             name=data['name'],
             description=data['description'],
             created_by=data['created_by'],
             is_template=data.get('is_template', False),
-            document_url=data.get('document_url')  # Opcional
+            document_url=data.get('document_url')
         )
         
-        # 2. Procesar los módulos y temas
         success, message = process_study_plan_document(
             str(study_plan_id),
             {"modules": data['modules']}

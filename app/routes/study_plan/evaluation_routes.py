@@ -1,245 +1,64 @@
 from flask import jsonify, request
 from app.utils.decorators import handle_errors
 from database.study_plan.db_evaluations import (
-    create_evaluation_plan,
-    create_evaluation,
-    get_evaluation_plan,
-    get_evaluations,
-    update_evaluation_plan,
-    update_evaluation,
-    delete_evaluation_plan,
-    delete_evaluation,
-    get_evaluation_by_id,
-    get_evaluations_by_module,
-    get_evaluations_by_topic,
-    assign_evaluation_plan
+    get_module_evaluations,
+    get_student_evaluations,
+    record_student_evaluation
 )
 
 @handle_errors
-def upload_evaluation_plan():
-    """Crea plan de evaluación a partir de datos JSON"""
-    data = request.get_json()
-    required_fields = ['name', 'description', 'created_by']
-    
-    if not all(field in data for field in required_fields):
-        return jsonify({"error": "Faltan datos requeridos"}), 400
-    
-    try:
-        evaluation_plan_id = create_evaluation_plan(
-            name=data['name'],
-            description=data['description'],
-            created_by=data['created_by'],
-            is_template=data.get('is_template', False),
-            document_url=data.get('document_url')
-        )
-        
-        return jsonify({
-            "message": "Plan de evaluación creado exitosamente",
-            "evaluation_plan_id": str(evaluation_plan_id)
-        }), 201
-        
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
+def get_module_evaluations_endpoint(module_id):
+    """Obtiene las actividades de evaluación de un módulo"""
+    evaluations = get_module_evaluations(module_id)
+    return jsonify({"evaluations": evaluations}), 200
 
 @handle_errors
-def assign_evaluation_plan_endpoint():
-    """Asigna un plan de evaluación a un aula"""
-    data = request.get_json()
-    if not all(k in data for k in ['evaluation_plan_id', 'classroom_id']):
-        return jsonify({"error": "Faltan datos requeridos"}), 400
-        
-    assignment_id = assign_evaluation_plan(
-        data['evaluation_plan_id'],
-        data['classroom_id']
-    )
-    
-    return jsonify({
-        "message": "Plan de evaluación asignado exitosamente",
-        "assignment_id": str(assignment_id)
-    }), 201
+def get_student_evaluations_endpoint(student_id):
+    """Obtiene las evaluaciones de un estudiante"""
+    module_id = request.args.get('module_id')
+    evaluations = get_student_evaluations(student_id, module_id)
+    return jsonify({"evaluations": evaluations}), 200
 
 @handle_errors
-def get_evaluation_plan_details(evaluation_plan_id):
-    """Obtiene detalles completos del plan de evaluación"""
-    eval_plan = get_evaluation_plan(evaluation_plan_id)
-    if not eval_plan:
-        return jsonify({"error": "Plan de evaluación no encontrado"}), 404
-    
-    evaluations = get_evaluations(evaluation_plan_id)
-    eval_plan['evaluations'] = evaluations
-    return jsonify(eval_plan), 200
-
-@handle_errors
-def create_evaluation_endpoint():
-    """Crea una nueva evaluación individual"""
+def record_evaluation_endpoint():
+    """Registra una evaluación para un estudiante"""
     data = request.get_json()
-    required_fields = [
-        'evaluation_plan_id', 'module_id', 'topic_ids', 'name',
-        'description', 'methodology', 'weight', 'date'
-    ]
+    required_fields = ['module_id', 'activity_id', 'student_id', 'score']
     
     if not all(field in data for field in required_fields):
         return jsonify({"error": "Faltan campos requeridos"}), 400
-    
-    evaluation_id = create_evaluation(
-        evaluation_plan_id=data['evaluation_plan_id'],
-        module_id=data['module_id'],
-        topic_ids=data['topic_ids'],
-        name=data['name'],
-        description=data['description'],
-        methodology=data['methodology'],
-        weight=data['weight'],
-        date=data['date']
+        
+    evaluation_id = record_student_evaluation(
+        data['module_id'],
+        data['activity_id'],
+        data['student_id'],
+        data['score'],
+        data.get('feedback', '')
     )
     
     return jsonify({
-        "message": "Evaluación creada exitosamente",
+        "message": "Evaluación registrada exitosamente",
         "evaluation_id": str(evaluation_id)
     }), 201
 
-@handle_errors
-def get_evaluation_details(evaluation_id):
-    """Obtiene detalles de una evaluación específica"""
-    evaluation = get_evaluation_by_id(evaluation_id)
-    if not evaluation:
-        return jsonify({"error": "Evaluación no encontrada"}), 404
-    
-    return jsonify(evaluation), 200
-
-@handle_errors
-def get_module_evaluations(module_id):
-    """Obtiene todas las evaluaciones de un módulo"""
-    evaluations = get_evaluations_by_module(module_id)
-    return jsonify({"evaluations": evaluations}), 200
-
-@handle_errors
-def get_topic_evaluations(topic_id):
-    """Obtiene todas las evaluaciones relacionadas con un tema"""
-    evaluations = get_evaluations_by_topic(topic_id)
-    return jsonify({"evaluations": evaluations}), 200
-
-@handle_errors
-def update_evaluation_plan_endpoint(evaluation_plan_id):
-    """Actualiza un plan de evaluación existente"""
-    data = request.get_json()
-    if not data:
-        return jsonify({"error": "No se proporcionaron datos para actualizar"}), 400
-    
-    updated = update_evaluation_plan(evaluation_plan_id, data)
-    if not updated:
-        return jsonify({"error": "Plan de evaluación no encontrado"}), 404
-    
-    return jsonify({"message": "Plan de evaluación actualizado exitosamente"}), 200
-
-@handle_errors
-def update_evaluation_endpoint(evaluation_id):
-    """Actualiza una evaluación específica"""
-    data = request.get_json()
-    if not data:
-        return jsonify({"error": "No se proporcionaron datos para actualizar"}), 400
-    
-    updated = update_evaluation(evaluation_id, data)
-    if not updated:
-        return jsonify({"error": "Evaluación no encontrada"}), 404
-    
-    return jsonify({"message": "Evaluación actualizada exitosamente"}), 200
-
-@handle_errors
-def delete_evaluation_plan_endpoint(evaluation_plan_id):
-    """Elimina un plan de evaluación y sus evaluaciones asociadas"""
-    deleted = delete_evaluation_plan(evaluation_plan_id)
-    if not deleted:
-        return jsonify({"error": "Plan de evaluación no encontrado"}), 404
-    
-    return jsonify({"message": "Plan de evaluación eliminado exitosamente"}), 200
-
-@handle_errors
-def delete_evaluation_endpoint(evaluation_id):
-    """Elimina una evaluación específica"""
-    deleted = delete_evaluation(evaluation_id)
-    if not deleted:
-        return jsonify({"error": "Evaluación no encontrada"}), 404
-    
-    return jsonify({"message": "Evaluación eliminada exitosamente"}), 200
-
 def register_evaluation_routes(bp):
-    """Registra las rutas relacionadas con evaluaciones"""
-    # Rutas para Plan de Evaluación
-    bp.add_url_rule(
-        '/evaluation-plan',
-        'create_evaluation_plan',
-        upload_evaluation_plan,
-        methods=['POST']
-    )
-    
-    bp.add_url_rule(
-        '/evaluation-plan/assign',
-        'assign_evaluation_plan',
-        assign_evaluation_plan_endpoint,
-        methods=['POST']
-    )
-    
-    bp.add_url_rule(
-        '/evaluation-plan/<evaluation_plan_id>',
-        'get_evaluation_plan_details',
-        get_evaluation_plan_details,
-        methods=['GET']
-    )
-    
-    bp.add_url_rule(
-        '/evaluation-plan/<evaluation_plan_id>',
-        'update_evaluation_plan',
-        update_evaluation_plan_endpoint,
-        methods=['PUT']
-    )
-    
-    bp.add_url_rule(
-        '/evaluation-plan/<evaluation_plan_id>',
-        'delete_evaluation_plan',
-        delete_evaluation_plan_endpoint,
-        methods=['DELETE']
-    )
-    
-    # Rutas para Evaluaciones individuales
-    bp.add_url_rule(
-        '/evaluation',
-        'create_evaluation',
-        create_evaluation_endpoint,
-        methods=['POST']
-    )
-    
-    bp.add_url_rule(
-        '/evaluation/<evaluation_id>',
-        'get_evaluation_details',
-        get_evaluation_details,
-        methods=['GET']
-    )
-    
-    bp.add_url_rule(
-        '/evaluation/<evaluation_id>',
-        'update_evaluation',
-        update_evaluation_endpoint,
-        methods=['PUT']
-    )
-    
-    bp.add_url_rule(
-        '/evaluation/<evaluation_id>',
-        'delete_evaluation',
-        delete_evaluation_endpoint,
-        methods=['DELETE']
-    )
-    
-    # Rutas para consultas específicas
     bp.add_url_rule(
         '/module/<module_id>/evaluations',
         'get_module_evaluations',
-        get_module_evaluations,
+        get_module_evaluations_endpoint,
         methods=['GET']
     )
     
     bp.add_url_rule(
-        '/topic/<topic_id>/evaluations',
-        'get_topic_evaluations',
-        get_topic_evaluations,
+        '/student/<student_id>/evaluations',
+        'get_student_evaluations',
+        get_student_evaluations_endpoint,
         methods=['GET']
+    )
+    
+    bp.add_url_rule(
+        '/evaluation/record',
+        'record_evaluation',
+        record_evaluation_endpoint,
+        methods=['POST']
     )

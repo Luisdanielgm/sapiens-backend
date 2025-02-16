@@ -80,23 +80,21 @@ def remove_study_plan_assignment(assignment_id):
 def process_study_plan_document(study_plan_id, document_content):
     """
     Procesa el contenido del documento y extrae los temas
-    
-    Args:
-        study_plan_id: ID del plan de estudio
-        document_content: Contenido del documento (JSON estructurado)
     """
     db = get_db()
     
     try:
         # Crear módulos y temas basados en el contenido
         for module_data in document_content.get('modules', []):
-            # Crear módulo
+            # Crear módulo con sus actividades de evaluación
             module_id = create_module(
                 study_plan_id=study_plan_id,
                 name=module_data['name'],
-                start_date=module_data['start_date'],
-                end_date=module_data['end_date'],
-                objectives=module_data.get('objectives', [])
+                description=module_data.get('description', ''),
+                theoretical_references=module_data.get('theoretical_references', []),
+                strategies=module_data.get('strategies', []),
+                objectives=module_data.get('objectives', []),
+                evaluation_activities=module_data.get('evaluation_activities', [])
             )
             
             # Crear temas para este módulo
@@ -105,8 +103,10 @@ def process_study_plan_document(study_plan_id, document_content):
                     module_id=module_id,
                     name=topic_data['name'],
                     description=topic_data['description'],
-                    date_range=topic_data.get('date_range', {}),
-                    class_schedule=topic_data.get('class_schedule', [])
+                    theoretical_content=topic_data.get('theoretical_content', ''),
+                    practical_content=topic_data.get('practical_content', ''),
+                    activities=topic_data.get('activities', []),
+                    evaluation_criteria=topic_data.get('evaluation_criteria', [])
                 )
         
         return True, "Contenido procesado exitosamente"

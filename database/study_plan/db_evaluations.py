@@ -2,33 +2,44 @@ from bson import ObjectId
 from datetime import datetime
 from database.mongodb import get_db
 
-def create_evaluation_plan(name, description, created_by, is_template=False, document_url=None):
-    """
-    Crea un nuevo plan de evaluación
-    
-    Args:
-        name (str): Nombre del plan
-        description (str): Descripción del plan
-        created_by (str): Email del profesor que crea el plan
-        is_template (bool): Indica si es una plantilla reutilizable
-        document_url (str, optional): URL del documento original
-        
-    Returns:
-        ObjectId: ID del plan de evaluación creado
-    """
+def get_module_evaluations(module_id):
+    """Obtiene todas las actividades de evaluación de un módulo"""
     db = get_db()
-    evaluation_plan = {
-        "name": name,
-        "description": description,
-        "created_by": created_by,
-        "is_template": is_template,
-        "status": "active",
-        "document_url": document_url,
+    module = db.modules.find_one({"_id": ObjectId(module_id)})
+    return module.get("evaluation_activities", []) if module else []
+
+def get_student_evaluations(student_id, module_id=None):
+    """Obtiene las evaluaciones de un estudiante"""
+    db = get_db()
+    query = {"student_id": ObjectId(student_id)}
+    if module_id:
+        query["module_id"] = ObjectId(module_id)
+    return list(db.student_evaluations.find(query))
+
+def record_student_evaluation(module_id, activity_id, student_id, score, feedback):
+    """Registra la evaluación de un estudiante"""
+    db = get_db()
+    evaluation = {
+        "module_id": ObjectId(module_id),
+        "activity_id": activity_id,
+        "student_id": ObjectId(student_id),
+        "score": score,
+        "feedback": feedback,
         "created_at": datetime.utcnow(),
         "updated_at": datetime.utcnow()
     }
-    result = db.evaluation_plans.insert_one(evaluation_plan)
+    result = db.student_evaluations.insert_one(evaluation)
     return result.inserted_id
+
+def update_student_evaluation(evaluation_id, updates):
+    """Actualiza la evaluación de un estudiante"""
+    db = get_db()
+    updates["updated_at"] = datetime.utcnow()
+    result = db.student_evaluations.update_one(
+        {"_id": ObjectId(evaluation_id)},
+        {"$set": updates}
+    )
+    return result.modified_count > 0
 
 def assign_evaluation_plan(evaluation_plan_id, classroom_id):
     """
@@ -86,19 +97,6 @@ def create_evaluation(evaluation_plan_id, module_id, topic_ids, name, descriptio
     result = db.evaluations.insert_one(evaluation)
     return result.inserted_id
 
-def get_evaluation_plan(evaluation_plan_id):
-    """
-    Obtiene los detalles de un plan de evaluación
-    
-    Args:
-        evaluation_plan_id (str): ID del plan de evaluación
-        
-    Returns:
-        dict: Detalles del plan de evaluación o None si no existe
-    """
-    db = get_db()
-    return db.evaluation_plans.find_one({"_id": ObjectId(evaluation_plan_id)})
-
 def get_evaluations(evaluation_plan_id):
     """
     Obtiene todas las evaluaciones de un plan
@@ -113,25 +111,6 @@ def get_evaluations(evaluation_plan_id):
     return list(db.evaluations.find(
         {"evaluation_plan_id": ObjectId(evaluation_plan_id)}
     ))
-
-def update_evaluation_plan(evaluation_plan_id, updates):
-    """
-    Actualiza un plan de evaluación
-    
-    Args:
-        evaluation_plan_id (str): ID del plan de evaluación
-        updates (dict): Campos a actualizar
-        
-    Returns:
-        bool: True si se actualizó correctamente
-    """
-    db = get_db()
-    updates["updated_at"] = datetime.utcnow()
-    result = db.evaluation_plans.update_one(
-        {"_id": ObjectId(evaluation_plan_id)},
-        {"$set": updates}
-    )
-    return result.modified_count > 0
 
 def update_evaluation(evaluation_id, updates):
     """
@@ -151,23 +130,6 @@ def update_evaluation(evaluation_id, updates):
         {"$set": updates}
     )
     return result.modified_count > 0
-
-def delete_evaluation_plan(evaluation_plan_id):
-    """
-    Elimina un plan de evaluación y todas sus evaluaciones asociadas
-    
-    Args:
-        evaluation_plan_id (str): ID del plan de evaluación
-        
-    Returns:
-        bool: True si se eliminó correctamente
-    """
-    db = get_db()
-    # Primero eliminar todas las evaluaciones asociadas
-    db.evaluations.delete_many({"evaluation_plan_id": ObjectId(evaluation_plan_id)})
-    # Luego eliminar el plan de evaluación
-    result = db.evaluation_plans.delete_one({"_id": ObjectId(evaluation_plan_id)})
-    return result.deleted_count > 0
 
 def delete_evaluation(evaluation_id):
     """

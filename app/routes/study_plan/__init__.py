@@ -10,6 +10,6 @@ study_plan_bp = Blueprint('study_plan', __name__)
 register_basic_routes(study_plan_bp)
 register_module_routes(study_plan_bp)
 register_topic_routes(study_plan_bp)
-register_evaluation_routes(study_plan_bp)
+register_evaluation_routes(study_plan_bp)  # Solo rutas de calificaciones de estudiantes
 
 __all__ = ['study_plan_bp'] 

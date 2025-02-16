@@ -2,14 +2,16 @@ from bson import ObjectId
 from datetime import datetime
 from database.mongodb import get_db
 
-def create_module(study_plan_id, name, start_date, end_date, objectives):
+def create_module(study_plan_id, name, description, theoretical_references, strategies, objectives, evaluation_activities):
     db = get_db()
     module = {
         "study_plan_id": ObjectId(study_plan_id),
         "name": name,
-        "start_date": start_date,
-        "end_date": end_date,
+        "description": description,
+        "theoretical_references": theoretical_references,
+        "strategies": strategies,
         "objectives": objectives,
+        "evaluation_activities": evaluation_activities,
         "created_at": datetime.utcnow()
     }
     result = db.modules.insert_one(module)

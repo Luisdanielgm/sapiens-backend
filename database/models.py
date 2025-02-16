@@ -164,108 +164,82 @@ from datetime import datetime
     "updated_at": datetime
 }
 
-# study_plans
+# study_plans (Plan integrado)
 {
     "_id": ObjectId,
     "name": str,
     "description": str,
     "created_by": str,  # email del profesor
+    "subject_area": str,  # "GHC", "Biología", etc.
     "is_template": bool,
     "status": str,  # "active", "archived"
-    "document_url": str,  # URL del documento original (opcional)
+    "document_url": str,  # opcional
     "created_at": datetime,
     "updated_at": datetime
 }
 
-# study_plan_assignments
+# modules (Temas generadores)
 {
     "_id": ObjectId,
     "study_plan_id": ObjectId,
-    "classroom_id": ObjectId,
-    "assigned_at": datetime,
-    "status": str,  # "active", "completed", "cancelled"
-}
-
-# modules (Lapsos o módulos del plan de estudio)
-{
-    "_id": ObjectId,
-    "study_plan_id": ObjectId,  # Vinculado al plan de estudio
-    "name": str,  # "Primer Lapso", "Módulo 1", etc.
-    "start_date": datetime,
-    "end_date": datetime,
-    "objectives": [str],
-    "created_at": datetime
-}
-
-# topics (Temas específicos por módulo)
-{
-    "_id": ObjectId,
-    "module_id": ObjectId,
-    "name": str,
+    "name": str,  # Tema generador
     "description": str,
-    "date_range": {
-        "start_date": datetime,
-        "end_date": datetime
-    },
-    "class_schedule": [{
-        "week_start": datetime,  # Inicio de la semana
-        "sessions": [{
-            "date": datetime,    # Fecha específica de la clase
-            "start_time": str,   # "08:00"
-            "end_time": str,     # "09:30"
-            "description": str   # "Introducción al tema"
+    "theoretical_references": [str],  # Referentes teóricos prácticos
+    "strategies": [str],  # Estrategias metodológicas
+    "objectives": [str],
+    "evaluation_activities": [{
+        "name": str,
+        "type": str,  # "written", "oral", "practical", etc.
+        "description": str,
+        "weight": float,  # Ponderación (%)
+        "criteria": [{  # Criterios de evaluación
+            "name": str,  # ej: "Responsabilidad", "Dominio del tema"
+            "description": str,
+            "indicators": [str]  # ej: "Muestra conocimiento", "Utiliza material de apoyo"
+        }],
+        "rubric": [{
+            "criteria": str,
+            "description": str,
+            "weight": float
         }]
     }],
-    "resources": [{
-        "type": str,  # "video", "image", "podcast", "document"
-        "url": str,
-        "description": str
+    "created_at": datetime
+}
+
+# topics (Tejido temático)
+{
+    "_id": ObjectId,
+    "module_id": ObjectId,
+    "name": str,
+    "description": str,
+    "theoretical_content": str,  # Contenido teórico específico
+    "practical_content": str,  # Contenido práctico
+    "activities": [{
+        "type": str,  # "theory", "practice", "evaluation"
+        "description": str,
+        "resources": [{
+            "type": str,
+            "url": str,
+            "description": str
+        }]
+    }],
+    "evaluation_criteria": [{
+        "name": str,  # ej: "Responsabilidad", "Ortografía"
+        "description": str,
+        "weight": float,
+        "indicators": [{
+            "description": str,  # ej: "Muestra conocimiento y coherencia"
+            "weight": float
+        }]
     }],
     "created_at": datetime
 }
 
-# evaluation_plans
+# student_evaluations (actualizado)
 {
     "_id": ObjectId,
-    "name": str,
-    "description": str,
-    "created_by": str,  # email del profesor
-    "is_template": bool,
-    "status": str,  # "active", "archived"
-    "document_url": str,  # URL del documento original (opcional)
-    "created_at": datetime,
-    "updated_at": datetime
-}
-
-# evaluation_plan_assignments
-{
-    "_id": ObjectId,
-    "evaluation_plan_id": ObjectId,
-    "classroom_id": ObjectId,
-    "assigned_at": datetime,
-    "status": str,  # "active", "completed", "cancelled"
-}
-
-# evaluations
-{
-    "_id": ObjectId,
-    "evaluation_plan_id": ObjectId,
     "module_id": ObjectId,
-    "topic_ids": [ObjectId],  # Puede evaluar varios temas
-    "name": str,
-    "description": str,
-    "methodology": str,
-    "weight": float,  # Ponderación
-    "date": datetime,
-    "status": str,  # "pending", "completed", "cancelled"
-    "created_at": datetime,
-    "updated_at": datetime
-}
-
-# student_evaluations
-{
-    "_id": ObjectId,
-    "evaluation_id": ObjectId,
+    "activity_id": str,  # ID de la actividad dentro del módulo
     "student_id": ObjectId,
     "score": float,
     "feedback": str,
