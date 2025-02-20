@@ -5,7 +5,10 @@ from database.indigenous_languages.translations import (
     get_translations,
     update_translation,
     delete_translation,
-    bulk_create_translations
+    bulk_create_translations,
+    get_available_language_pairs,
+    search_translations,
+    validate_language_pair
 )
 
 translations_bp = Blueprint('translations', __name__)
@@ -19,6 +22,10 @@ def create_translation_endpoint():
     
     if not all(field in data for field in required_fields):
         return jsonify({"error": "Faltan campos requeridos"}), 400
+    
+    # Validar formato de language_pair
+    if not validate_language_pair(data['language_pair']):
+        return jsonify({"error": "Formato inválido de language_pair"}), 400
         
     translation_id = create_translation(**{k: data[k] for k in required_fields})
     return jsonify({
@@ -70,4 +77,34 @@ def delete_translation_endpoint(translation_id):
     
     if success:
         return jsonify({"message": "Traducción eliminada exitosamente"}), 200
-    return jsonify({"error": "No se pudo eliminar la traducción"}), 400 
+    return jsonify({"error": "No se pudo eliminar la traducción"}), 400
+
+@translations_bp.route('/language-pairs', methods=['GET'])
+@handle_errors
+def get_language_pairs_endpoint():
+    """Obtiene los pares de idiomas disponibles"""
+    pairs = get_available_language_pairs()
+    return jsonify({"language_pairs": pairs}), 200
+
+@translations_bp.route('/translations/search', methods=['GET'])
+@handle_errors
+def search_translations_endpoint():
+    """Búsqueda avanzada de traducciones"""
+    query = request.args.get('q')
+    
+    filters = {
+        "language_pair": request.args.get('language_pair'),
+        "type_data": request.args.get('type_data'),
+        "dialecto": request.args.get('dialecto'),
+        "created_after": request.args.get('created_after'),
+        "updated_after": request.args.get('updated_after')
+    }
+    
+    # Eliminar filtros None
+    filters = {k: v for k, v in filters.items() if v is not None}
+    
+    translations = search_translations(query, filters)
+    return jsonify({
+        "translations": translations,
+        "count": len(translations)
+    }), 200 
