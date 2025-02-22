@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import datetime, timedelta
 from bson import ObjectId
 from .mongodb import get_indigenous_db
 
@@ -79,11 +79,11 @@ def search_translations(query=None, filters=None):
     Args:
         query (str): Texto a buscar en español o traducción
         filters (dict): Filtros adicionales como:
-            - language_pair
-            - type_data
-            - dialecto
-            - created_after
-            - updated_after
+            - language_pair: str
+            - type_data: str
+            - dialecto: str
+            - created_at: str (YYYY-MM-DD)
+            - updated_at: str (YYYY-MM-DD)
     """
     db = get_indigenous_db()
     search_query = {}
@@ -95,7 +95,7 @@ def search_translations(query=None, filters=None):
             {"traduccion": {"$regex": query, "$options": "i"}}
         ]
     
-    # Aplicar filtros
+    # Aplicar filtros básicos (coincidencia exacta)
     if filters:
         if filters.get("language_pair"):
             search_query["language_pair"] = filters["language_pair"]
@@ -103,18 +103,55 @@ def search_translations(query=None, filters=None):
             search_query["type_data"] = filters["type_data"]
         if filters.get("dialecto"):
             search_query["dialecto"] = filters["dialecto"]
-        if filters.get("created_after"):
-            search_query["created_at"] = {"$gt": filters["created_after"]}
-        if filters.get("updated_after"):
-            search_query["updated_at"] = {"$gt": filters["updated_after"]}
-    
-    translations = list(db.translations.find(search_query))
-    
-    # Convertir ObjectId a string
-    for translation in translations:
-        translation["_id"] = str(translation["_id"])
+
+        # Manejo de fechas
+        date_conditions = {}
         
-    return translations
+        if filters.get("created_at"):
+            try:
+                created_date = datetime.strptime(filters["created_at"], "%Y-%m-%d")
+                # Ajustar para incluir todo el día especificado
+                next_day = created_date + timedelta(days=1)
+                date_conditions["created_at"] = {
+                    "$gte": created_date,
+                    "$lt": next_day
+                }
+            except ValueError as e:
+                print(f"Error al parsear fecha created_at: {filters['created_at']} - {str(e)}")
+
+        if filters.get("updated_at"):
+            try:
+                updated_date = datetime.strptime(filters["updated_at"], "%Y-%m-%d")
+                # Ajustar para incluir todo el día especificado
+                next_day = updated_date + timedelta(days=1)
+                date_conditions["updated_at"] = {
+                    "$gte": updated_date,
+                    "$lt": next_day
+                }
+            except ValueError as e:
+                print(f"Error al parsear fecha updated_at: {filters['updated_at']} - {str(e)}")
+
+        # Agregar condiciones de fecha a la query principal
+        if date_conditions:
+            search_query.update(date_conditions)
+
+    print("Query de búsqueda:", search_query)  # Debug
+    
+    try:
+        translations = list(db.translations.find(search_query))
+        
+        # Convertir ObjectId a string y fechas a formato ISO
+        for translation in translations:
+            translation["_id"] = str(translation["_id"])
+            if isinstance(translation.get("created_at"), datetime):
+                translation["created_at"] = translation["created_at"].isoformat()
+            if isinstance(translation.get("updated_at"), datetime):
+                translation["updated_at"] = translation["updated_at"].isoformat()
+            
+        return translations
+    except Exception as e:
+        print(f"Error en la búsqueda: {str(e)}")
+        return []
 
 def validate_language_pair(language_pair):
     """Valida el formato del par de idiomas"""

@@ -96,15 +96,19 @@ def search_translations_endpoint():
         "language_pair": request.args.get('language_pair'),
         "type_data": request.args.get('type_data'),
         "dialecto": request.args.get('dialecto'),
-        "created_after": request.args.get('created_after'),
-        "updated_after": request.args.get('updated_after')
+        "created_at": request.args.get('created_at'),
+        "updated_at": request.args.get('updated_at')
     }
     
-    # Eliminar filtros None
-    filters = {k: v for k, v in filters.items() if v is not None}
+    # Eliminar filtros None o vacíos
+    filters = {k: v for k, v in filters.items() if v is not None and v != ''}
+    
+    print("Filtros recibidos:", filters)  # Debug
     
     translations = search_translations(query, filters)
+    
     return jsonify({
         "translations": translations,
-        "count": len(translations)
+        "count": len(translations),
+        "filters_applied": filters  # Incluir los filtros aplicados en la respuesta
     }), 200 
