@@ -1,7 +1,10 @@
-flask==2.0.1
-flask-cors==3.0.10
-pymongo==4.1.1
-python-dotenv==0.19.0
+flask==2.2.3
+werkzeug==2.2.3
+flask-cors==4.0.0
+flask-jwt-extended==4.5.2
+pymongo==4.5.0
+python-dotenv==1.0.0
 PyJWT==2.3.0
 bson==0.5.10
-python-dateutil==2.8.2 
+python-dateutil==2.8.2
+bcrypt==4.0.1 

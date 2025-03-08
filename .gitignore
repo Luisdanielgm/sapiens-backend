@@ -1,7 +1,5 @@
 # Entornos virtuales
 venv/
-env/
-.env/
 .venv/
 
 # Archivos de configuración sensibles
@@ -44,3 +42,4 @@ Thumbs.db
 tmp/
 temp/
 
+/.env
