@@ -116,7 +116,7 @@ def create_app(config_object=active_config):
     app.register_blueprint(games_bp, url_prefix='/api/games')
     app.register_blueprint(simulations_bp, url_prefix='/api/simulations')
 
-    @app.route('/health')
+    @app.route('/')
     def health_check():
         """Endpoint para verificar la salud de la aplicación"""
         return jsonify({
