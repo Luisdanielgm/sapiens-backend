@@ -1,8 +1,46 @@
+# Entornos virtuales
 venv/
 env/
 .env/
 .venv/
-/database/__pycache__
-/scraping/__pycache__
-/utils/__pycache__
-/__pycache__
+
+# Archivos de configuración sensibles
+.env
+.flaskenv
+.envrc
+*.pem
+*.key
+
+# Archivos de caché de Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Archivos del sistema operativo
+.DS_Store
+Thumbs.db
+.directory
+
+# IDEs y editores
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+.vs/
+
+# Directorios específicos de la aplicación
+/dist/
+/build/
+/*.egg-info/
+
+# Archivos temporales o log
+*.log
+tmp/
+temp/
+
