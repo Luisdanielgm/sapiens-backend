@@ -4,10 +4,10 @@ from flask import g
 from pymongo.errors import PyMongoError
 from datetime import datetime
 
-from src.shared.database import get_db, BaseService
+from src.shared.database import get_db
 from src.shared.constants import STATUS, ROLES
-from src.shared.standardization import ErrorCodes
-from src.shared.exceptions import AppException, ResourceNotFoundError
+from src.shared.standardization import ErrorCodes, BaseService
+from src.shared.exceptions import AppException
 from .models import Class, ClassMember, Subperiod
 from src.student_individual_content.models import StudentIndividualContent
 

@@ -11,9 +11,9 @@ from .services import (
     InstituteDashboardService
 )
 from src.shared.standardization import APIBlueprint, APIRoute, ErrorCodes
-from src.shared.decorators import auth_required, role_required
+from src.shared.decorators import auth_required, role_required, handle_errors, validate_json
 from src.shared.constants import ROLES
-from src.shared.utils import handle_errors, validate_json, ensure_json_serializable
+from src.shared.utils import ensure_json_serializable
 
 analytics_bp = APIBlueprint('analytics', __name__)
 
