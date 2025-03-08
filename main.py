@@ -127,8 +127,11 @@ def create_app(config_object=active_config):
 
     return app
 
+# Crear la aplicación para que Vercel pueda encontrarla
+app = create_app()
+
 if __name__ == '__main__':
-    app = create_app()
+    # Cuando se ejecuta directamente (desarrollo local)
     logger.info(f"Iniciando aplicación en modo {os.getenv('FLASK_ENV', 'development')}")
     app.run(
         debug=app.config['DEBUG'], 
