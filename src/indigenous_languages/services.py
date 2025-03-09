@@ -2,17 +2,46 @@ from typing import Tuple, List, Dict
 from datetime import datetime, timedelta
 from bson import ObjectId
 
-from src.shared.database import get_indigenous_db
-from src.shared.standardization import BaseService, ErrorCodes
+from src.shared.database import get_indigenous_db, get_db
+from src.shared.standardization import BaseService, VerificationBaseService, ErrorCodes
 from src.shared.exceptions import AppException
 from .models import Translation, Language
 
-class TranslationService(BaseService):
+class IndigenousVerificationBaseService(BaseService):
+    """
+    Clase base para servicios relacionados con lenguas indígenas.
+    Usa la base de datos específica de lenguas indígenas pero mantiene
+    acceso a la base de datos principal para verificaciones.
+    """
+    def __init__(self, collection_name: str):
+        # No llamamos a super() porque usamos otra base de datos
+        self.indigenous_db = get_indigenous_db()
+        self.collection = self.indigenous_db[collection_name]
+        self.collection_name = collection_name
+        # Mantenemos acceso a la DB principal para verificaciones
+        self.db = get_db()
+
+    # Métodos de verificación heredados de VerificationBaseService
+    def check_user_exists(self, user_id: str) -> bool:
+        """
+        Verifica si un usuario existe.
+        
+        Args:
+            user_id: ID del usuario a verificar
+            
+        Returns:
+            bool: True si el usuario existe, False en caso contrario
+        """
+        try:
+            user_id_obj = ObjectId(user_id) if isinstance(user_id, str) else user_id
+            user = self.db.users.find_one({"_id": user_id_obj})
+            return user is not None
+        except Exception:
+            return False
+
+class TranslationService(IndigenousVerificationBaseService):
     def __init__(self):
-        # Usando una base de datos específica para lenguas indígenas
-        # No llamamos a super() porque no estamos usando la base de datos principal
-        self.db = get_indigenous_db()
-        self.collection = self.db.translations
+        super().__init__(collection_name="translations")
 
     def create_translation(self, translation_data: dict) -> Tuple[bool, str]:
         try:
@@ -167,12 +196,9 @@ class TranslationService(BaseService):
             print(f"Error al obtener pares de idiomas: {str(e)}")
             return []
 
-class LanguageService(BaseService):
+class LanguageService(IndigenousVerificationBaseService):
     def __init__(self):
-        # Usando una base de datos específica para lenguas indígenas
-        # No llamamos a super() porque no estamos usando la base de datos principal
-        self.db = get_indigenous_db()
-        self.collection = self.db.languages
+        super().__init__(collection_name="languages")
 
     def add_language(self, language_data: dict) -> Tuple[bool, str]:
         try:

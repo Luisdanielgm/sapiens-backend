@@ -4,15 +4,14 @@ from datetime import datetime
 
 from src.shared.database import get_db
 from src.shared.constants import ROLES, COLLECTIONS
-from src.shared.standardization import BaseService, ErrorCodes
+from src.shared.standardization import VerificationBaseService, ErrorCodes
 from src.shared.exceptions import AppException
 from .models import Institute, EducationalProgram, Level, InstituteMember
 from src.analytics.services import InstituteAnalyticsService
 
-class InstituteService(BaseService):
+class InstituteService(VerificationBaseService):
     def __init__(self):
         super().__init__(collection_name="institutes")
-        self.db = get_db()
         self.analytics_service = InstituteAnalyticsService()
 
     def create_institute(self, institute_data: dict) -> Tuple[bool, str]:
@@ -63,15 +62,41 @@ class InstituteService(BaseService):
         except Exception as e:
             return False, str(e)
 
+    def check_admin_has_institute(self, admin_email: str) -> bool:
+        """
+        Verifica si un administrador está asociado a un instituto
+        
+        Args:
+            admin_email: Email del administrador
+            
+        Returns:
+            bool: True si el administrador tiene un instituto asociado, False en caso contrario
+        """
+        try:
+            # Buscar usuario por email
+            user = get_db().users.find_one({"email": admin_email})
+            if not user:
+                return False
+
+            # Buscar membresía como administrador de instituto
+            member = get_db().institute_members.find_one({
+                "user_id": user["_id"],
+                "role": "institute_admin"
+            })
+
+            return member is not None
+        except Exception:
+            return False
+
     def get_institute_by_admin(self, admin_email: str) -> Optional[Dict]:
         try:
             # Buscar usuario por email
-            user = self.db.users.find_one({"email": admin_email})
+            user = get_db().users.find_one({"email": admin_email})
             if not user:
                 return None
 
             # Buscar membresía como administrador de instituto
-            member = self.db.institute_members.find_one({
+            member = get_db().institute_members.find_one({
                 "user_id": user["_id"],
                 "role": "institute_admin"
             })
@@ -95,12 +120,12 @@ class InstituteService(BaseService):
     def delete_institute(self, institute_id: str, admin_email: str) -> Tuple[bool, str]:
         try:
             # Verificar si existen programas asociados
-            programs_count = self.db.educational_programs.count_documents({"institute_id": ObjectId(institute_id)})
+            programs_count = get_db().educational_programs.count_documents({"institute_id": ObjectId(institute_id)})
             if programs_count > 0:
                 return False, f"No se puede eliminar el instituto porque tiene {programs_count} programas asociados"
 
             # Eliminar miembros del instituto
-            self.db.institute_members.delete_many({"institute_id": ObjectId(institute_id)})
+            get_db().institute_members.delete_many({"institute_id": ObjectId(institute_id)})
 
             # Eliminar el instituto
             result = self.collection.delete_one({"_id": ObjectId(institute_id)})
@@ -113,10 +138,9 @@ class InstituteService(BaseService):
     def get_institute_statistics(self, institute_id: str) -> Optional[Dict]:
         return self.analytics_service.get_institute_statistics(institute_id)
 
-class ProgramService(BaseService):
+class ProgramService(VerificationBaseService):
     def __init__(self):
         super().__init__(collection_name="educational_programs")
-        self.db = get_db()
 
     def create_program(self, program_data: dict) -> Tuple[bool, str]:
         try:
@@ -136,7 +160,7 @@ class ProgramService(BaseService):
                 program["institute_id"] = str(program["institute_id"])
                 
                 # Obtener niveles
-                levels_count = self.db.levels.count_documents({"program_id": program["_id"]})
+                levels_count = get_db().levels.count_documents({"program_id": program["_id"]})
                 program["levels_count"] = levels_count
             
             return programs
@@ -164,7 +188,7 @@ class ProgramService(BaseService):
     def delete_program(self, program_id: str) -> Tuple[bool, str]:
         try:
             # Verificar si existen niveles asociados
-            levels_count = self.db.levels.count_documents({"program_id": ObjectId(program_id)})
+            levels_count = get_db().levels.count_documents({"program_id": ObjectId(program_id)})
             if levels_count > 0:
                 return False, f"No se puede eliminar el programa porque tiene {levels_count} niveles asociados"
                 
@@ -189,7 +213,7 @@ class ProgramService(BaseService):
             program["institute_id"] = str(program["institute_id"])
             
             # Obtener instituto relacionado
-            institute = self.db.institutes.find_one({"_id": ObjectId(program["institute_id"])})
+            institute = get_db().institutes.find_one({"_id": ObjectId(program["institute_id"])})
             if institute:
                 program["institute"] = {
                     "id": str(institute["_id"]),
@@ -197,7 +221,7 @@ class ProgramService(BaseService):
                 }
                 
             # Obtener niveles
-            levels = list(self.db.levels.find({"program_id": ObjectId(program_id)}).sort("order", 1))
+            levels = list(get_db().levels.find({"program_id": ObjectId(program_id)}).sort("order", 1))
             program["levels"] = []
             
             for level in levels:
@@ -212,15 +236,14 @@ class ProgramService(BaseService):
             print(f"Error al obtener programa: {str(e)}")
             return None
 
-class LevelService(BaseService):
+class LevelService(VerificationBaseService):
     def __init__(self):
         super().__init__(collection_name="levels")
-        self.db = get_db()
 
     def create_level(self, level_data: dict) -> Tuple[bool, str]:
         try:
             # Verificar si existe el programa
-            program = self.db.educational_programs.find_one({"_id": ObjectId(level_data['program_id'])})
+            program = get_db().educational_programs.find_one({"_id": ObjectId(level_data['program_id'])})
             if not program:
                 return False, "Programa educativo no encontrado"
                 
@@ -287,8 +310,8 @@ class LevelService(BaseService):
     def delete_level(self, level_id: str) -> Tuple[bool, str]:
         try:
             # Verificar si hay dependencias (materias, secciones, etc.)
-            subjects_count = self.db.subjects.count_documents({"level_id": ObjectId(level_id)})
-            sections_count = self.db.sections.count_documents({"level_id": ObjectId(level_id)})
+            subjects_count = get_db().subjects.count_documents({"level_id": ObjectId(level_id)})
+            sections_count = get_db().sections.count_documents({"level_id": ObjectId(level_id)})
             
             if subjects_count > 0 or sections_count > 0:
                 return False, f"No se puede eliminar el nivel porque tiene {subjects_count} materias y {sections_count} secciones asociadas"

@@ -4,16 +4,149 @@ from datetime import datetime
 
 from src.shared.database import get_db
 from src.shared.constants import ROLES, INVITATION_STATUS
-from src.shared.standardization import BaseService, ErrorCodes
+from src.shared.standardization import VerificationBaseService, ErrorCodes
 from src.shared.exceptions import AppException
 from .models import InstituteInvitation, ClassInvitation, MembershipRequest
 from src.members.services import MembershipService
 
-class InvitationService(BaseService):
+class InvitationService(VerificationBaseService):
     def __init__(self):
         # No inicializamos con una colección específica porque usamos varias
-        self.db = get_db()
+        super().__init__(collection_name="institute_invitations") 
         self.membership_service = MembershipService()
+
+    # ========== MÉTODOS DE VERIFICACIÓN ESTANDARIZADOS ==========
+    def check_institute_exists(self, institute_id: str) -> bool:
+        """
+        Verifica si un instituto existe.
+        
+        Args:
+            institute_id: ID del instituto a verificar
+            
+        Returns:
+            bool: True si el instituto existe, False en caso contrario
+        """
+        try:
+            institute = self.db.institutes.find_one({"_id": ObjectId(institute_id)})
+            return institute is not None
+        except Exception:
+            return False
+
+    def check_class_exists(self, class_id: str) -> bool:
+        """
+        Verifica si una clase existe.
+        
+        Args:
+            class_id: ID de la clase a verificar
+            
+        Returns:
+            bool: True si la clase existe, False en caso contrario
+        """
+        try:
+            class_obj = self.db.classes.find_one({"_id": ObjectId(class_id)})
+            return class_obj is not None
+        except Exception:
+            return False
+
+    def check_invitation_exists(self, invitation_id: str, collection_name: str = "institute_invitations") -> bool:
+        """
+        Verifica si una invitación existe.
+        
+        Args:
+            invitation_id: ID de la invitación a verificar
+            collection_name: Nombre de la colección donde buscar
+            
+        Returns:
+            bool: True si la invitación existe, False en caso contrario
+        """
+        try:
+            invitation = self.db[collection_name].find_one({"_id": ObjectId(invitation_id)})
+            return invitation is not None
+        except Exception:
+            return False
+
+    def check_pending_institute_invitation(self, institute_id: str, invitee_email: str) -> bool:
+        """
+        Verifica si existe una invitación pendiente para un correo y un instituto.
+        
+        Args:
+            institute_id: ID del instituto
+            invitee_email: Correo electrónico del invitado
+            
+        Returns:
+            bool: True si existe una invitación pendiente, False en caso contrario
+        """
+        try:
+            existing_invitation = self.db.institute_invitations.find_one({
+                "institute_id": ObjectId(institute_id),
+                "invitee_email": invitee_email,
+                "status": "pending"
+            })
+            return existing_invitation is not None
+        except Exception:
+            return False
+
+    def check_pending_class_invitation(self, class_id: str, invitee_email: str) -> bool:
+        """
+        Verifica si existe una invitación pendiente para un correo y una clase.
+        
+        Args:
+            class_id: ID de la clase
+            invitee_email: Correo electrónico del invitado
+            
+        Returns:
+            bool: True si existe una invitación pendiente, False en caso contrario
+        """
+        try:
+            existing_invitation = self.db.class_invitations.find_one({
+                "class_id": ObjectId(class_id),
+                "invitee_email": invitee_email,
+                "status": "pending"
+            })
+            return existing_invitation is not None
+        except Exception:
+            return False
+
+    def check_is_institute_member(self, institute_id: str, user_id: str) -> bool:
+        """
+        Verifica si un usuario es miembro de un instituto.
+        
+        Args:
+            institute_id: ID del instituto
+            user_id: ID del usuario
+            
+        Returns:
+            bool: True si el usuario es miembro, False en caso contrario
+        """
+        try:
+            existing_member = self.db.institute_members.find_one({
+                "institute_id": ObjectId(institute_id),
+                "user_id": ObjectId(user_id)
+            })
+            return existing_member is not None
+        except Exception:
+            return False
+
+    def check_pending_membership_request(self, institute_id: str, user_id: str) -> bool:
+        """
+        Verifica si existe una solicitud de membresía pendiente.
+        
+        Args:
+            institute_id: ID del instituto
+            user_id: ID del usuario
+            
+        Returns:
+            bool: True si existe una solicitud pendiente, False en caso contrario
+        """
+        try:
+            existing_request = self.db.membership_requests.find_one({
+                "institute_id": ObjectId(institute_id),
+                "user_id": ObjectId(user_id),
+                "status": "pending"
+            })
+            return existing_request is not None
+        except Exception:
+            return False
 
     # ========== INSTITUTO INVITATIONS ==========
     def create_institute_invitation(self, invitation_data: dict) -> Tuple[bool, str]:
@@ -22,19 +155,11 @@ class InvitationService(BaseService):
         """
         try:
             # Verificar que el instituto existe
-            institute = self.db.institutes.find_one(
-                {"_id": ObjectId(invitation_data['institute_id'])}
-            )
-            if not institute:
+            if not self.check_institute_exists(invitation_data['institute_id']):
                 return False, "Instituto no encontrado"
 
             # Verificar que no exista una invitación pendiente con el mismo email
-            existing_invitation = self.db.institute_invitations.find_one({
-                "institute_id": ObjectId(invitation_data['institute_id']),
-                "invitee_email": invitation_data['invitee_email'],
-                "status": "pending"
-            })
-            if existing_invitation:
+            if self.check_pending_institute_invitation(invitation_data['institute_id'], invitation_data['invitee_email']):
                 return False, "Ya existe una invitación pendiente para este correo electrónico"
 
             invitation = InstituteInvitation(**invitation_data)
@@ -72,9 +197,10 @@ class InvitationService(BaseService):
         """
         try:
             # Verificar que la invitación existe
-            invitation = self.db.institute_invitations.find_one({"_id": ObjectId(invitation_id)})
-            if not invitation:
+            if not self.check_invitation_exists(invitation_id, "institute_invitations"):
                 return False, "Invitación no encontrada"
+                
+            invitation = self.db.institute_invitations.find_one({"_id": ObjectId(invitation_id)})
                 
             # Verificar estado
             if invitation["status"] != "pending":
@@ -131,22 +257,11 @@ class InvitationService(BaseService):
         """
         try:
             # Verificar que la clase existe
-            class_obj = self.db.classes.find_one(
-                {"_id": ObjectId(invitation_data['class_id'])}
-            )
-            if not class_obj:
+            if not self.check_class_exists(invitation_data['class_id']):
                 return False, "Clase no encontrada"
 
-            # Verificar que el invitador tiene permisos en la clase
-            # Esta verificación podría hacerse con mejor granularidad dependiendo del rol
-                
             # Verificar que no exista una invitación pendiente con el mismo email
-            existing_invitation = self.db.class_invitations.find_one({
-                "class_id": ObjectId(invitation_data['class_id']),
-                "invitee_email": invitation_data['invitee_email'],
-                "status": "pending"
-            })
-            if existing_invitation:
+            if self.check_pending_class_invitation(invitation_data['class_id'], invitation_data['invitee_email']):
                 return False, "Ya existe una invitación pendiente para este correo electrónico"
 
             invitation = ClassInvitation(**invitation_data)
@@ -184,9 +299,10 @@ class InvitationService(BaseService):
         """
         try:
             # Verificar que la invitación existe
-            invitation = self.db.class_invitations.find_one({"_id": ObjectId(invitation_id)})
-            if not invitation:
+            if not self.check_invitation_exists(invitation_id, "class_invitations"):
                 return False, "Invitación no encontrada"
+                
+            invitation = self.db.class_invitations.find_one({"_id": ObjectId(invitation_id)})
                 
             # Verificar estado
             if invitation["status"] != "pending":
@@ -203,8 +319,7 @@ class InvitationService(BaseService):
             # Si fue aceptada, añadir al usuario como miembro de la clase
             if new_status == "accepted":
                 # Verificar que la clase sigue existiendo
-                class_obj = self.db.classes.find_one({"_id": invitation["class_id"]})
-                if not class_obj:
+                if not self.check_class_exists(str(invitation["class_id"])):
                     return False, "La clase ya no existe"
                     
                 membership_data = {
@@ -231,27 +346,15 @@ class InvitationService(BaseService):
         """
         try:
             # Verificar que el instituto existe
-            institute = self.db.institutes.find_one(
-                {"_id": ObjectId(request_data['institute_id'])}
-            )
-            if not institute:
+            if not self.check_institute_exists(request_data['institute_id']):
                 return False, "Instituto no encontrado"
 
             # Verificar que el usuario no sea ya un miembro
-            existing_member = self.db.institute_members.find_one({
-                "institute_id": ObjectId(request_data['institute_id']),
-                "user_id": ObjectId(request_data['user_id'])
-            })
-            if existing_member:
+            if self.check_is_institute_member(request_data['institute_id'], request_data['user_id']):
                 return False, "El usuario ya es miembro de este instituto"
                 
             # Verificar que no exista una solicitud pendiente
-            existing_request = self.db.membership_requests.find_one({
-                "institute_id": ObjectId(request_data['institute_id']),
-                "user_id": ObjectId(request_data['user_id']),
-                "status": "pending"
-            })
-            if existing_request:
+            if self.check_pending_membership_request(request_data['institute_id'], request_data['user_id']):
                 return False, "Ya existe una solicitud pendiente para este usuario"
 
             request_obj = MembershipRequest(**request_data)

@@ -5,7 +5,7 @@ import json
 
 from src.shared.database import get_db
 from src.shared.constants import STATUS
-from src.shared.standardization import BaseService, ErrorCodes
+from src.shared.standardization import VerificationBaseService, ErrorCodes
 from src.shared.exceptions import AppException
 from src.shared.validators import validate_object_id
 from .models import (
@@ -17,10 +17,9 @@ from .models import (
     EvaluationResult
 )
 
-class StudyPlanService(BaseService):
+class StudyPlanService(VerificationBaseService):
     def __init__(self):
         super().__init__(collection_name="study_plans_per_subject")
-        self.db = get_db()
 
     def create_study_plan(self, plan_data: dict) -> str:
         """
@@ -37,7 +36,7 @@ class StudyPlanService(BaseService):
         """
         try:
             # Primero obtener el ID del usuario usando el email
-            user = self.db.users.find_one({"email": plan_data['author_id']})
+            user = get_db().users.find_one({"email": plan_data['author_id']})
             if not user:
                 raise AppException("Usuario no encontrado", AppException.NOT_FOUND)
             
@@ -102,7 +101,7 @@ class StudyPlanService(BaseService):
         validate_object_id(plan_id)
         
         # Verificar si hay asignaciones activas
-        assignments = self.db.study_plan_assignments.find_one({
+        assignments = get_db().study_plan_assignments.find_one({
             "study_plan_id": ObjectId(plan_id),
             "is_active": True
         })
@@ -112,7 +111,7 @@ class StudyPlanService(BaseService):
         
         try:
             # Obtener todos los módulos del plan
-            modules = list(self.db.modules.find({"study_plan_id": ObjectId(plan_id)}))
+            modules = list(get_db().modules.find({"study_plan_id": ObjectId(plan_id)}))
             module_ids = [module["_id"] for module in modules]
             
             # Inicializar contadores para el resumen
@@ -122,15 +121,15 @@ class StudyPlanService(BaseService):
             
             # 1. Eliminar todos los temas asociados a los módulos
             if module_ids:
-                topics_result = self.db.topics.delete_many({"module_id": {"$in": module_ids}})
+                topics_result = get_db().topics.delete_many({"module_id": {"$in": module_ids}})
                 total_topics_deleted = topics_result.deleted_count
                 
                 # 2. Eliminar todas las evaluaciones asociadas a los módulos
-                evaluations_result = self.db.evaluations.delete_many({"module_id": {"$in": module_ids}})
+                evaluations_result = get_db().evaluations.delete_many({"module_id": {"$in": module_ids}})
                 total_evaluations_deleted = evaluations_result.deleted_count
                 
                 # 3. Eliminar los módulos
-                modules_result = self.db.modules.delete_many({"_id": {"$in": module_ids}})
+                modules_result = get_db().modules.delete_many({"_id": {"$in": module_ids}})
                 total_modules_deleted = modules_result.deleted_count
             
             # 4. Eliminar el plan en sí
@@ -185,7 +184,7 @@ class StudyPlanService(BaseService):
             plan["_id"] = str(plan["_id"])
             
             # Obtener módulos asociados
-            modules = list(self.db.modules.find({"study_plan_id": ObjectId(plan_id)}))
+            modules = list(get_db().modules.find({"study_plan_id": ObjectId(plan_id)}))
             
             # Para cada módulo, obtener sus temas y evaluaciones
             for module in modules:
@@ -194,7 +193,7 @@ class StudyPlanService(BaseService):
                 module["study_plan_id"] = str(module["study_plan_id"])
                 
                 # Obtener topics y convertir sus ObjectId
-                topics = list(self.db.topics.find({"module_id": ObjectId(module["_id"])}))
+                topics = list(get_db().topics.find({"module_id": ObjectId(module["_id"])}))
                 for topic in topics:
                     topic["_id"] = str(topic["_id"])
                     topic["module_id"] = str(topic["module_id"])
@@ -202,7 +201,7 @@ class StudyPlanService(BaseService):
                 module["topics"] = topics
                 
                 # Obtener evaluaciones y convertir sus ObjectId
-                evaluations = list(self.db.evaluations.find({"module_id": ObjectId(module["_id"])}))
+                evaluations = list(get_db().evaluations.find({"module_id": ObjectId(module["_id"])}))
                 for evaluation in evaluations:
                     evaluation["_id"] = str(evaluation["_id"])
                     evaluation["module_id"] = str(evaluation["module_id"])
@@ -215,29 +214,72 @@ class StudyPlanService(BaseService):
             print(f"Error al obtener plan de estudio: {str(e)}")
             return None
 
-class StudyPlanAssignmentService(BaseService):
+class StudyPlanAssignmentService(VerificationBaseService):
     def __init__(self):
         super().__init__(collection_name="study_plan_assignments")
-        self.db = get_db()
+
+    def check_class_exists(self, class_id: str) -> bool:
+        """
+        Verifica si una clase existe
+        
+        Args:
+            class_id: ID de la clase
+            
+        Returns:
+            bool: True si la clase existe, False en caso contrario
+        """
+        try:
+            class_doc = get_db().classes.find_one({"_id": ObjectId(class_id)})
+            return class_doc is not None
+        except Exception:
+            return False
+            
+    def check_study_plan_exists(self, plan_id: str) -> bool:
+        """
+        Verifica si un plan de estudios existe
+        
+        Args:
+            plan_id: ID del plan de estudios
+            
+        Returns:
+            bool: True si el plan existe, False en caso contrario
+        """
+        try:
+            plan = get_db().study_plans_per_subject.find_one({"_id": ObjectId(plan_id)})
+            return plan is not None
+        except Exception:
+            return False
+            
+    def check_subperiod_exists(self, subperiod_id: str) -> bool:
+        """
+        Verifica si un subperiodo existe
+        
+        Args:
+            subperiod_id: ID del subperiodo
+            
+        Returns:
+            bool: True si el subperiodo existe, False en caso contrario
+        """
+        try:
+            subperiod = get_db().subperiods.find_one({"_id": ObjectId(subperiod_id)})
+            return subperiod is not None
+        except Exception:
+            return False
     
     def assign_plan_to_class(self, assignment_data: dict) -> str:
         """
-        Asigna un plan de estudios a una clase para un subperiodo.
+        Asigna un plan de estudios a una clase durante un subperiodo específico
         
         Args:
-            assignment_data: Datos de la asignación (study_plan_id, class_id, subperiod_id, assigned_by)
+            assignment_data: Datos de la asignación
             
         Returns:
-            ID de la asignación creada
+            str: ID de la asignación creada
             
         Raises:
-            AppException: Si ocurre un error durante la asignación
+            AppException: Si hay errores en los datos o restricciones de negocio
         """
         try:
-            # Validar IDs
-            for id_field in ['study_plan_id', 'class_id', 'subperiod_id', 'assigned_by']:
-                validate_object_id(assignment_data[id_field])
-                
             # Convertir IDs a ObjectId
             study_plan_id = ObjectId(assignment_data['study_plan_id'])
             class_id = ObjectId(assignment_data['class_id'])
@@ -245,18 +287,15 @@ class StudyPlanAssignmentService(BaseService):
             assigned_by = ObjectId(assignment_data['assigned_by'])
                 
             # Verificar que la clase existe
-            class_doc = self.db.classes.find_one({"_id": class_id})
-            if not class_doc:
+            if not self.check_class_exists(assignment_data['class_id']):
                 raise AppException("La clase no existe", AppException.NOT_FOUND)
                 
             # Verificar que el plan existe
-            plan = self.db.study_plans_per_subject.find_one({"_id": study_plan_id})
-            if not plan:
+            if not self.check_study_plan_exists(assignment_data['study_plan_id']):
                 raise AppException("El plan de estudios no existe", AppException.NOT_FOUND)
                 
             # Verificar que el subperiodo existe
-            subperiod = self.db.subperiods.find_one({"_id": subperiod_id})
-            if not subperiod:
+            if not self.check_subperiod_exists(assignment_data['subperiod_id']):
                 raise AppException("El subperiodo no existe", AppException.NOT_FOUND)
                 
             # Verificar si ya existe una asignación activa para esta clase y subperiodo
@@ -373,16 +412,15 @@ class StudyPlanAssignmentService(BaseService):
         except Exception as e:
             raise AppException(f"Error al remover asignación: {str(e)}", AppException.BAD_REQUEST)
 
-class ModuleService(BaseService):
+class ModuleService(VerificationBaseService):
     def __init__(self):
         super().__init__(collection_name="study_plan_modules")
-        self.db = get_db()
 
     def create_module(self, module_data: dict) -> Tuple[bool, str]:
         try:
             # Validar que existe el plan de estudio
             study_plan_id = module_data.get('study_plan_id')
-            study_plan = self.db.study_plans_per_subject.find_one({"_id": ObjectId(study_plan_id)})
+            study_plan = get_db().study_plans_per_subject.find_one({"_id": ObjectId(study_plan_id)})
             if not study_plan:
                 return False, "Plan de estudio no encontrado"
             
@@ -460,16 +498,15 @@ class ModuleService(BaseService):
         except Exception as e:
             return None
 
-class TopicService(BaseService):
+class TopicService(VerificationBaseService):
     def __init__(self):
         super().__init__(collection_name="study_plan_topics")
-        self.db = get_db()
-    
+
     def create_topic(self, topic_data: dict) -> Tuple[bool, str]:
         try:
             # Validar que existe el módulo
             module_id = topic_data.get('module_id')
-            module = self.db.study_plan_modules.find_one({"_id": ObjectId(module_id)})
+            module = get_db().study_plan_modules.find_one({"_id": ObjectId(module_id)})
             if not module:
                 return False, "Módulo no encontrado"
             
@@ -601,16 +638,15 @@ class TopicService(BaseService):
         except Exception as e:
             return False, str(e)
 
-class EvaluationService(BaseService):
+class EvaluationService(VerificationBaseService):
     def __init__(self):
         super().__init__(collection_name="study_plan_evaluations")
-        self.db = get_db()
 
     def create_evaluation(self, evaluation_data: dict) -> Tuple[bool, str]:
         try:
             # Validar que existe el módulo
             module_id = evaluation_data.get('module_id')
-            module = self.db.study_plan_modules.find_one({"_id": ObjectId(module_id)})
+            module = get_db().study_plan_modules.find_one({"_id": ObjectId(module_id)})
             if not module:
                 return False, "Módulo no encontrado"
             
@@ -656,7 +692,7 @@ class EvaluationService(BaseService):
                 return False, "Evaluación no encontrada"
             
             # Eliminar resultados de la evaluación
-            self.db.evaluation_results.delete_many({"evaluation_id": ObjectId(evaluation_id)})
+            get_db().evaluation_results.delete_many({"evaluation_id": ObjectId(evaluation_id)})
             
             # Eliminar la evaluación
             result = self.collection.delete_one({"_id": ObjectId(evaluation_id)})
@@ -691,12 +727,12 @@ class EvaluationService(BaseService):
             
             # Validar que el estudiante existe
             student_id = result_data.get('student_id')
-            student = self.db.users.find_one({"_id": ObjectId(student_id)})
+            student = get_db().users.find_one({"_id": ObjectId(student_id)})
             if not student:
                 return False, "Estudiante no encontrado"
             
             # Verificar si ya existe un resultado para esta evaluación y estudiante
-            existing_result = self.db.evaluation_results.find_one({
+            existing_result = get_db().evaluation_results.find_one({
                 "evaluation_id": ObjectId(evaluation_id),
                 "student_id": ObjectId(student_id)
             })
@@ -709,14 +745,14 @@ class EvaluationService(BaseService):
             
             if existing_result:
                 # Actualizar resultado existente
-                result = self.db.evaluation_results.update_one(
+                result = get_db().evaluation_results.update_one(
                     {"_id": existing_result["_id"]},
                     {"$set": evaluation_result.to_dict()}
                 )
                 return True, str(existing_result["_id"])
             else:
                 # Crear nuevo resultado
-                result = self.db.evaluation_results.insert_one(evaluation_result.to_dict())
+                result = get_db().evaluation_results.insert_one(evaluation_result.to_dict())
                 return True, str(result.inserted_id)
         except Exception as e:
             return False, str(e)
@@ -727,7 +763,7 @@ class EvaluationService(BaseService):
             update_data['recorded_at'] = datetime.now()
             
             # Actualizar el resultado
-            result = self.db.evaluation_results.update_one(
+            result = get_db().evaluation_results.update_one(
                 {"_id": ObjectId(result_id)},
                 {"$set": update_data}
             )
@@ -741,7 +777,7 @@ class EvaluationService(BaseService):
     def delete_result(self, result_id: str) -> Tuple[bool, str]:
         try:
             # Eliminar el resultado
-            result = self.db.evaluation_results.delete_one({"_id": ObjectId(result_id)})
+            result = get_db().evaluation_results.delete_one({"_id": ObjectId(result_id)})
             
             if result.deleted_count > 0:
                 return True, "Resultado eliminado exitosamente"
@@ -752,7 +788,7 @@ class EvaluationService(BaseService):
     def get_student_results(self, student_id: str) -> List[Dict]:
         try:
             # Obtener resultados del estudiante
-            results = list(self.db.evaluation_results.find({"student_id": ObjectId(student_id)}))
+            results = list(get_db().evaluation_results.find({"student_id": ObjectId(student_id)}))
             
             # Enriquecer con datos de evaluaciones
             enriched_results = []
@@ -773,7 +809,7 @@ class EvaluationService(BaseService):
                     }
                     
                     # Obtener detalles del módulo
-                    module = self.db.study_plan_modules.find_one({"_id": evaluation.get("module_id")})
+                    module = get_db().study_plan_modules.find_one({"_id": evaluation.get("module_id")})
                     if module:
                         result['module'] = {
                             "name": module.get("name", ""),

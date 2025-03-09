@@ -3,12 +3,12 @@ from datetime import datetime
 from bson import ObjectId
 
 from src.shared.database import get_db
-from src.shared.standardization import BaseService, ErrorCodes
+from src.shared.standardization import VerificationBaseService, ErrorCodes
 from src.shared.exceptions import AppException
 from src.profiles.models import TeacherProfile, StudentProfile, AdminProfile
 
 
-class ProfileService(BaseService):
+class ProfileService(VerificationBaseService):
     """
     Servicio para gestionar los perfiles específicos de los diferentes roles de usuario.
     Incluye funcionalidad para crear, actualizar y obtener perfiles de profesores, estudiantes y administradores.
@@ -17,7 +17,6 @@ class ProfileService(BaseService):
         # Inicializamos con una colección para que BaseService funcione correctamente
         # Pero mantenemos flexibilidad para trabajar con múltiples colecciones
         super().__init__(collection_name="profiles")
-        self.db = get_db()
     
     def _get_user_id(self, user_id_or_email: str) -> Optional[ObjectId]:
         """
@@ -71,7 +70,7 @@ class ProfileService(BaseService):
     
     def update_teacher_profile(self, user_id_or_email: str, profile_data: Dict) -> None:
         """
-        Actualiza el perfil de profesor para un usuario específico.
+        Actualiza o crea un perfil de profesor
         
         Args:
             user_id_or_email: ID o email del usuario profesor
@@ -80,10 +79,11 @@ class ProfileService(BaseService):
         Raises:
             AppException: Si el usuario no existe o si ocurre un error durante la actualización
         """
-        user_id = self._get_user_id(user_id_or_email)
-        if not user_id:
+        if not self.check_user_exists(user_id_or_email):
             raise AppException(f"Usuario no encontrado: {user_id_or_email}", AppException.NOT_FOUND)
-            
+        
+        user_id = self._get_user_id(user_id_or_email)
+        
         # Verificar si ya existe un perfil
         profile = self.db.teacher_profiles.find_one({"user_id": user_id})
         
@@ -253,4 +253,20 @@ class ProfileService(BaseService):
         except AppException:
             raise
         except Exception as e:
-            raise AppException(f"Error al actualizar perfil de administrador: {str(e)}", AppException.BAD_REQUEST) 
+            raise AppException(f"Error al actualizar perfil de administrador: {str(e)}", AppException.BAD_REQUEST)
+
+    def check_user_exists(self, user_id_or_email: str) -> bool:
+        """
+        Verifica si un usuario existe basado en su ID o email
+        
+        Args:
+            user_id_or_email: ID o email del usuario
+            
+        Returns:
+            bool: True si el usuario existe, False en caso contrario
+        """
+        try:
+            user_id = self._get_user_id(user_id_or_email)
+            return user_id is not None
+        except Exception:
+            return False 

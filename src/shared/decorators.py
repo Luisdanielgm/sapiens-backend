@@ -6,6 +6,7 @@ from bson.objectid import ObjectId
 from src.shared.database import get_db
 from src.shared.constants import ROLES
 from src.shared.exceptions import AppException
+import logging
 
 def handle_errors(f):
     """Decorador para manejar excepciones en las rutas"""
@@ -36,13 +37,35 @@ def auth_required(f):
     """Decorador para requerir autenticación mediante JWT"""
     @wraps(f)
     def decorated_function(*args, **kwargs):
+        logger = logging.getLogger(__name__)
+        
         try:
             # Usar flask_jwt_extended para verificar el token
             verify_jwt_in_request()
             # Guardar el ID del usuario para usarlo en la función
-            request.user_id = get_jwt_identity()
+            user_id = get_jwt_identity()
+            logger.info(f"Auth_required: Token JWT válido para usuario con ID: {user_id}")
+            
+            # Verificar que el usuario existe en la base de datos
+            db = get_db()
+            user = db.users.find_one({"_id": ObjectId(user_id)})
+            
+            if not user:
+                logger.warning(f"Auth_required: Usuario con ID {user_id} no encontrado en la base de datos")
+                return jsonify({
+                    "success": False,
+                    "error": "ERROR_AUTENTICACION",
+                    "message": "Usuario no encontrado"
+                }), 401
+                
+            # Guardar información relevante del usuario en el request
+            request.user_id = user_id
+            request.user_role = user.get("role")
+            logger.info(f"Auth_required: Usuario autenticado con rol: {request.user_role}")
+            
             return f(*args, **kwargs)
         except Exception as e:
+            logger.error(f"Auth_required: Error de autenticación: {str(e)}")
             return jsonify({
                 "success": False,
                 "error": "ERROR_AUTENTICACION",
@@ -71,6 +94,11 @@ def role_required(required_roles):
         else:
             normalized_roles.append(role)
     
+    # Agregar versiones en mayúsculas de los roles normalizados
+    uppercase_roles = [role.upper() for role in normalized_roles]
+    # Incluir ambas versiones para la comparación
+    all_roles = normalized_roles + uppercase_roles
+    
     def decorator(f):
         @wraps(f)
         def decorated_function(*args, **kwargs):
@@ -85,14 +113,23 @@ def role_required(required_roles):
             user_id = request.user_id
             db = get_db()
             
+            # Primero verificar si el usuario tiene el rol directamente en su documento
+            user = db.users.find_one({"_id": ObjectId(user_id)})
+            if user and "role" in user:
+                # Comprobar tanto en minúsculas como en mayúsculas
+                if user["role"] in all_roles:
+                    return f(*args, **kwargs)
+            
             # Roles que pueden ser verificados en institutos
             institute_roles = ['admin', 'institute_admin', 'teacher', 'student']
+            institute_roles_upper = [role.upper() for role in institute_roles]
+            all_institute_roles = institute_roles + institute_roles_upper
             
             # Verificar si la ruta contiene un institute_id
             institute_id = kwargs.get('institute_id')
             if institute_id:
-                for role in normalized_roles:
-                    if role in institute_roles:
+                for role in all_roles:
+                    if role in all_institute_roles:
                         # Verificar si el usuario tiene el rol en el instituto
                         member = db.institute_members.find_one({
                             "institute_id": ObjectId(institute_id),
@@ -106,8 +143,8 @@ def role_required(required_roles):
             # Verificar si la ruta contiene un class_id
             class_id = kwargs.get('class_id')
             if class_id:
-                for role in normalized_roles:
-                    if role in ['teacher', 'student']:
+                for role in all_roles:
+                    if role.lower() in ['teacher', 'student']:
                         # Verificar si el usuario es miembro de la clase con el rol requerido
                         member = db.class_members.find_one({
                             "class_id": ObjectId(class_id),

@@ -1,6 +1,7 @@
 from flask import request, jsonify
 from bson.objectid import ObjectId
 from datetime import datetime
+import logging
 
 from .services import (
     StudentAnalyticsService, 
@@ -14,6 +15,7 @@ from src.shared.standardization import APIBlueprint, APIRoute, ErrorCodes
 from src.shared.decorators import auth_required, role_required, handle_errors, validate_json
 from src.shared.constants import ROLES
 from src.shared.utils import ensure_json_serializable
+from src.shared.database import get_db
 
 analytics_bp = APIBlueprint('analytics', __name__)
 
@@ -195,19 +197,33 @@ def get_institute_dashboard(institute_id):
 def get_teacher_dashboard():
     """Obtiene el dashboard para un profesor con métricas relevantes"""
     try:
-        # En una implementación real, este id se obtendría del token JWT
-        teacher_id = request.args.get('teacher_id')
-        if not teacher_id:
-            return APIRoute.error(
-                ErrorCodes.VALIDATION_ERROR,
-                "Se requiere el ID del profesor",
-                status_code=400
-            )
+        logger = logging.getLogger(__name__)
+        
+        # Usar el ID del usuario autenticado por defecto
+        teacher_id = request.user_id
+        logger.info(f"Usuario autenticado con ID: {teacher_id}")
+        
+        # Opcionalmente permitir sobrescribir para propósitos administrativos
+        # (esto solo funcionaría si el usuario tiene permisos de admin pero aún está protegido por roles)
+        override_id = request.args.get('teacher_id')
+        if override_id:
+            logger.info(f"Solicitando override con ID: {override_id}")
+            # Verificar si el usuario autenticado es administrador
+            db = get_db()
+            user = db.users.find_one({"_id": ObjectId(teacher_id)})
+            logger.info(f"Información del usuario: {user}")
+            is_admin = user and user.get("role") in [ROLES["ADMIN"], ROLES["INSTITUTE_ADMIN"]]
+            logger.info(f"¿Es admin? {is_admin}")
             
+            if is_admin:
+                teacher_id = override_id
+                logger.info(f"Override aceptado, usando ID: {teacher_id}")
+        
         # Obtener clases del profesor
         classes = list(ClassAnalyticsService().db.classes.find({
             "teacher_id": ObjectId(teacher_id)
         }))
+        logger.info(f"Encontradas {len(classes)} clases para el profesor")
         
         if not classes:
             return APIRoute.success(
@@ -229,9 +245,9 @@ def get_teacher_dashboard():
         # Métricas generales
         overall_metrics = {
             "total_classes": len(classes),
-            "total_students": sum(cls.get("student_count", 0) for cls in class_metrics),
-            "average_attendance": sum(m.get("attendance_rate", 0) for m in class_metrics) / len(class_metrics) if class_metrics else 0,
-            "average_evaluation_score": sum(m.get("avg_score", 0) for m in class_metrics) / len(class_metrics) if class_metrics else 0
+            "total_students": len(class_metrics),
+            "average_attendance": sum(m.get("metrics", {}).get("attendance_rate", 0) for m in class_metrics) / len(class_metrics) if class_metrics else 0,
+            "average_evaluation_score": sum(m.get("metrics", {}).get("avg_score", 0) for m in class_metrics) / len(class_metrics) if class_metrics else 0
         }
             
         dashboard = {
@@ -242,6 +258,8 @@ def get_teacher_dashboard():
             
         return APIRoute.success(data={"dashboard": dashboard})
     except Exception as e:
+        import traceback
+        logging.getLogger(__name__).error(f"Error en get_teacher_dashboard: {str(e)}\n{traceback.format_exc()}")
         return APIRoute.error(
             ErrorCodes.SERVER_ERROR,
             str(e),

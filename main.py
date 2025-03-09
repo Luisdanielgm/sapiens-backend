@@ -1,4 +1,4 @@
-from flask import Flask, jsonify
+from flask import Flask, jsonify, request
 from flask_cors import CORS
 from flask_jwt_extended import JWTManager
 from src.shared.database import get_db
@@ -50,6 +50,69 @@ def create_app(config_object=active_config):
     
     # Inicializar JWT
     jwt = JWTManager(app)
+
+    # Sistema unificado de logging para endpoints
+    @app.after_request
+    def log_response(response):
+        # Verificar el nivel de logging configurado
+        api_logging = app.config.get('API_LOGGING', 'basic')
+        
+        if api_logging == 'none':
+            # No hacer logging
+            return response
+            
+        # Datos básicos para todos los niveles excepto 'none'
+        method = request.method
+        path = request.path
+        status = response.status_code
+        
+        # Logging básico para todos los endpoints
+        if api_logging == 'basic':
+            # Solo registrar información básica de la solicitud
+            logger.info(f"API: {method} {path} - Status: {status}")
+            return response
+            
+        # Logging detallado (api_logging == 'detailed')
+        # Obtener datos de la solicitud
+        request_data = None
+        if request.method in ['POST', 'PUT', 'PATCH'] and request.is_json:
+            try:
+                request_data = request.get_json()
+            except:
+                request_data = "Error al parsear JSON"
+        elif request.form:
+            request_data = dict(request.form)
+        elif request.args:
+            request_data = dict(request.args)
+            # Para solicitudes GET, los argumentos en la URL son relevantes
+            if request.method == 'GET':
+                logger.info(f"URL Query Params: {request_data}")
+                # No establecer request_data para evitar duplicación en el log
+                request_data = None
+            
+        # Obtener datos de la respuesta
+        response_data = None
+        if response.content_type == 'application/json':
+            try:
+                # Guardar los datos originales
+                response_data = response.get_json()
+            except:
+                response_data = response.get_data(as_text=True)
+        
+        # Endpoints específicos que queremos monitorear especialmente
+        special_endpoints = ['/api/users/check', '/api/users/login', '/api/users/register']
+        is_special = any(endpoint in path for endpoint in special_endpoints)
+        
+        # Logging detallado
+        logger.info(f"API REQUEST: {method} {path}")
+        if request_data and (is_special or api_logging == 'detailed'):
+            logger.info(f"Request Data: {request_data}")
+            
+        logger.info(f"API RESPONSE: {method} {path} - Status: {status}")
+        if response_data and (is_special or api_logging == 'detailed'):
+            logger.info(f"Response Data: {response_data}")
+            
+        return response
 
     # Verificar conexión a la base de datos
     try:

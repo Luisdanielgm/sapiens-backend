@@ -261,3 +261,156 @@ La seguridad de la API se mantiene gracias a:
 5. **Respuestas**:
    - Usar `APIRoute.success()` y `APIRoute.error()` para respuestas consistentes
    - Usar códigos de error estandarizados de `ErrorCodes` 
+
+## Métodos de Verificación Estandarizados
+
+La aplicación ahora implementa un patrón estándar para métodos de verificación en los servicios. Estos métodos:
+
+1. **Propósito**: Verifican la existencia de entidades en la base de datos antes de realizar operaciones
+2. **Nomenclatura**: Siguen el patrón `check_X_exists` donde X es la entidad a verificar
+3. **Retorno**: Devuelven un valor booleano (True/False)
+4. **Manejo de errores**: Incluyen manejo de excepciones
+
+### Características principales
+
+- **Prefijo estándar**: Todos comienzan con `check_`
+- **Manejo interno de excepciones**: Evita que las excepciones de base de datos se propaguen
+- **Documentación completa**: Incluyen docstrings explicativos
+- **Simplicidad**: Realizan una única verificación específica
+
+### Implementación típica
+
+```python
+def check_entity_exists(self, entity_id: str) -> bool:
+    """
+    Verifica si una entidad existe.
+    
+    Args:
+        entity_id: ID de la entidad a verificar
+        
+    Returns:
+        bool: True si la entidad existe, False en caso contrario
+    """
+    try:
+        entity = self.db.entities.find_one({"_id": ObjectId(entity_id)})
+        return entity is not None
+    except Exception:
+        return False
+```
+
+### Ejemplos de uso
+
+En la lógica de negocio, estos métodos se utilizan para validar condiciones previas:
+
+```python
+def create_something(self, data: dict) -> Tuple[bool, str]:
+    # Verificar entidades relacionadas
+    if not self.check_entity_exists(data['entity_id']):
+        return False, "Entidad no encontrada"
+        
+    # Continuar con la creación si la verificación pasa
+    # ...
+```
+
+### Beneficios
+
+1. **Código más limpio**: Los métodos principales se centran en su funcionalidad específica
+2. **Reducción de duplicación**: La lógica de verificación se centraliza
+3. **Manejo consistente de errores**: Todas las verificaciones siguen el mismo patrón
+4. **Mayor robustez**: Cada operación verifica primero las condiciones necesarias
+5. **Mantenibilidad mejorada**: Si cambia la lógica de verificación, solo hay que modificarla en un lugar
+
+### Implementación en nuevos servicios
+
+Al crear un nuevo servicio, se recomienda:
+
+1. Extender la clase `VerificationBaseService` en lugar de `BaseService`
+2. Utilizar los métodos de verificación predefinidos
+3. Implementar métodos de verificación adicionales específicos del dominio si es necesario
+
+### Clase VerificationBaseService
+
+Para simplificar la implementación de estos métodos, se ha creado la clase `VerificationBaseService` en `standardization.py`, que extiende `BaseService` y proporciona métodos de verificación comunes:
+
+```python
+from src.shared.standardization import VerificationBaseService
+
+class MiServicio(VerificationBaseService):
+    def __init__(self):
+        super().__init__(collection_name="mi_coleccion")
+        
+    def create_algo(self, data: dict) -> Tuple[bool, str]:
+        # Usar métodos heredados de verificación
+        if not self.check_user_exists(data['user_id']):
+            return False, "Usuario no encontrado"
+            
+        if not self.check_class_exists(data['class_id']):
+            return False, "Clase no encontrada"
+            
+        # ... lógica de creación ...
+```
+
+Los métodos de verificación predefinidos incluyen:
+- `check_user_exists`
+- `check_institute_exists`
+- `check_class_exists`
+- `check_student_exists`
+- `check_teacher_exists`
+- `check_study_plan_exists`
+- `check_academic_period_exists`
+- `check_subject_exists`
+
+Para entidades específicas de dominio, se deben implementar métodos adicionales siguiendo el mismo patrón.
+
+### Ejemplo de migración de un servicio existente
+
+**Antes (usando BaseService):**
+```python
+from src.shared.standardization import BaseService
+
+class VirtualModuleService(BaseService):
+    def __init__(self):
+        super().__init__(collection_name="virtual_modules")
+        
+    def check_study_plan_exists(self, plan_id: str) -> bool:
+        try:
+            plan = self.db.study_plans_per_subject.find_one({"_id": ObjectId(plan_id)})
+            return plan is not None
+        except Exception:
+            return False
+            
+    def create_module(self, module_data: dict) -> Tuple[bool, str]:
+        try:
+            # Verificar que el plan de estudio existe
+            if not self.check_study_plan_exists(module_data['study_plan_id']):
+                return False, "Plan de estudios no encontrado"
+
+            module = VirtualModule(**module_data)
+            result = self.collection.insert_one(module.to_dict())
+            return True, str(result.inserted_id)
+        except Exception as e:
+            return False, str(e)
+```
+
+**Después (usando VerificationBaseService):**
+```python
+from src.shared.standardization import VerificationBaseService
+
+class VirtualModuleService(VerificationBaseService):
+    def __init__(self):
+        super().__init__(collection_name="virtual_modules")
+            
+    def create_module(self, module_data: dict) -> Tuple[bool, str]:
+        try:
+            # Verificar que el plan de estudio existe
+            if not self.check_study_plan_exists(module_data['study_plan_id']):
+                return False, "Plan de estudios no encontrado"
+
+            module = VirtualModule(**module_data)
+            result = self.collection.insert_one(module.to_dict())
+            return True, str(result.inserted_id)
+        except Exception as e:
+            return False, str(e)
+```
+
+La migración elimina la necesidad de implementar el método `check_study_plan_exists`, ya que ahora se hereda de `VerificationBaseService`. 

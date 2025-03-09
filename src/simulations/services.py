@@ -4,29 +4,56 @@ from datetime import datetime
 
 from src.shared.database import get_db
 from src.shared.constants import STATUS
-from src.shared.standardization import BaseService, ErrorCodes
+from src.shared.standardization import VerificationBaseService, ErrorCodes
 from src.shared.exceptions import AppException
 from .models import Simulation, VirtualSimulation, SimulationResult
 
-class SimulationService(BaseService):
+class SimulationService(VerificationBaseService):
     def __init__(self):
         super().__init__(collection_name="simulations")
-        self.db = get_db()
+
+    def check_topic_exists(self, topic_id: str) -> bool:
+        """
+        Verifica si un tema existe.
+        
+        Args:
+            topic_id: ID del tema a verificar
+            
+        Returns:
+            bool: True si el tema existe, False en caso contrario
+        """
+        try:
+            topic = get_db().topics.find_one({"_id": ObjectId(topic_id)})
+            return topic is not None
+        except Exception:
+            return False
+            
+    def check_simulation_exists(self, simulation_id: str) -> bool:
+        """
+        Verifica si una simulación existe.
+        
+        Args:
+            simulation_id: ID de la simulación a verificar
+            
+        Returns:
+            bool: True si la simulación existe, False en caso contrario
+        """
+        try:
+            simulation = self.collection.find_one({"_id": ObjectId(simulation_id)})
+            return simulation is not None
+        except Exception:
+            return False
 
     def create_simulation(self, simulation_data: dict) -> Tuple[bool, str]:
         try:
             # Verificar que el tema existe
-            topic = self.db.topics.find_one(
-                {"_id": ObjectId(simulation_data['topic_id'])}
-            )
-            if not topic:
+            if not self.check_topic_exists(simulation_data['topic_id']):
                 return False, "Tema no encontrado"
 
             simulation = Simulation(**simulation_data)
             result = self.collection.insert_one(simulation.to_dict())
             return True, str(result.inserted_id)
         except Exception as e:
-            print(f"Error al crear simulación: {str(e)}")
             return False, str(e)
 
     def get_simulation(self, simulation_id: str) -> Optional[Dict]:
@@ -63,7 +90,7 @@ class SimulationService(BaseService):
     def delete_simulation(self, simulation_id: str) -> Tuple[bool, str]:
         try:
             # Primero, obtener todas las simulaciones virtuales que dependen de esta simulación
-            virtual_simulations = list(self.db.virtual_simulations.find(
+            virtual_simulations = list(get_db().virtual_simulations.find(
                 {"simulation_id": ObjectId(simulation_id)}
             ))
             
@@ -72,13 +99,13 @@ class SimulationService(BaseService):
             deleted_results = 0
             
             if v_sim_ids:
-                results_deletion = self.db.simulation_results.delete_many(
+                results_deletion = get_db().simulation_results.delete_many(
                     {"virtual_simulation_id": {"$in": v_sim_ids}}
                 )
                 deleted_results = results_deletion.deleted_count
             
             # Eliminar todas las simulaciones virtuales
-            v_sims_deletion = self.db.virtual_simulations.delete_many(
+            v_sims_deletion = get_db().virtual_simulations.delete_many(
                 {"simulation_id": ObjectId(simulation_id)}
             )
             deleted_v_sims = v_sims_deletion.deleted_count
@@ -144,19 +171,19 @@ class SimulationService(BaseService):
             v_sims = []
             v_sim_ids = []
             if sim_ids:
-                v_sims = list(self.db.virtual_simulations.find({"simulation_id": {"$in": sim_ids}}))
+                v_sims = list(get_db().virtual_simulations.find({"simulation_id": {"$in": sim_ids}}))
                 v_sim_ids = [v_sim["_id"] for v_sim in v_sims]
             
             # Eliminar resultados de simulaciones virtuales
             results_deleted = 0
             if v_sim_ids:
-                results = self.db.simulation_results.delete_many({"virtual_simulation_id": {"$in": v_sim_ids}})
+                results = get_db().simulation_results.delete_many({"virtual_simulation_id": {"$in": v_sim_ids}})
                 results_deleted = results.deleted_count
                 
             # Eliminar simulaciones virtuales
             v_sims_deleted = 0
             if sim_ids:
-                v_sims_result = self.db.virtual_simulations.delete_many({"simulation_id": {"$in": sim_ids}})
+                v_sims_result = get_db().virtual_simulations.delete_many({"simulation_id": {"$in": sim_ids}})
                 v_sims_deleted = v_sims_result.deleted_count
                 
             # Eliminar simulaciones
@@ -170,29 +197,60 @@ class SimulationService(BaseService):
             print(f"Error al eliminar simulaciones del tema: {str(e)}")
             return 0, 0, 0
 
-class VirtualSimulationService(BaseService):
+class VirtualSimulationService(VerificationBaseService):
     def __init__(self):
         super().__init__(collection_name="virtual_simulations")
-        self.db = get_db()
+
+    def check_simulation_exists(self, simulation_id: str) -> bool:
+        """
+        Verifica si una simulación existe.
+        
+        Args:
+            simulation_id: ID de la simulación a verificar
+            
+        Returns:
+            bool: True si la simulación existe, False en caso contrario
+        """
+        try:
+            simulation = get_db().simulations.find_one({"_id": ObjectId(simulation_id)})
+            return simulation is not None
+        except Exception:
+            return False
+            
+    def check_virtual_simulation_exists(self, virtual_simulation_id: str) -> bool:
+        """
+        Verifica si una simulación virtual existe.
+        
+        Args:
+            virtual_simulation_id: ID de la simulación virtual a verificar
+            
+        Returns:
+            bool: True si la simulación virtual existe, False en caso contrario
+        """
+        try:
+            simulation = self.collection.find_one({"_id": ObjectId(virtual_simulation_id)})
+            return simulation is not None
+        except Exception:
+            return False
 
     def create_virtual_simulation(self, virtual_simulation_data: dict) -> Tuple[bool, str]:
         try:
             # Verificar que la simulación base existe
-            simulation = self.db.simulations.find_one(
+            simulation = get_db().simulations.find_one(
                 {"_id": ObjectId(virtual_simulation_data['simulation_id'])}
             )
             if not simulation:
                 return False, "Simulación base no encontrada"
 
             # Verificar que el tema virtual existe
-            virtual_topic = self.db.virtual_topics.find_one(
+            virtual_topic = get_db().virtual_topics.find_one(
                 {"_id": ObjectId(virtual_simulation_data['virtual_topic_id'])}
             )
             if not virtual_topic:
                 return False, "Tema virtual no encontrado"
 
             # Verificar que el estudiante existe
-            student = self.db.users.find_one(
+            student = get_db().users.find_one(
                 {"_id": ObjectId(virtual_simulation_data['student_id']), "role": "student"}
             )
             if not student:
@@ -246,7 +304,7 @@ class VirtualSimulationService(BaseService):
             
             # Agregar información de la simulación base
             for virtual_simulation in virtual_simulations:
-                simulation = self.db.simulations.find_one({"_id": virtual_simulation["simulation_id"]})
+                simulation = get_db().simulations.find_one({"_id": virtual_simulation["simulation_id"]})
                 if simulation:
                     virtual_simulation["simulation_details"] = {
                         "_id": str(simulation["_id"]),
@@ -297,15 +355,46 @@ class VirtualSimulationService(BaseService):
             print(f"Error al actualizar progreso de la simulación: {str(e)}")
             return False, str(e)
 
-class SimulationResultService(BaseService):
+class SimulationResultService(VerificationBaseService):
     def __init__(self):
         super().__init__(collection_name="simulation_results")
-        self.db = get_db()
         
+    def check_virtual_simulation_exists(self, virtual_simulation_id: str) -> bool:
+        """
+        Verifica si una simulación virtual existe.
+        
+        Args:
+            virtual_simulation_id: ID de la simulación virtual a verificar
+            
+        Returns:
+            bool: True si la simulación virtual existe, False en caso contrario
+        """
+        try:
+            simulation = get_db().virtual_simulations.find_one({"_id": ObjectId(virtual_simulation_id)})
+            return simulation is not None
+        except Exception:
+            return False
+            
+    def check_result_exists(self, result_id: str) -> bool:
+        """
+        Verifica si un resultado existe.
+        
+        Args:
+            result_id: ID del resultado a verificar
+            
+        Returns:
+            bool: True si el resultado existe, False en caso contrario
+        """
+        try:
+            result = self.collection.find_one({"_id": ObjectId(result_id)})
+            return result is not None
+        except Exception:
+            return False
+            
     def save_result(self, result_data: dict) -> Tuple[bool, str]:
         try:
             # Verificar que la simulación virtual existe
-            virtual_simulation = self.db.virtual_simulations.find_one(
+            virtual_simulation = get_db().virtual_simulations.find_one(
                 {"_id": ObjectId(result_data['virtual_simulation_id'])}
             )
             if not virtual_simulation:
@@ -315,7 +404,7 @@ class SimulationResultService(BaseService):
             result = self.collection.insert_one(simulation_result.to_dict())
             
             # Actualizar el estado de la simulación virtual
-            self.db.virtual_simulations.update_one(
+            get_db().virtual_simulations.update_one(
                 {"_id": ObjectId(result_data['virtual_simulation_id'])},
                 {"$set": {"completion_status": "completed"}}
             )
@@ -336,9 +425,9 @@ class SimulationResultService(BaseService):
                 result["student_id"] = str(result["student_id"])
                 
                 # Agregar detalles de la simulación
-                virtual_sim = self.db.virtual_simulations.find_one({"_id": ObjectId(result["virtual_simulation_id"])})
+                virtual_sim = get_db().virtual_simulations.find_one({"_id": ObjectId(result["virtual_simulation_id"])})
                 if virtual_sim:
-                    sim = self.db.simulations.find_one({"_id": virtual_sim["simulation_id"]})
+                    sim = get_db().simulations.find_one({"_id": virtual_sim["simulation_id"]})
                     if sim:
                         result["simulation_info"] = {
                             "title": sim["title"],

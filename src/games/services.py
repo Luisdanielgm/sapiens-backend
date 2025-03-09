@@ -4,29 +4,56 @@ from datetime import datetime
 
 from src.shared.database import get_db
 from src.shared.constants import STATUS
-from src.shared.standardization import BaseService, ErrorCodes
+from src.shared.standardization import VerificationBaseService, ErrorCodes
 from src.shared.exceptions import AppException
 from .models import Game, VirtualGame
 
-class GameService(BaseService):
+class GameService(VerificationBaseService):
     def __init__(self):
         super().__init__(collection_name="games")
-        self.db = get_db()
+
+    def check_topic_exists(self, topic_id: str) -> bool:
+        """
+        Verifica si un tema existe.
+        
+        Args:
+            topic_id: ID del tema a verificar
+            
+        Returns:
+            bool: True si el tema existe, False en caso contrario
+        """
+        try:
+            topic = get_db().topics.find_one({"_id": ObjectId(topic_id)})
+            return topic is not None
+        except Exception:
+            return False
+            
+    def check_game_exists(self, game_id: str) -> bool:
+        """
+        Verifica si un juego existe.
+        
+        Args:
+            game_id: ID del juego a verificar
+            
+        Returns:
+            bool: True si el juego existe, False en caso contrario
+        """
+        try:
+            game = self.collection.find_one({"_id": ObjectId(game_id)})
+            return game is not None
+        except Exception:
+            return False
 
     def create_game(self, game_data: dict) -> Tuple[bool, str]:
         try:
             # Verificar que el tema existe
-            topic = self.db.topics.find_one(
-                {"_id": ObjectId(game_data['topic_id'])}
-            )
-            if not topic:
+            if not self.check_topic_exists(game_data['topic_id']):
                 return False, "Tema no encontrado"
 
             game = Game(**game_data)
             result = self.collection.insert_one(game.to_dict())
             return True, str(result.inserted_id)
         except Exception as e:
-            print(f"Error al crear juego: {str(e)}")
             return False, str(e)
 
     def get_game(self, game_id: str) -> Optional[Dict]:
@@ -63,7 +90,7 @@ class GameService(BaseService):
     def delete_game(self, game_id: str) -> Tuple[bool, str]:
         try:
             # Eliminar primero los juegos virtuales relacionados
-            virtual_games = self.db.virtual_games.delete_many({"game_id": ObjectId(game_id)})
+            virtual_games = get_db().virtual_games.delete_many({"game_id": ObjectId(game_id)})
             
             # Ahora eliminar el juego
             result = self.collection.delete_one({"_id": ObjectId(game_id)})
@@ -100,7 +127,7 @@ class GameService(BaseService):
             virtual_count = 0
             if game_ids:
                 # Eliminar juegos virtuales relacionados con estos juegos
-                virtual_result = self.db.virtual_games.delete_many({"game_id": {"$in": game_ids}})
+                virtual_result = get_db().virtual_games.delete_many({"game_id": {"$in": game_ids}})
                 virtual_count = virtual_result.deleted_count
             
             # Eliminar los juegos
@@ -115,25 +142,56 @@ class GameService(BaseService):
             return 0, 0
 
 
-class VirtualGameService(BaseService):
+class VirtualGameService(VerificationBaseService):
     def __init__(self):
         super().__init__(collection_name="virtual_games")
-        self.db = get_db()
+
+    def check_game_exists(self, game_id: str) -> bool:
+        """
+        Verifica si un juego existe.
+        
+        Args:
+            game_id: ID del juego a verificar
+            
+        Returns:
+            bool: True si el juego existe, False en caso contrario
+        """
+        try:
+            game = get_db().games.find_one({"_id": ObjectId(game_id)})
+            return game is not None
+        except Exception:
+            return False
+            
+    def check_virtual_game_exists(self, virtual_game_id: str) -> bool:
+        """
+        Verifica si un juego virtual existe.
+        
+        Args:
+            virtual_game_id: ID del juego virtual a verificar
+            
+        Returns:
+            bool: True si el juego virtual existe, False en caso contrario
+        """
+        try:
+            game = self.collection.find_one({"_id": ObjectId(virtual_game_id)})
+            return game is not None
+        except Exception:
+            return False
 
     def create_virtual_game(self, virtual_game_data: dict) -> Tuple[bool, str]:
         try:
             # Verificar que el juego base existe
-            game = self.db.games.find_one({"_id": ObjectId(virtual_game_data['game_id'])})
+            game = get_db().games.find_one({"_id": ObjectId(virtual_game_data['game_id'])})
             if not game:
                 return False, "Juego base no encontrado"
                 
             # Verificar que el estudiante existe
-            student = self.db.users.find_one({"_id": ObjectId(virtual_game_data['student_id']), "role": "STUDENT"})
+            student = get_db().users.find_one({"_id": ObjectId(virtual_game_data['student_id']), "role": "STUDENT"})
             if not student:
                 return False, "Estudiante no encontrado"
                 
             # Verificar que el tema virtual existe
-            virtual_topic = self.db.virtual_topics.find_one({"_id": ObjectId(virtual_game_data['virtual_topic_id'])})
+            virtual_topic = get_db().virtual_topics.find_one({"_id": ObjectId(virtual_game_data['virtual_topic_id'])})
             if not virtual_topic:
                 return False, "Tema virtual no encontrado"
                 
@@ -205,7 +263,7 @@ class VirtualGameService(BaseService):
                 game["virtual_topic_id"] = str(game["virtual_topic_id"])
                 
                 # Obtener detalles del juego base
-                base_game = self.db.games.find_one({"_id": ObjectId(game["game_id"])})
+                base_game = get_db().games.find_one({"_id": ObjectId(game["game_id"])})
                 if base_game:
                     game["base_game"] = {
                         "title": base_game.get("title", ""),

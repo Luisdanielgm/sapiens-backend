@@ -18,6 +18,7 @@ from src.shared.utils import ensure_json_serializable
 from typing import List, Dict, Any, Union, Optional, Callable, Tuple
 from bson.objectid import ObjectId
 from src.shared.database import get_db
+import logging
 
 #-------------------------------------------------------
 # ESTANDARIZACIÓN DE RUTAS
@@ -342,3 +343,148 @@ class ErrorCodes:
     
     # Errores de servidor
     SERVER_ERROR = "ERROR_SERVIDOR"                 # 500 - Error interno del servidor 
+
+#-------------------------------------------------------
+# SERVICIOS DE VERIFICACIÓN ESTANDARIZADOS
+#-------------------------------------------------------
+
+class VerificationBaseService(BaseService):
+    """
+    Clase base para servicios que proporciona métodos de verificación estándar.
+    
+    Extiende BaseService con métodos de verificación reutilizables para
+    comprobar la existencia de entidades comunes en la base de datos.
+    """
+    
+    def check_user_exists(self, user_id: str) -> bool:
+        """
+        Verifica si un usuario existe.
+        
+        Args:
+            user_id: ID del usuario a verificar
+            
+        Returns:
+            bool: True si el usuario existe, False en caso contrario
+        """
+        try:
+            user_id_obj = ObjectId(user_id) if isinstance(user_id, str) else user_id
+            user = self.db.users.find_one({"_id": user_id_obj})
+            return user is not None
+        except Exception:
+            return False
+    
+    def check_institute_exists(self, institute_id: str) -> bool:
+        """
+        Verifica si un instituto existe.
+        
+        Args:
+            institute_id: ID del instituto a verificar
+            
+        Returns:
+            bool: True si el instituto existe, False en caso contrario
+        """
+        try:
+            institute_id_obj = ObjectId(institute_id) if isinstance(institute_id, str) else institute_id
+            institute = self.db.institutes.find_one({"_id": institute_id_obj})
+            return institute is not None
+        except Exception:
+            return False
+    
+    def check_class_exists(self, class_id: str) -> bool:
+        """
+        Verifica si una clase existe.
+        
+        Args:
+            class_id: ID de la clase a verificar
+            
+        Returns:
+            bool: True si la clase existe, False en caso contrario
+        """
+        try:
+            class_id_obj = ObjectId(class_id) if isinstance(class_id, str) else class_id
+            class_obj = self.db.classes.find_one({"_id": class_id_obj})
+            return class_obj is not None
+        except Exception:
+            return False
+    
+    def check_student_exists(self, student_id: str) -> bool:
+        """
+        Verifica si un estudiante existe.
+        
+        Args:
+            student_id: ID del estudiante a verificar
+            
+        Returns:
+            bool: True si el estudiante existe, False en caso contrario
+        """
+        try:
+            student_id_obj = ObjectId(student_id) if isinstance(student_id, str) else student_id
+            student = self.db.users.find_one({"_id": student_id_obj, "role": "STUDENT"})
+            return student is not None
+        except Exception:
+            return False
+    
+    def check_teacher_exists(self, teacher_id: str) -> bool:
+        """
+        Verifica si un profesor existe.
+        
+        Args:
+            teacher_id: ID del profesor a verificar
+            
+        Returns:
+            bool: True si el profesor existe, False en caso contrario
+        """
+        try:
+            teacher_id_obj = ObjectId(teacher_id) if isinstance(teacher_id, str) else teacher_id
+            teacher = self.db.users.find_one({"_id": teacher_id_obj, "role": "TEACHER"})
+            return teacher is not None
+        except Exception:
+            return False
+    
+    def check_study_plan_exists(self, plan_id: str) -> bool:
+        """
+        Verifica si un plan de estudios existe.
+        
+        Args:
+            plan_id: ID del plan de estudios a verificar
+            
+        Returns:
+            bool: True si el plan de estudios existe, False en caso contrario
+        """
+        try:
+            plan = self.db.study_plans_per_subject.find_one({"_id": ObjectId(plan_id)})
+            return plan is not None
+        except Exception:
+            return False
+    
+    def check_academic_period_exists(self, period_id: str) -> bool:
+        """
+        Verifica si un periodo académico existe.
+        
+        Args:
+            period_id: ID del periodo académico a verificar
+            
+        Returns:
+            bool: True si el periodo académico existe, False en caso contrario
+        """
+        try:
+            period = self.db.academic_periods.find_one({"_id": ObjectId(period_id)})
+            return period is not None
+        except Exception:
+            return False
+    
+    def check_subject_exists(self, subject_id: str) -> bool:
+        """
+        Verifica si una materia existe.
+        
+        Args:
+            subject_id: ID de la materia a verificar
+            
+        Returns:
+            bool: True si la materia existe, False en caso contrario
+        """
+        try:
+            subject = self.db.subjects.find_one({"_id": ObjectId(subject_id)})
+            return subject is not None
+        except Exception:
+            return False 

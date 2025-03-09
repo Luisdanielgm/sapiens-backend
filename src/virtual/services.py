@@ -4,7 +4,7 @@ from datetime import datetime
 
 from src.shared.database import get_db
 from src.shared.constants import STATUS
-from src.shared.standardization import BaseService, ErrorCodes
+from src.shared.standardization import BaseService, VerificationBaseService
 from src.shared.exceptions import AppException
 from .models import (
     VirtualModule,
@@ -13,18 +13,33 @@ from .models import (
     VirtualEvaluationResult
 )
 
-class VirtualModuleService(BaseService):
+class VirtualModuleService(VerificationBaseService):
+    """
+    Servicio para gestionar módulos virtuales.
+    """
     def __init__(self):
         super().__init__(collection_name="virtual_modules")
-        self.db = get_db()
+
+    def check_study_plan_exists(self, plan_id: str) -> bool:
+        """
+        Verifica si un plan de estudios existe
+        
+        Args:
+            plan_id: ID del plan de estudios
+            
+        Returns:
+            bool: True si el plan existe, False en caso contrario
+        """
+        try:
+            study_plan = self.db.study_plans_per_subject.find_one({"_id": ObjectId(plan_id)})
+            return study_plan is not None
+        except Exception:
+            return False
 
     def create_module(self, module_data: dict) -> Tuple[bool, str]:
         try:
             # Verificar que el plan de estudio existe
-            study_plan = self.db.study_plans_per_subject.find_one(
-                {"_id": ObjectId(module_data['study_plan_id'])}
-            )
-            if not study_plan:
+            if not self.check_study_plan_exists(module_data['study_plan_id']):
                 return False, "Plan de estudios no encontrado"
 
             module = VirtualModule(**module_data)
@@ -34,66 +49,84 @@ class VirtualModuleService(BaseService):
             return False, str(e)
 
     def get_module_details(self, module_id: str) -> Optional[Dict]:
+        """
+        Obtiene los detalles de un módulo virtual.
+        
+        Args:
+            module_id: ID del módulo a obtener
+            
+        Returns:
+            Dict: Detalles del módulo o None si no existe
+        """
         try:
             module = self.collection.find_one({"_id": ObjectId(module_id)})
             if not module:
                 return None
-
-            # Obtener temas y evaluaciones asociados
-            topics = list(self.db.virtual_topics.find(
-                {"virtual_module_id": module["_id"]}
-            ).sort("order", 1))
-
-            evaluations = list(self.db.virtual_evaluations.find(
-                {"virtual_module_id": module["_id"]}
-            ))
-
-            # Convertir ObjectIds a strings
+                
+            # Convertir ObjectId a string
             module["_id"] = str(module["_id"])
             module["study_plan_id"] = str(module["study_plan_id"])
             
-            # Procesamos los objetos anidados (temas)
-            topics_data = []
-            for topic in topics:
-                topic["_id"] = str(topic["_id"])
-                topic["virtual_module_id"] = str(topic["virtual_module_id"])
-                topics_data.append(topic)
-            
-            # Procesamos las evaluaciones
-            evaluations_data = []
-            for evaluation in evaluations:
-                evaluation["_id"] = str(evaluation["_id"])
-                evaluation["virtual_module_id"] = str(evaluation["virtual_module_id"])
-                evaluations_data.append(evaluation)
-            
-            # Agregamos los datos procesados a la respuesta
-            module["topics"] = topics_data
-            module["evaluations"] = evaluations_data
+            # Obtener información del plan de estudios
+            study_plan = self.db.study_plans_per_subject.find_one({"_id": ObjectId(module["study_plan_id"])})
+            if study_plan:
+                module["study_plan"] = {
+                    "name": study_plan.get("name", ""),
+                    "subject": study_plan.get("subject", "")
+                }
+                
+            # Obtener temas asociados
+            topic_service = VirtualTopicService()
+            module["topics"] = topic_service.get_module_topics(module_id)
             
             return module
         except Exception as e:
-            print(f"Error al obtener detalles del módulo virtual: {str(e)}")
+            print(f"Error al obtener detalles del módulo: {str(e)}")
             return None
 
-class VirtualTopicService(BaseService):
+class VirtualTopicService(VerificationBaseService):
+    """
+    Servicio para gestionar temas de módulos virtuales.
+    """
     def __init__(self):
         super().__init__(collection_name="virtual_topics")
-        self.db = get_db()
-
+        
     def create_topic(self, topic_data: dict) -> Tuple[bool, str]:
+        """
+        Crea un nuevo tema para un módulo virtual.
+        
+        Args:
+            topic_data: Datos del tema a crear
+            
+        Returns:
+            Tuple[bool, str]: (Éxito, mensaje o ID)
+        """
         try:
-            # Verificar que el módulo virtual existe
-            module = self.db.virtual_modules.find_one(
-                {"_id": ObjectId(topic_data['virtual_module_id'])}
-            )
-            if not module:
+            # Verificar que el módulo existe
+            if "virtual_module_id" in topic_data and not self.check_module_exists(topic_data["virtual_module_id"]):
                 return False, "Módulo virtual no encontrado"
-
+                
             topic = VirtualTopic(**topic_data)
             result = self.collection.insert_one(topic.to_dict())
             return True, str(result.inserted_id)
         except Exception as e:
             return False, str(e)
+            
+    def check_module_exists(self, module_id: str) -> bool:
+        """
+        Verifica si un módulo virtual existe.
+        
+        Args:
+            module_id: ID del módulo a verificar
+            
+        Returns:
+            bool: True si el módulo existe, False en caso contrario
+        """
+        try:
+            module = self.db.virtual_modules.find_one({"_id": ObjectId(module_id)})
+            return module is not None
+        except Exception:
+            return False
 
     def get_module_topics(self, module_id: str) -> List[Dict]:
         try:
@@ -111,20 +144,60 @@ class VirtualTopicService(BaseService):
             print(f"Error al obtener temas del módulo: {str(e)}")
             return []
 
-class VirtualEvaluationService(BaseService):
+class VirtualEvaluationService(VerificationBaseService):
+    """
+    Servicio para gestionar evaluaciones virtuales.
+    """
     def __init__(self):
         super().__init__(collection_name="virtual_evaluations")
-        self.db = get_db()
-
-    def create_evaluation(self, evaluation_data: dict) -> Tuple[bool, str]:
+        
+    def check_module_exists(self, module_id: str) -> bool:
+        """
+        Verifica si un módulo virtual existe.
+        
+        Args:
+            module_id: ID del módulo a verificar
+            
+        Returns:
+            bool: True si el módulo existe, False en caso contrario
+        """
         try:
-            # Verificar que el módulo virtual existe
-            module = self.db.virtual_modules.find_one(
-                {"_id": ObjectId(evaluation_data['virtual_module_id'])}
-            )
-            if not module:
+            module = self.db.virtual_modules.find_one({"_id": ObjectId(module_id)})
+            return module is not None
+        except Exception:
+            return False
+            
+    def check_evaluation_exists(self, evaluation_id: str) -> bool:
+        """
+        Verifica si una evaluación existe.
+        
+        Args:
+            evaluation_id: ID de la evaluación a verificar
+            
+        Returns:
+            bool: True si la evaluación existe, False en caso contrario
+        """
+        try:
+            evaluation = self.collection.find_one({"_id": ObjectId(evaluation_id)})
+            return evaluation is not None
+        except Exception:
+            return False
+    
+    def create_evaluation(self, evaluation_data: dict) -> Tuple[bool, str]:
+        """
+        Crea una nueva evaluación para un módulo virtual.
+        
+        Args:
+            evaluation_data: Datos de la evaluación a crear
+            
+        Returns:
+            Tuple[bool, str]: (Éxito, mensaje o ID)
+        """
+        try:
+            # Verificar que el módulo existe
+            if not self.check_module_exists(evaluation_data['virtual_module_id']):
                 return False, "Módulo virtual no encontrado"
-
+                
             evaluation = VirtualEvaluation(**evaluation_data)
             result = self.collection.insert_one(evaluation.to_dict())
             return True, str(result.inserted_id)

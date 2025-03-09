@@ -6,6 +6,7 @@ from .services import UserService, CognitiveProfileService
 from src.shared.standardization import APIBlueprint, APIRoute, ErrorCodes
 from src.shared.constants import ROLES
 from src.shared.exceptions import AppException
+from src.shared.database import get_db
 
 users_bp = APIBlueprint('users', __name__)
 user_service = UserService()
@@ -96,14 +97,23 @@ def update_user_cognitive_profile():
 @users_bp.route('/check', methods=['POST'])
 @APIRoute.standard(required_fields=['email', 'name', 'picture'])
 def verify_user():
-    """Verifica si un usuario existe"""
+    """Verifica si un usuario existe por su email"""
     try:
         data = request.get_json()
-        result = user_service.verify_user_exists(data['email'])
-        return APIRoute.success(data={'userExists': result})
+        email = data.get('email')
+        
+        if not email:
+            return APIRoute.error(
+                ErrorCodes.MISSING_FIELDS,
+                "El campo email es requerido",
+                status_code=400
+            )
+            
+        user_exists = user_service.verify_user_exists(email)
+        return APIRoute.success(data={'userExists': user_exists})
     except Exception as e:
         return APIRoute.error(
-            ErrorCodes.USER_CHECK_ERROR,
+            ErrorCodes.SERVER_ERROR,
             str(e),
             status_code=500
         )
@@ -284,31 +294,55 @@ def get_user_profile_by_id(user_id):
         )
 
 @users_bp.route('/login', methods=['POST'])
-@APIRoute.standard(required_fields=['email', 'password'])
+@APIRoute.standard(required_fields=['email'])
 def login():
     """Login de usuario y generación de token JWT"""
     try:
         data = request.get_json()
         email = data.get('email')
         password = data.get('password')
+        google_login = data.get('google_login', False)
+        google_credential = data.get('credential')
         
-        if not email or not password:
-            return APIRoute.error(
-                ErrorCodes.DATA_INVALID,
-                "Email y contraseña son requeridos",
-                status_code=400
-            )
-        
-        # Verificar credenciales - implementar lógica adecuada aquí
-        db = get_db()
-        user = db.users.find_one({"email": email})
-        
-        if not user or not user_service.verify_password(password, user.get('password', '')):
-            return APIRoute.error(
-                ErrorCodes.CREDENTIALS_INVALID,
-                "Credenciales inválidas",
-                status_code=401
-            )
+        # Verificar si es login normal o con Google
+        if google_login:
+            if not email or not google_credential:
+                return APIRoute.error(
+                    ErrorCodes.MISSING_FIELDS,
+                    "Email y credential son requeridos para inicio de sesión con Google",
+                    status_code=400
+                )
+                
+            # Aquí se implementaría la lógica de verificación del token de Google
+            # Por ahora, simplemente buscamos al usuario por email
+            db = get_db()
+            user = db.users.find_one({"email": email})
+            
+            if not user:
+                return APIRoute.error(
+                    ErrorCodes.USER_NOT_FOUND,
+                    "Usuario no encontrado",
+                    status_code=404
+                )
+        else:
+            # Login normal con contraseña
+            if not email or not password:
+                return APIRoute.error(
+                    ErrorCodes.MISSING_FIELDS,
+                    "Email y contraseña son requeridos",
+                    status_code=400
+                )
+            
+            # Verificar credenciales
+            db = get_db()
+            user = db.users.find_one({"email": email})
+            
+            if not user or not user_service.verify_password(password, user.get('password', '')):
+                return APIRoute.error(
+                    ErrorCodes.AUTHENTICATION_ERROR,
+                    "Credenciales inválidas",
+                    status_code=401
+                )
         
         # Generar token
         access_token = create_access_token(identity=str(user['_id']))
@@ -319,13 +353,14 @@ def login():
                 "user": {
                     "id": str(user['_id']),
                     "name": user.get('name', ''),
-                    "email": user.get('email', '')
+                    "email": user.get('email', ''),
+                    "role": user.get('role', '')
                 }
             }
         )
     except Exception as e:
         return APIRoute.error(
-            ErrorCodes.LOGIN_ERROR,
+            ErrorCodes.SERVER_ERROR,
             str(e),
             status_code=500
         )
@@ -358,11 +393,53 @@ def get_user_by_email_jwt():
                 "user": {
                     "_id": str(user['_id']),
                     "name": user.get('name', ''),
-                    "email": user.get('email', '')
+                    "email": user.get('email', ''),
+                    "role": user.get('role', '')
                 }
             }
         )
     except Exception as e:
+        return APIRoute.error(
+            ErrorCodes.SERVER_ERROR,
+            str(e),
+            status_code=500
+        )
+
+@users_bp.route('/verify-token', methods=['GET'])
+@APIRoute.standard(auth_required_flag=True)
+def verify_token():
+    """Verifica si el token JWT es válido"""
+    try:
+        # Si llegamos hasta aquí, significa que el token es válido
+        # porque el decorador auth_required ya lo verificó
+        
+        # Obtener información del usuario autenticado
+        user_id = request.user_id
+        db = get_db()
+        user = db.users.find_one({"_id": ObjectId(user_id)})
+        
+        if not user:
+            return APIRoute.error(
+                ErrorCodes.USER_NOT_FOUND,
+                "Usuario no encontrado",
+                status_code=404
+            )
+        
+        return APIRoute.success(
+            data={
+                "user": {
+                    "id": str(user['_id']),
+                    "name": user.get('name', ''),
+                    "email": user.get('email', ''),
+                    "role": user.get('role', '')
+                }
+            },
+            message="Token válido"
+        )
+    except Exception as e:
+        import traceback
+        import logging
+        logging.getLogger(__name__).error(f"Error en verify_token: {str(e)}\n{traceback.format_exc()}")
         return APIRoute.error(
             ErrorCodes.SERVER_ERROR,
             str(e),

@@ -3,19 +3,93 @@ from datetime import datetime
 from bson import ObjectId
 
 from src.shared.database import get_db
-from src.shared.standardization import BaseService, ErrorCodes
+from src.shared.standardization import VerificationBaseService, ErrorCodes
 from src.shared.exceptions import AppException
 from src.student_individual_content.models import StudentIndividualContent
 
 
-class StudentIndividualContentService(BaseService):
+class StudentIndividualContentService(VerificationBaseService):
     """
     Servicio para gestionar el contenido individual de los estudiantes.
     Incluye funcionalidad para crear, actualizar, eliminar y consultar contenido.
     """
     def __init__(self):
         super().__init__(collection_name="contents")
-        self.db = get_db()
+        
+    # ========== MÉTODOS DE VERIFICACIÓN ESTANDARIZADOS ==========
+    def check_student_exists(self, student_id: str) -> bool:
+        """
+        Verifica si un estudiante existe.
+        
+        Args:
+            student_id: ID del estudiante a verificar
+            
+        Returns:
+            bool: True si el estudiante existe, False en caso contrario
+        """
+        try:
+            student_id_obj = ObjectId(student_id) if isinstance(student_id, str) else student_id
+            student = get_db().users.find_one({"_id": student_id_obj, "role": "STUDENT"})
+            return student is not None
+        except Exception:
+            return False
+            
+    def check_class_exists(self, class_id: str) -> bool:
+        """
+        Verifica si una clase existe.
+        
+        Args:
+            class_id: ID de la clase a verificar
+            
+        Returns:
+            bool: True si la clase existe, False en caso contrario
+        """
+        try:
+            class_id_obj = ObjectId(class_id) if isinstance(class_id, str) else class_id
+            class_exists = get_db().classes.find_one({"_id": class_id_obj})
+            return class_exists is not None
+        except Exception:
+            return False
+            
+    def check_student_in_class(self, student_id: str, class_id: str) -> bool:
+        """
+        Verifica si un estudiante es miembro de una clase.
+        
+        Args:
+            student_id: ID del estudiante a verificar
+            class_id: ID de la clase a verificar
+            
+        Returns:
+            bool: True si el estudiante es miembro de la clase, False en caso contrario
+        """
+        try:
+            student_id_obj = ObjectId(student_id) if isinstance(student_id, str) else student_id
+            class_id_obj = ObjectId(class_id) if isinstance(class_id, str) else class_id
+            
+            is_member = get_db().class_members.find_one({
+                "class_id": class_id_obj,
+                "user_id": student_id_obj,
+                "role": "STUDENT"
+            })
+            return is_member is not None
+        except Exception:
+            return False
+            
+    def check_content_exists(self, content_id: str) -> bool:
+        """
+        Verifica si un contenido existe.
+        
+        Args:
+            content_id: ID del contenido a verificar
+            
+        Returns:
+            bool: True si el contenido existe, False en caso contrario
+        """
+        try:
+            content = self.collection.find_one({"_id": ObjectId(content_id)})
+            return content is not None
+        except Exception:
+            return False
         
     def create_content(self, content_data: Dict) -> Tuple[bool, str]:
         """
@@ -33,22 +107,15 @@ class StudentIndividualContentService(BaseService):
             student_id = ObjectId(content_data["student_id"]) if ObjectId.is_valid(content_data["student_id"]) else content_data["student_id"]
             
             # Verificar que el estudiante existe
-            student = self.db.users.find_one({"_id": student_id, "role": "STUDENT"})
-            if not student:
+            if not self.check_student_exists(student_id):
                 return False, "Estudiante no encontrado o no es un estudiante válido"
                 
             # Verificar que la clase existe
-            class_exists = self.db.classes.find_one({"_id": class_id})
-            if not class_exists:
+            if not self.check_class_exists(class_id):
                 return False, "Clase no encontrada"
                 
             # Verificar que el estudiante es miembro de la clase
-            is_member = self.db.class_members.find_one({
-                "class_id": class_id,
-                "user_id": student_id,
-                "role": "STUDENT"
-            })
-            if not is_member:
+            if not self.check_student_in_class(student_id, class_id):
                 return False, "El estudiante no es miembro de esta clase"
                 
             # Crear el contenido
@@ -81,9 +148,8 @@ class StudentIndividualContentService(BaseService):
             Tuple[bool, str]: (Éxito, Mensaje)
         """
         try:
-            # Verificar que el contenido existe y pertenece al estudiante
-            content = self.collection.find_one({"_id": ObjectId(content_id)})
-            if not content:
+            # Verificar que el contenido existe
+            if not self.check_content_exists(content_id):
                 return False, "Contenido no encontrado"
                 
             # Evitar actualizar campos críticos
@@ -129,8 +195,8 @@ class StudentIndividualContentService(BaseService):
             content["student_id"] = str(content["student_id"])
             
             # Obtener información adicional
-            class_info = self.db.classes.find_one({"_id": ObjectId(content["class_id"])})
-            student_info = self.db.users.find_one({"_id": ObjectId(content["student_id"])})
+            class_info = get_db().classes.find_one({"_id": ObjectId(content["class_id"])})
+            student_info = get_db().users.find_one({"_id": ObjectId(content["student_id"])})
             
             if class_info:
                 content["class_info"] = {
@@ -176,7 +242,7 @@ class StudentIndividualContentService(BaseService):
                 content["student_id"] = str(content["student_id"])
                 
                 # Obtener información de la clase
-                class_info = self.db.classes.find_one({"_id": ObjectId(content["class_id"])})
+                class_info = get_db().classes.find_one({"_id": ObjectId(content["class_id"])})
                 if class_info:
                     content["class_info"] = {
                         "name": class_info.get("name", ""),
@@ -201,8 +267,7 @@ class StudentIndividualContentService(BaseService):
         """
         try:
             # Verificar que el contenido existe
-            content = self.collection.find_one({"_id": ObjectId(content_id)})
-            if not content:
+            if not self.check_content_exists(content_id):
                 return False, "Contenido no encontrado"
                 
             result = self.collection.delete_one({"_id": ObjectId(content_id)})

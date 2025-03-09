@@ -25,6 +25,10 @@ class Config:
     # CORS
     # Formato de CORS_ORIGINS: "http://ejemplo1.com,http://ejemplo2.com"
     CORS_ORIGINS = os.getenv('CORS_ORIGINS', 'http://localhost:3000').split(',')
+    
+    # Logging
+    # Valores posibles: 'none', 'basic', 'detailed'
+    API_LOGGING = os.getenv('API_LOGGING', 'basic')
 
 
 class DevelopmentConfig(Config):

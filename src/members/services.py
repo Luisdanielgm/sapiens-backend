@@ -6,14 +6,13 @@ from src.shared.database import get_db
 from src.shared.constants import ROLES
 from src.shared.exceptions import AppException
 from src.shared.validators import is_valid_object_id, validate_object_id
-from src.shared.standardization import BaseService, ErrorCodes
+from src.shared.standardization import VerificationBaseService, ErrorCodes
 from .models import InstituteMember, ClassMember
 
-class MembershipService(BaseService):
+class MembershipService(VerificationBaseService):
     def __init__(self):
         # Inicializamos con la colección de miembros del instituto por defecto
         super().__init__(collection_name="institute_members")
-        self.db = get_db()  # Mantenemos la referencia a la base de datos para acceder a otras colecciones
 
     # ========== INSTITUTO MEMBERS ==========
     def add_institute_member(self, member_data: dict) -> str:
@@ -37,7 +36,7 @@ class MembershipService(BaseService):
             raise AppException("ID de usuario inválido", ErrorCodes.INVALID_ID)
         
         # Verificar que el instituto existe
-        institute = self.db.institutes.find_one(
+        institute = get_db().institutes.find_one(
             {"_id": ObjectId(member_data['institute_id'])}
         )
         if not institute:
@@ -84,7 +83,7 @@ class MembershipService(BaseService):
             member["institute_id"] = str(member["institute_id"])
             member["user_id"] = str(member["user_id"])
             
-            user = self.db.users.find_one({"_id": ObjectId(member["user_id"])})
+            user = get_db().users.find_one({"_id": ObjectId(member["user_id"])})
             if user:
                 member["user"] = {
                     "name": user.get("name", ""),
@@ -121,6 +120,26 @@ class MembershipService(BaseService):
             # No es un error, pero podemos informarlo
             pass
 
+    def check_institute_member_exists(self, institute_id: str, user_id: str) -> bool:
+        """
+        Verifica si un usuario es miembro de un instituto
+        
+        Args:
+            institute_id: ID del instituto
+            user_id: ID del usuario
+            
+        Returns:
+            bool: True si el usuario es miembro del instituto, False en caso contrario
+        """
+        try:
+            member = self.collection.find_one({
+                "institute_id": ObjectId(institute_id),
+                "user_id": ObjectId(user_id)
+            })
+            return member is not None
+        except Exception:
+            return False
+
     def remove_institute_member(self, institute_id: str, user_id: str) -> None:
         """
         Elimina un miembro del instituto
@@ -136,13 +155,14 @@ class MembershipService(BaseService):
         validate_object_id(institute_id)
         validate_object_id(user_id)
         
+        # Verificar primero si existe
+        if not self.check_institute_member_exists(institute_id, user_id):
+            raise AppException("Miembro no encontrado", ErrorCodes.NOT_FOUND)
+        
         result = self.collection.delete_one({
             "institute_id": ObjectId(institute_id),
             "user_id": ObjectId(user_id)
         })
-        
-        if result.deleted_count == 0:
-            raise AppException("Miembro no encontrado", ErrorCodes.NOT_FOUND)
 
     # ========== CLASS MEMBERS ==========
     def add_class_member(self, member_data: dict) -> Tuple[bool, str]:
@@ -152,7 +172,7 @@ class MembershipService(BaseService):
         """
         try:
             # Verificar que la clase existe
-            class_obj = self.db.classes.find_one(
+            class_obj = get_db().classes.find_one(
                 {"_id": ObjectId(member_data['class_id'])}
             )
             if not class_obj:
@@ -162,11 +182,11 @@ class MembershipService(BaseService):
             class_institute_id = None
             
             # Buscar información académica relacionada con la clase
-            subject = self.db.subjects.find_one({"_id": class_obj.get("subject_id")})
+            subject = get_db().subjects.find_one({"_id": class_obj.get("subject_id")})
             if subject:
-                level = self.db.levels.find_one({"_id": subject.get("level_id")})
+                level = get_db().levels.find_one({"_id": subject.get("level_id")})
                 if level:
-                    program = self.db.educational_programs.find_one({"_id": level.get("program_id")})
+                    program = get_db().educational_programs.find_one({"_id": level.get("program_id")})
                     if program:
                         class_institute_id = program.get("institute_id")
             
@@ -183,7 +203,7 @@ class MembershipService(BaseService):
                 return False, "El usuario debe ser miembro del instituto para unirse a una clase"
 
             # Verificar que el usuario no sea ya miembro
-            existing_member = self.db.class_members.find_one({
+            existing_member = get_db().class_members.find_one({
                 "class_id": ObjectId(member_data['class_id']),
                 "user_id": ObjectId(member_data['user_id'])
             })
@@ -192,7 +212,7 @@ class MembershipService(BaseService):
 
             # Si el rol es profesor, verificar que no haya otro profesor asignado
             if member_data['role'] == 'teacher':
-                existing_teacher = self.db.class_members.find_one({
+                existing_teacher = get_db().class_members.find_one({
                     "class_id": ObjectId(member_data['class_id']),
                     "role": "teacher"
                 })
@@ -200,7 +220,7 @@ class MembershipService(BaseService):
                     return False, "La clase ya tiene un profesor asignado"
 
             member = ClassMember(**member_data)
-            result = self.db.class_members.insert_one(member.to_dict())
+            result = get_db().class_members.insert_one(member.to_dict())
             return True, str(result.inserted_id)
         except Exception as e:
             return False, str(e)
@@ -214,7 +234,7 @@ class MembershipService(BaseService):
             if role:
                 query["role"] = role
                 
-            members = list(self.db.class_members.find(query))
+            members = list(get_db().class_members.find(query))
             return members
         except Exception as e:
             print(f"Error al obtener miembros: {str(e)}")
@@ -225,7 +245,7 @@ class MembershipService(BaseService):
         Actualiza la información de un miembro de la clase
         """
         try:
-            result = self.db.class_members.update_one(
+            result = get_db().class_members.update_one(
                 {"_id": ObjectId(member_id)},
                 {"$set": update_data}
             )
@@ -240,7 +260,7 @@ class MembershipService(BaseService):
         Elimina un miembro de la clase
         """
         try:
-            result = self.db.class_members.delete_one({
+            result = get_db().class_members.delete_one({
                 "class_id": ObjectId(class_id),
                 "user_id": ObjectId(user_id)
             })
@@ -259,7 +279,7 @@ class MembershipService(BaseService):
             memberships = list(self.collection.find({"user_id": ObjectId(user_id)}))
             institute_ids = [membership["institute_id"] for membership in memberships]
             
-            institutes = list(self.db.institutes.find({"_id": {"$in": institute_ids}}))
+            institutes = list(get_db().institutes.find({"_id": {"$in": institute_ids}}))
             return institutes
         except Exception as e:
             print(f"Error al obtener institutos: {str(e)}")
@@ -270,10 +290,10 @@ class MembershipService(BaseService):
         Obtiene todas las clases de las que un usuario es miembro
         """
         try:
-            memberships = list(self.db.class_members.find({"user_id": ObjectId(user_id)}))
+            memberships = list(get_db().class_members.find({"user_id": ObjectId(user_id)}))
             class_ids = [membership["class_id"] for membership in memberships]
             
-            classes = list(self.db.classes.find({"_id": {"$in": class_ids}}))
+            classes = list(get_db().classes.find({"_id": {"$in": class_ids}}))
             return classes
         except Exception as e:
             print(f"Error al obtener clases: {str(e)}")

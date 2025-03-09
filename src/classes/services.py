@@ -6,26 +6,45 @@ from datetime import datetime
 
 from src.shared.database import get_db
 from src.shared.constants import STATUS, ROLES
-from src.shared.standardization import ErrorCodes, BaseService
+from src.shared.standardization import ErrorCodes, VerificationBaseService
 from src.shared.exceptions import AppException
 from .models import Class, ClassMember, Subperiod
 from src.student_individual_content.models import StudentIndividualContent
 
-class ClassService(BaseService):
+class ClassService(VerificationBaseService):
     def __init__(self):
         super().__init__(collection_name="classes")
-        self.db = get_db()
+
+    def check_section_exists(self, section_id: str) -> bool:
+        """
+        Verifica si una sección existe
+        
+        Args:
+            section_id: ID de la sección
+            
+        Returns:
+            bool: True si la sección existe, False en caso contrario
+        """
+        try:
+            section = self.db.sections.find_one({"_id": ObjectId(section_id)})
+            return section is not None
+        except Exception:
+            return False
 
     def create_class(self, class_data: dict) -> Tuple[bool, str]:
         try:
             # Verificar que la sección, materia, período académico y nivel existan
-            section = self.db.sections.find_one({"_id": ObjectId(class_data['section_id'])})
-            subject = self.db.subjects.find_one({"_id": ObjectId(class_data['subject_id'])})
-            academic_period = self.db.academic_periods.find_one({"_id": ObjectId(class_data['academic_period_id'])})
-            level = self.db.levels.find_one({"_id": ObjectId(class_data['level_id'])})
+            if not self.check_section_exists(class_data['section_id']):
+                return False, "Sección no encontrada"
             
-            if not all([section, subject, academic_period, level]):
-                return False, "Sección, materia, período académico o nivel no encontrado"
+            if not self.check_subject_exists(class_data['subject_id']):
+                return False, "Materia no encontrada"
+            
+            if not self.check_academic_period_exists(class_data['academic_period_id']):
+                return False, "Período académico no encontrado"
+            
+            if not self.check_level_exists(class_data['level_id']):
+                return False, "Nivel educativo no encontrado"
 
             # Crear la clase
             class_instance = Class(**class_data)
@@ -85,10 +104,9 @@ class ClassService(BaseService):
         except Exception as e:
             return False, str(e)
 
-class MembershipService(BaseService):
+class MembershipService(VerificationBaseService):
     def __init__(self):
         super().__init__(collection_name="classroom_members")
-        self.db = get_db()
 
     def add_member(self, class_id: str, user_id: str, role: str) -> Tuple[bool, str]:
         try:
@@ -304,10 +322,9 @@ class MembershipService(BaseService):
             print(f"Error al obtener estudiantes de la clase: {str(e)}")
             return []
 
-class SubperiodService(BaseService):
+class SubperiodService(VerificationBaseService):
     def __init__(self):
         super().__init__(collection_name="subperiods")
-        self.db = get_db()
 
     def create_subperiod(self, subperiod_data: dict) -> Tuple[bool, str]:
         try:

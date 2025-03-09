@@ -4,11 +4,11 @@ from datetime import datetime
 import json
 
 from src.shared.database import get_db
-from src.shared.standardization import BaseService, ErrorCodes
+from src.shared.standardization import VerificationBaseService, ErrorCodes
 from src.shared.exceptions import AppException
 from .models import User, CognitiveProfile
 
-class UserService(BaseService):
+class UserService(VerificationBaseService):
     def __init__(self):
         super().__init__(collection_name="users")
 
@@ -85,11 +85,18 @@ class UserService(BaseService):
             print(f"Error al obtener perfil de usuario: {str(e)}")
             return None
 
-    def verify_user_exists(self, email: str) -> Dict:
+    def verify_user_exists(self, email: str) -> bool:
+        """
+        Verifica si un usuario con el email dado existe en la base de datos.
+        
+        Args:
+            email: Email del usuario a verificar
+            
+        Returns:
+            True si el usuario existe, False si no
+        """
         user = self.collection.find_one({"email": email})
-        if not user:
-            raise AppException(f"Usuario con email {email} no encontrado", ErrorCodes.USER_NOT_FOUND, status_code=404)
-        return user
+        return user is not None
 
     def search_users_by_email(self, partial_email: str) -> List[str]:
         users = self.collection.find({"email": {"$regex": partial_email, "$options": "i"}}, {"email": 1})
@@ -151,7 +158,7 @@ class UserService(BaseService):
             print(f"Error verificando contraseña: {str(e)}")
             return False
 
-class CognitiveProfileService(BaseService):
+class CognitiveProfileService(VerificationBaseService):
     def __init__(self):
         super().__init__(collection_name="cognitive_profiles")
 

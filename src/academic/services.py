@@ -3,7 +3,7 @@ from bson import ObjectId
 from datetime import datetime
 
 from src.shared.database import get_db
-from src.shared.standardization import BaseService, ErrorCodes
+from src.shared.standardization import VerificationBaseService, ErrorCodes
 from src.shared.exceptions import AppException
 from .models import (
     AcademicPeriod,
@@ -11,10 +11,9 @@ from .models import (
     Subject
 )
 
-class PeriodService(BaseService):
+class PeriodService(VerificationBaseService):
     def __init__(self):
         super().__init__(collection_name="academic_periods")
-        self.db = get_db()
 
     def create_period(self, period_data: dict) -> Tuple[bool, str]:
         try:
@@ -89,11 +88,10 @@ class PeriodService(BaseService):
         except Exception as e:
             return False, str(e)
 
-class SectionService(BaseService):
+class SectionService(VerificationBaseService):
     def __init__(self):
         super().__init__(collection_name="sections")
-        self.db = get_db()
-        
+
     def create_section(self, section_data: dict) -> Tuple[bool, str]:
         try:
             # Verificar si ya existe una sección con el mismo código
@@ -171,11 +169,10 @@ class SectionService(BaseService):
         except Exception as e:
             return False, str(e)
 
-class SubjectService(BaseService):
+class SubjectService(VerificationBaseService):
     def __init__(self):
         super().__init__(collection_name="subjects")
-        self.db = get_db()
-        
+
     def create_subject(self, subject_data: dict) -> Tuple[bool, str]:
         try:
             subject = Subject(**subject_data)
