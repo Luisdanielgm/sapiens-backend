@@ -81,7 +81,7 @@ class InstituteService(VerificationBaseService):
             # Buscar membresía como administrador de instituto
             member = get_db().institute_members.find_one({
                 "user_id": user["_id"],
-                "role": "institute_admin"
+                "role": "INSTITUTE_ADMIN"
             })
 
             return member is not None
@@ -98,7 +98,7 @@ class InstituteService(VerificationBaseService):
             # Buscar membresía como administrador de instituto
             member = get_db().institute_members.find_one({
                 "user_id": user["_id"],
-                "role": "institute_admin"
+                "role": "INSTITUTE_ADMIN"
             })
 
             if not member:

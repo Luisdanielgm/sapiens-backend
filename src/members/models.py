@@ -40,7 +40,7 @@ class InstituteMember(Member):
         self.permissions = permissions or {
             "academic": True,
             "financial": False,
-            "admin": role == "institute_admin"
+            "admin": role == "INSTITUTE_ADMIN"
         }
 
     def to_dict(self) -> dict:

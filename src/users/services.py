@@ -19,7 +19,7 @@ class UserService(VerificationBaseService):
             result = self.collection.insert_one(user.to_dict())
             user_id = result.inserted_id
 
-            # Si es institute_admin, crear instituto
+            # Si es INSTITUTE_ADMIN, crear instituto
             if user.role == 'INSTITUTE_ADMIN' and institute_name:
                 db = get_db()
                 institute_result = db.institutes.insert_one({

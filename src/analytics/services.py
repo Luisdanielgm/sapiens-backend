@@ -558,7 +558,7 @@ class InstituteAnalyticsService(BaseService):
             })
 
             # Contar usuarios totales
-            total_users = members_by_role.get("teacher", 0) + members_by_role.get("institute_admin", 0)
+            total_users = members_by_role.get("teacher", 0) + members_by_role.get("INSTITUTE_ADMIN", 0)
             
             # Obtener clases activas
             total_classes = self.db[COLLECTIONS["CLASSES"]].count_documents({
@@ -1075,7 +1075,7 @@ class InstituteDashboardService(BaseService):
             }))
             
             total_teachers = sum(1 for m in institute_members if m.get("role") == "teacher")
-            total_admins = sum(1 for m in institute_members if m.get("role") == "institute_admin")
+            total_admins = sum(1 for m in institute_members if m.get("role") == "INSTITUTE_ADMIN")
             
             # Contar estudiantes (estudiantes matriculados en clases)
             class_ids = [c["_id"] for c in self.db.classes.find({"level_id": {"$in": level_ids}})]

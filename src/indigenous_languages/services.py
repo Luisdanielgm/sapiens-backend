@@ -5,7 +5,7 @@ from bson import ObjectId
 from src.shared.database import get_indigenous_db, get_db
 from src.shared.standardization import BaseService, VerificationBaseService, ErrorCodes
 from src.shared.exceptions import AppException
-from .models import Translation, Language
+from .models import Translation, Language, Verificador, Verificacion
 
 class IndigenousVerificationBaseService(BaseService):
     """
@@ -51,7 +51,7 @@ class TranslationService(IndigenousVerificationBaseService):
         except Exception as e:
             return False, str(e)
 
-    def get_translations(self, language_pair=None, type_data=None, dialecto=None) -> List[Dict]:
+    def get_translations(self, language_pair=None, type_data=None, dialecto=None, filters=None) -> List[Dict]:
         try:
             query = {}
             if language_pair:
@@ -60,6 +60,12 @@ class TranslationService(IndigenousVerificationBaseService):
                 query["type_data"] = type_data
             if dialecto:
                 query["dialecto"] = dialecto
+                
+            # Aplicar filtros adicionales relacionados con verificaciones
+            if filters:
+                # Filtro por número mínimo de verificaciones
+                if 'min_verificaciones' in filters and isinstance(filters['min_verificaciones'], int):
+                    query["verificaciones_count"] = {"$gte": filters['min_verificaciones']}
 
             translations = list(self.collection.find(query))
             
@@ -67,11 +73,35 @@ class TranslationService(IndigenousVerificationBaseService):
             for translation in translations:
                 translation["_id"] = str(translation["_id"])
                 
+            # Si se solicita incluir verificaciones o se filtra por verificador específico
+            verificador_id = filters and filters.get('verificador_id')
+            include_verificaciones = filters and filters.get('include_verificaciones', False)
+            
+            if verificador_id or include_verificaciones:
+                # Crear instancia del servicio de verificaciones
+                from .services import VerificacionService
+                verificacion_service = VerificacionService()
+                
+                # Filtrar por verificador específico
+                if verificador_id:
+                    verificacion_collection = verificacion_service.collection
+                    verificaciones = list(verificacion_collection.find({"verificador_id": verificador_id}))
+                    
+                    translation_ids_verificadas = [v["translation_id"] for v in verificaciones]
+                    translations = [t for t in translations if str(t["_id"]) in translation_ids_verificadas]
+                
+                # Enriquecer con verificaciones
+                if include_verificaciones:
+                    for translation in translations:
+                        translation_id = translation["_id"]
+                        verificaciones = verificacion_service.get_verificaciones_by_translation(translation_id)
+                        translation["verificaciones"] = verificaciones
+                
             return translations
         except Exception as e:
             print(f"Error al obtener traducciones: {str(e)}")
             return []
-
+            
     def search_translations(self, query=None, filters=None) -> List[Dict]:
         try:
             search_query = {}
@@ -92,25 +122,30 @@ class TranslationService(IndigenousVerificationBaseService):
                     
                 if 'type_data' in filters and filters['type_data']:
                     search_query["type_data"] = filters['type_data']
-                    
-                if 'desde' in filters and filters['desde']:
-                    try:
-                        fecha_desde = datetime.fromisoformat(filters['desde'].replace('Z', '+00:00'))
-                        search_query["created_at"] = {"$gte": fecha_desde}
-                    except:
-                        # Si hay error en formato, ignorar este filtro
-                        pass
-                        
-                if 'hasta' in filters and filters['hasta']:
-                    try:
-                        fecha_hasta = datetime.fromisoformat(filters['hasta'].replace('Z', '+00:00'))
-                        if "created_at" in search_query:
-                            search_query["created_at"]["$lte"] = fecha_hasta
-                        else:
-                            search_query["created_at"] = {"$lte": fecha_hasta}
-                    except:
-                        # Si hay error en formato, ignorar este filtro
-                        pass
+                
+                # Filtro por número mínimo de verificaciones
+                if 'min_verificaciones' in filters and isinstance(filters['min_verificaciones'], int):
+                    search_query["verificaciones_count"] = {"$gte": filters['min_verificaciones']}
+                
+                # Procesamiento de filtros de created_at
+                self._apply_date_filter(
+                    search_query=search_query,
+                    field_name="created_at",
+                    exact_date=filters.get('created_at'),
+                    desde=filters.get('desde_created'),
+                    hasta=filters.get('hasta_created')
+                )
+                
+                # Procesamiento de filtros de updated_at
+                self._apply_date_filter(
+                    search_query=search_query,
+                    field_name="updated_at",
+                    exact_date=filters.get('updated_at'),
+                    desde=filters.get('desde_updated'),
+                    hasta=filters.get('hasta_updated')
+                )
+            
+            print(f"Consulta de búsqueda final: {search_query}")
             
             # Realizar búsqueda en base de datos
             translations = list(self.collection.find(search_query).sort("created_at", -1))
@@ -119,14 +154,129 @@ class TranslationService(IndigenousVerificationBaseService):
             for translation in translations:
                 translation["_id"] = str(translation["_id"])
                 
+            # Si se solicita incluir verificaciones o se filtra por verificador específico
+            include_verificaciones = filters and filters.get('include_verificaciones', False)
+            verificador_id = filters and filters.get('verificador_id')
+            
+            if include_verificaciones or verificador_id:
+                # Crear instancia del servicio de verificaciones si es necesario
+                from .services import VerificacionService
+                verificacion_service = VerificacionService()
+                
+                # Filtrar por verificador específico si se solicita
+                if verificador_id:
+                    # Obtener traducciones verificadas por este verificador
+                    verificacion_collection = verificacion_service.collection
+                    verificaciones = list(verificacion_collection.find({"verificador_id": verificador_id}))
+                    
+                    translation_ids_verificadas = [v["translation_id"] for v in verificaciones]
+                    translations = [t for t in translations if str(t["_id"]) in translation_ids_verificadas]
+                
+                # Enriquecer con verificaciones si se solicita
+                if include_verificaciones:
+                    for translation in translations:
+                        translation_id = translation["_id"]
+                        verificaciones = verificacion_service.get_verificaciones_by_translation(translation_id)
+                        translation["verificaciones"] = verificaciones
+            
             return translations
         except Exception as e:
             print(f"Error en búsqueda de traducciones: {str(e)}")
             return []
 
+    def _apply_date_filter(self, search_query, field_name, exact_date=None, desde=None, hasta=None):
+        """
+        Aplica filtros de fecha a un campo específico
+        
+        Args:
+            search_query: El diccionario de consulta de MongoDB
+            field_name: Nombre del campo de fecha (created_at o updated_at)
+            exact_date: Fecha exacta para filtrar
+            desde: Fecha de inicio
+            hasta: Fecha de fin
+        """
+        try:
+            # Si se especifica una fecha exacta
+            if exact_date:
+                try:
+                    # Convertir a fecha y asegurar que busque todo el día
+                    fecha_str = exact_date
+                    if 'T' not in fecha_str:  # Formato simple YYYY-MM-DD
+                        fecha_inicio = datetime.fromisoformat(f"{fecha_str}T00:00:00")
+                        fecha_fin = datetime.fromisoformat(f"{fecha_str}T23:59:59.999")
+                        search_query[field_name] = {"$gte": fecha_inicio, "$lte": fecha_fin}
+                        print(f"Filtro exacto aplicado a {field_name}: {fecha_inicio} - {fecha_fin}")
+                    else:
+                        # Es una fecha-hora completa
+                        # Normalizamos el formato (reemplazar Z por +00:00 si es necesario)
+                        if fecha_str.endswith('Z'):
+                            fecha_str = fecha_str.replace('Z', '+00:00')
+                        
+                        # Si es formato ISO completo pero sin zona horaria, añadir UTC
+                        if 'T' in fecha_str and '+' not in fecha_str and '-' not in fecha_str[10:]:
+                            fecha_str = f"{fecha_str}+00:00"
+                            
+                        fecha = datetime.fromisoformat(fecha_str)
+                        search_query[field_name] = fecha
+                        print(f"Filtro exacto aplicado a {field_name}: {fecha}")
+                except Exception as e:
+                    print(f"Error al procesar fecha exacta '{field_name}': {str(e)}, valor: {exact_date}")
+                return
+                
+            # Inicializar el diccionario de rango si se usa desde o hasta
+            if desde or hasta:
+                if field_name not in search_query:
+                    search_query[field_name] = {}
+            
+            # Aplicar filtro desde
+            if desde:
+                try:
+                    fecha_str = desde
+                    if 'T' not in fecha_str:  # Formato simple YYYY-MM-DD
+                        fecha_str = f"{fecha_str}T00:00:00"
+                    
+                    # Normalizamos el formato (reemplazar Z por +00:00 si es necesario)
+                    if fecha_str.endswith('Z'):
+                        fecha_str = fecha_str.replace('Z', '+00:00')
+                    
+                    # Si es formato ISO completo pero sin zona horaria, añadir UTC
+                    if 'T' in fecha_str and '+' not in fecha_str and '-' not in fecha_str[10:]:
+                        fecha_str = f"{fecha_str}+00:00"
+                        
+                    fecha_desde = datetime.fromisoformat(fecha_str)
+                    search_query[field_name]["$gte"] = fecha_desde
+                    print(f"Filtro desde aplicado a {field_name}: {fecha_desde}")
+                except Exception as e:
+                    print(f"Error al procesar 'desde' para {field_name}: {str(e)}, valor: {desde}")
+            
+            # Aplicar filtro hasta
+            if hasta:
+                try:
+                    fecha_str = hasta
+                    if 'T' not in fecha_str:  # Formato simple YYYY-MM-DD
+                        fecha_str = f"{fecha_str}T23:59:59.999"
+                    
+                    # Normalizamos el formato (reemplazar Z por +00:00 si es necesario)
+                    if fecha_str.endswith('Z'):
+                        fecha_str = fecha_str.replace('Z', '+00:00')
+                    
+                    # Si es formato ISO completo pero sin zona horaria, añadir UTC
+                    if 'T' in fecha_str and '+' not in fecha_str and '-' not in fecha_str[10:]:
+                        fecha_str = f"{fecha_str}+00:00"
+                        
+                    fecha_hasta = datetime.fromisoformat(fecha_str)
+                    search_query[field_name]["$lte"] = fecha_hasta
+                    print(f"Filtro hasta aplicado a {field_name}: {fecha_hasta}")
+                except Exception as e:
+                    print(f"Error al procesar 'hasta' para {field_name}: {str(e)}, valor: {hasta}")
+                    
+        except Exception as e:
+            print(f"Error general al aplicar filtros de fecha a {field_name}: {str(e)}")
+            # No interrumpir la búsqueda por error en filtros de fecha
+
     def validate_language_pair(self, language_pair: str) -> bool:
-        # Formato esperado: "es-<code>" donde <code> es el código del idioma indígena
-        return language_pair.startswith("es-") and len(language_pair) > 3
+        # Formato esperado: "español-<code>" donde <code> es el código del idioma indígena
+        return language_pair.startswith("español-") and len(language_pair) > 8  # "español-" tiene 8 caracteres
 
     def bulk_create_translations(self, translations: List[Dict]) -> Tuple[bool, List[str]]:
         try:
@@ -152,7 +302,7 @@ class TranslationService(IndigenousVerificationBaseService):
                 return False, "Traducción no encontrada"
                 
             # Actualizar la traducción
-            updates["updated_at"] = datetime.now()
+            updates["updated_at"] = datetime.utcnow()
             result = self.collection.update_one(
                 {"_id": ObjectId(translation_id)},
                 {"$set": updates}
@@ -219,4 +369,165 @@ class LanguageService(IndigenousVerificationBaseService):
             return languages
         except Exception as e:
             print(f"Error al obtener idiomas: {str(e)}")
+            return []
+
+class VerificadorService(IndigenousVerificationBaseService):
+    def __init__(self):
+        super().__init__('verificadores')
+        
+    def create_verificador(self, verificador_data: dict) -> Tuple[bool, str]:
+        try:
+            verificador = Verificador(**verificador_data)
+            result = self.collection.insert_one(verificador.to_dict())
+            return True, str(result.inserted_id)
+        except Exception as e:
+            return False, str(e)
+            
+    def get_verificadores(self, etnia=None, tipo=None, activo=True) -> List[Dict]:
+        try:
+            query = {"activo": activo}
+            if etnia:
+                query["etnia"] = etnia
+            if tipo:
+                query["tipo"] = tipo
+                
+            verificadores = list(self.collection.find(query))
+            
+            # Convertir ObjectId a string para serialización
+            for verificador in verificadores:
+                verificador["_id"] = str(verificador["_id"])
+                
+            return verificadores
+        except Exception as e:
+            print(f"Error al obtener verificadores: {str(e)}")
+            return []
+            
+    def update_verificador(self, verificador_id: str, updates: Dict) -> Tuple[bool, str]:
+        try:
+            # Verificar si existe
+            verificador = self.collection.find_one({"_id": ObjectId(verificador_id)})
+            if not verificador:
+                return False, "Verificador no encontrado"
+                
+            # Actualizar
+            updates["updated_at"] = datetime.utcnow()
+            result = self.collection.update_one(
+                {"_id": ObjectId(verificador_id)},
+                {"$set": updates}
+            )
+            
+            if result.modified_count > 0:
+                return True, "Verificador actualizado con éxito"
+            return False, "No se realizaron cambios"
+        except Exception as e:
+            return False, str(e)
+            
+    def delete_verificador(self, verificador_id: str) -> Tuple[bool, str]:
+        try:
+            # Desactivar en lugar de eliminar
+            result = self.collection.update_one(
+                {"_id": ObjectId(verificador_id)},
+                {"$set": {"activo": False, "updated_at": datetime.utcnow()}}
+            )
+            
+            if result.modified_count > 0:
+                return True, "Verificador desactivado con éxito"
+            return False, "No se realizaron cambios"
+        except Exception as e:
+            return False, str(e)
+
+class VerificacionService(IndigenousVerificationBaseService):
+    def __init__(self):
+        super().__init__('verificaciones')
+        self.translation_service = TranslationService()
+        self.verificador_service = VerificadorService()
+        
+    def add_verificacion(self, verificacion_data: dict) -> Tuple[bool, str]:
+        try:
+            # Verificar que exista la traducción
+            translation_id = verificacion_data.get('translation_id')
+            translation = self.translation_service.collection.find_one({"_id": ObjectId(translation_id)})
+            if not translation:
+                return False, "Traducción no encontrada"
+                
+            # Verificar que exista el verificador
+            verificador_id = verificacion_data.get('verificador_id')
+            verificador = self.verificador_service.collection.find_one({"_id": ObjectId(verificador_id)})
+            if not verificador:
+                return False, "Verificador no encontrado"
+            
+            # Verificar que no exista ya esta verificación
+            existing = self.collection.find_one({
+                "translation_id": translation_id,
+                "verificador_id": verificador_id
+            })
+            if existing:
+                return False, "Esta verificación ya existe"
+                
+            # Crear verificación
+            verificacion = Verificacion(**verificacion_data)
+            result = self.collection.insert_one(verificacion.to_dict())
+            
+            # Actualizar contador de verificaciones en la traducción
+            self.translation_service.collection.update_one(
+                {"_id": ObjectId(translation_id)},
+                {"$inc": {"verificaciones_count": 1}}
+            )
+            
+            return True, str(result.inserted_id)
+        except Exception as e:
+            return False, str(e)
+            
+    def get_verificaciones_by_translation(self, translation_id: str) -> List[Dict]:
+        try:
+            # Buscar verificaciones
+            verificaciones = list(self.collection.find({"translation_id": translation_id}))
+            
+            # Enriquecer con datos del verificador
+            for v in verificaciones:
+                v["_id"] = str(v["_id"])
+                verificador = self.verificador_service.collection.find_one({"_id": ObjectId(v["verificador_id"])})
+                if verificador:
+                    verificador["_id"] = str(verificador["_id"])
+                    v["verificador"] = verificador
+                    
+            return verificaciones
+        except Exception as e:
+            print(f"Error al obtener verificaciones: {str(e)}")
+            return []
+            
+    def remove_verificacion(self, verificacion_id: str) -> Tuple[bool, str]:
+        try:
+            # Buscar la verificación
+            verificacion = self.collection.find_one({"_id": ObjectId(verificacion_id)})
+            if not verificacion:
+                return False, "Verificación no encontrada"
+                
+            # Eliminar verificación
+            result = self.collection.delete_one({"_id": ObjectId(verificacion_id)})
+            
+            # Actualizar contador en la traducción
+            if result.deleted_count > 0:
+                self.translation_service.collection.update_one(
+                    {"_id": ObjectId(verificacion["translation_id"])},
+                    {"$inc": {"verificaciones_count": -1}}
+                )
+                return True, "Verificación eliminada con éxito"
+            
+            return False, "No se realizaron cambios"
+        except Exception as e:
+            return False, str(e)
+            
+    def get_top_verified_translations(self, limit: int = 10) -> List[Dict]:
+        try:
+            # Obtener traducciones con más verificaciones
+            translations = list(self.translation_service.collection.find().sort("verificaciones_count", -1).limit(limit))
+            
+            # Convertir ObjectId a string
+            for t in translations:
+                t["_id"] = str(t["_id"])
+                
+            return translations
+        except Exception as e:
+            print(f"Error al obtener traducciones verificadas: {str(e)}")
             return [] 
