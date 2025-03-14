@@ -5,7 +5,7 @@ from typing import List, Dict, Optional, Any
 class Institute:
     """
     Modelo para representar un instituto educativo.
-    Un instituto tiene información básica y niveles educativos que ofrece.
+    Un instituto tiene información básica.
     """
     def __init__(
         self, 
@@ -14,7 +14,6 @@ class Institute:
         phone: str,
         email: str,
         website: str,
-        educational_levels: List[str],
         status: str = "pending",
         created_at: Optional[datetime] = None,
         _id: Optional[ObjectId] = None
@@ -25,7 +24,6 @@ class Institute:
         self.phone = phone
         self.email = email
         self.website = website
-        self.educational_levels = educational_levels
         self.status = status
         self.created_at = created_at or datetime.now()
 
@@ -38,7 +36,6 @@ class Institute:
             "phone": self.phone,
             "email": self.email,
             "website": self.website,
-            "educational_levels": self.educational_levels,
             "status": self.status,
             "created_at": self.created_at
         }

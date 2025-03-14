@@ -18,7 +18,7 @@ def create_institute():
     """
     try:
         # Validar que vienen los campos requeridos
-        required_fields = ['name', 'address', 'email', 'educational_levels']
+        required_fields = ['name', 'address', 'email']
         for field in required_fields:
             if field not in request.json:
                 return APIRoute.error(ErrorCodes.MISSING_FIELD, f"Campo requerido: {field}")
@@ -59,7 +59,7 @@ def update_institute(institute_id):
             return APIRoute.error("No se proporcionaron datos para actualizar", 400)
             
         # Campos permitidos para actualización
-        allowed_fields = ['name', 'address', 'phone', 'email', 'website', 'educational_levels', 'status']
+        allowed_fields = ['name', 'address', 'phone', 'email', 'website', 'status']
         updates = {}
         
         for field in allowed_fields:
@@ -97,6 +97,22 @@ def delete_institute(institute_id):
             return APIRoute.error(result, 400)
     except Exception as e:
         return APIRoute.error(str(e), 500)
+
+@institute_bp.route('/<institute_id>/activate', methods=['PUT'])
+@APIRoute.standard(auth_required_flag=True, roles=[ROLES["ADMIN"]])
+def activate_institute(institute_id):
+    """
+    Activa un instituto específico cambiando su estado a 'active'.
+    """
+    try:
+        success, result = institute_service.activate_institute(institute_id)
+        
+        if success:
+            return APIRoute.success({"message": result})
+        else:
+            return APIRoute.error(result, 400)
+    except Exception as e:
+        return APIRoute.error(ErrorCodes.SERVER_ERROR, str(e), status_code=500)
 
 @institute_bp.route('/<institute_id>/statistics', methods=['GET'])
 @APIRoute.standard(auth_required_flag=True, roles=[ROLES["ADMIN"], ROLES["INSTITUTE_ADMIN"]])

@@ -138,6 +138,38 @@ class InstituteService(VerificationBaseService):
     def get_institute_statistics(self, institute_id: str) -> Optional[Dict]:
         return self.analytics_service.get_institute_statistics(institute_id)
 
+    def activate_institute(self, institute_id: str) -> Tuple[bool, str]:
+        """
+        Activa un instituto cambiando su estado a 'active'
+        
+        Args:
+            institute_id: ID del instituto a activar
+            
+        Returns:
+            Tuple[bool, str]: Un booleano indicando el éxito de la operación y un mensaje
+        """
+        try:
+            # Verificar que el instituto existe
+            institute = self.collection.find_one({"_id": ObjectId(institute_id)})
+            if not institute:
+                return False, "Instituto no encontrado"
+                
+            # Verificar si ya está activo
+            if institute.get("status") == "active":
+                return False, "El instituto ya está activo"
+                
+            # Actualizar estado a 'active'
+            result = self.collection.update_one(
+                {"_id": ObjectId(institute_id)},
+                {"$set": {"status": "active"}}
+            )
+            
+            if result.modified_count > 0:
+                return True, "Instituto activado correctamente"
+            return False, "No se pudo activar el instituto"
+        except Exception as e:
+            return False, str(e)
+
 class ProgramService(VerificationBaseService):
     def __init__(self):
         super().__init__(collection_name="educational_programs")
