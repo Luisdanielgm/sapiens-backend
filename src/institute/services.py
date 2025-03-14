@@ -170,6 +170,46 @@ class InstituteService(VerificationBaseService):
         except Exception as e:
             return False, str(e)
 
+    def get_all_institutes(self) -> List[Dict]:
+        """
+        Obtiene todos los institutos registrados en el sistema
+        
+        Returns:
+            List[Dict]: Lista de institutos con información básica
+        """
+        try:
+            institutes = list(self.collection.find())
+            
+            # Procesar los datos
+            for institute in institutes:
+                institute["_id"] = str(institute["_id"])
+                
+                # Obtener cantidad de programas
+                programs_count = self.db.educational_programs.count_documents({
+                    "institute_id": ObjectId(institute["_id"])
+                })
+                institute["programs_count"] = programs_count
+                
+                # Obtener información del administrador principal
+                admin = self.db.institute_members.find_one({
+                    "institute_id": ObjectId(institute["_id"]),
+                    "role": "INSTITUTE_ADMIN"
+                })
+                
+                if admin:
+                    user = self.db.users.find_one({"_id": admin["user_id"]})
+                    if user:
+                        institute["admin"] = {
+                            "id": str(user["_id"]),
+                            "name": user.get("name", ""),
+                            "email": user.get("email", "")
+                        }
+            
+            return institutes
+        except Exception as e:
+            print(f"Error al obtener todos los institutos: {str(e)}")
+            return []
+
 class ProgramService(VerificationBaseService):
     def __init__(self):
         super().__init__(collection_name="educational_programs")

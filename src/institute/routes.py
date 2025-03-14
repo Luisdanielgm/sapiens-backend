@@ -148,6 +148,19 @@ def get_institute_by_admin():
     except Exception as e:
         return APIRoute.error(str(e), 500)
 
+@institute_bp.route('/all', methods=['GET'])
+@APIRoute.standard(auth_required_flag=True, roles=[ROLES["ADMIN"]])
+def get_all_institutes():
+    """
+    Obtiene todos los institutos registrados en el sistema.
+    Accesible solo para administradores globales.
+    """
+    try:
+        institutes = institute_service.get_all_institutes()
+        return APIRoute.success(institutes)
+    except Exception as e:
+        return APIRoute.error(ErrorCodes.SERVER_ERROR, str(e), status_code=500)
+
 @institute_bp.route('/<institute_id>/programs', methods=['GET'])
 @APIRoute.standard(auth_required_flag=True)
 def get_institute_programs(institute_id):
