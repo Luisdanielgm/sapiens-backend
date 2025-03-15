@@ -331,6 +331,7 @@ class ErrorCodes:
     # Errores de operaciones
     OPERATION_FAILED = "OPERACION_FALLIDA"          # 400 - La operación no pudo completarse
     DATABASE_ERROR = "ERROR_BASE_DATOS"             # 500 - Error al interactuar con la BD
+    CREATION_ERROR = "ERROR_CREACION"               # 400 - Error al crear un recurso
     
     # Errores de dominio específico
     USER_NOT_FOUND = "USUARIO_NO_ENCONTRADO"        # 404 - Usuario no encontrado

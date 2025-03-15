@@ -32,7 +32,7 @@ def create_institute_invitation(institute_id):
     """Crear una invitación para unirse a un instituto"""
     data = request.get_json()
     data['institute_id'] = institute_id
-    data['created_by'] = get_jwt_identity()
+    data['inviter_id'] = get_jwt_identity()
     
     success, result = invitation_service.create_institute_invitation(data)
     if success:
@@ -42,7 +42,7 @@ def create_institute_invitation(institute_id):
             status_code=201
         )
     return APIRoute.error(
-        ErrorCodes.CREATION_ERROR,
+        ErrorCodes.OPERATION_FAILED,
         result,
         status_code=400
     )
@@ -111,7 +111,7 @@ def create_class_invitation(class_id):
     """Crear una invitación para unirse a una clase"""
     data = request.get_json()
     data['class_id'] = class_id
-    data['created_by'] = get_jwt_identity()
+    data['inviter_id'] = get_jwt_identity()
     
     success, result = invitation_service.create_class_invitation(data)
     if success:
@@ -121,7 +121,7 @@ def create_class_invitation(class_id):
             status_code=201
         )
     return APIRoute.error(
-        ErrorCodes.CREATION_ERROR,
+        ErrorCodes.OPERATION_FAILED,
         result,
         status_code=400
     )
@@ -199,7 +199,7 @@ def create_membership_request(institute_id):
             status_code=201
         )
     return APIRoute.error(
-        ErrorCodes.CREATION_ERROR,
+        ErrorCodes.OPERATION_FAILED,
         result,
         status_code=400
     )
