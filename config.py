@@ -1,7 +1,30 @@
 import os
+import sys
+import logging
 from dotenv import load_dotenv
 
 load_dotenv()
+
+# Configurar logger
+logger = logging.getLogger(__name__)
+
+# Variables de entorno requeridas para producción
+REQUIRED_ENV_VARS = ['MONGO_DB_URI', 'DB_NAME', 'JWT_SECRET']
+
+def validate_env_vars():
+    """
+    Valida que las variables de entorno requeridas estén configuradas.
+    En producción, la aplicación no debería iniciarse si faltan variables críticas.
+    """
+    # Solo validar en producción
+    if os.getenv('FLASK_ENV') != 'production':
+        return True
+        
+    missing_vars = [var for var in REQUIRED_ENV_VARS if not os.getenv(var)]
+    if missing_vars:
+        logger.error(f"Faltan variables de entorno requeridas: {', '.join(missing_vars)}")
+        return False
+    return True
 
 class Config:
     """Configuración base para la aplicación"""
@@ -29,6 +52,16 @@ class Config:
     # Logging
     # Valores posibles: 'none', 'basic', 'detailed'
     API_LOGGING = os.getenv('API_LOGGING', 'basic')
+    
+    @classmethod
+    def validate(cls):
+        """Valida que la configuración sea correcta"""
+        if cls.MONGO_DB_URI is None:
+            logger.warning("MONGO_DB_URI no está configurado. La conexión a la base de datos puede fallar.")
+        if cls.DB_NAME is None:
+            logger.warning("DB_NAME no está configurado. Se usará el valor por defecto.")
+        if cls.JWT_SECRET_KEY == 'develop-secret-key':
+            logger.warning("JWT_SECRET tiene el valor por defecto. Esto es inseguro en producción.")
 
 
 class DevelopmentConfig(Config):
@@ -39,6 +72,15 @@ class DevelopmentConfig(Config):
 class ProductionConfig(Config):
     """Configuración para entorno de producción"""
     DEBUG = False
+    
+    @classmethod
+    def validate(cls):
+        super().validate()
+        if not validate_env_vars():
+            logger.critical("Faltan variables de entorno críticas en entorno de producción")
+            # En producción, fallar si faltan variables críticas
+            if os.getenv('ENFORCE_ENV_VALIDATION', '0') == '1':
+                sys.exit(1)
 
 
 class TestingConfig(Config):
@@ -57,4 +99,8 @@ config_by_name = {
 }
 
 # Obtener la configuración activa
-active_config = config_by_name[os.getenv('FLASK_ENV', 'development')]
+env = os.getenv('FLASK_ENV', 'development')
+active_config = config_by_name[env]
+
+# Validar configuración
+active_config.validate()

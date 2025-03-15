@@ -5,6 +5,7 @@ from bson import ObjectId
 from src.shared.database import get_indigenous_db, get_db
 from src.shared.standardization import BaseService, VerificationBaseService, ErrorCodes
 from src.shared.exceptions import AppException
+from src.shared.logging import log_error, log_info, log_debug
 from .models import Translation, Language, Verificador, Verificacion
 
 class IndigenousVerificationBaseService(BaseService):
@@ -105,6 +106,7 @@ class TranslationService(IndigenousVerificationBaseService):
     def search_translations(self, query=None, filters=None) -> List[Dict]:
         try:
             search_query = {}
+            index_hint = None
             
             if query:
                 search_query["$or"] = [
@@ -116,6 +118,7 @@ class TranslationService(IndigenousVerificationBaseService):
                 # Aplicar filtros adicionales
                 if 'language_pair' in filters and filters['language_pair']:
                     search_query["language_pair"] = filters['language_pair']
+                    index_hint = "language_pair_1"  # Sugerencia de índice para optimización
                     
                 if 'dialecto' in filters and filters['dialecto']:
                     search_query["dialecto"] = filters['dialecto']
@@ -145,10 +148,20 @@ class TranslationService(IndigenousVerificationBaseService):
                     hasta=filters.get('hasta_updated')
                 )
             
-            print(f"Consulta de búsqueda final: {search_query}")
+            log_debug(f"Consulta de búsqueda final: {search_query}", "indigenous_languages.services")
             
-            # Realizar búsqueda en base de datos
-            translations = list(self.collection.find(search_query).sort("created_at", -1))
+            # Realizar búsqueda en base de datos con límite para evitar sobrecarga
+            cursor = self.collection.find(search_query).sort("created_at", -1).limit(100)
+            
+            # Aplicar hint de índice si existe
+            if index_hint:
+                try:
+                    cursor = cursor.hint(index_hint)
+                except Exception:
+                    # Si el índice no existe, continuar sin hint
+                    pass
+            
+            translations = list(cursor)
             
             # Convertir ObjectId a string para serialización
             for translation in translations:
@@ -169,19 +182,20 @@ class TranslationService(IndigenousVerificationBaseService):
                     verificacion_collection = verificacion_service.collection
                     verificaciones = list(verificacion_collection.find({"verificador_id": verificador_id}))
                     
-                    translation_ids_verificadas = [v["translation_id"] for v in verificaciones]
-                    translations = [t for t in translations if str(t["_id"]) in translation_ids_verificadas]
+                    translation_ids_verificadas = [str(v["translation_id"]) for v in verificaciones]
+                    translations = [t for t in translations if t["_id"] in translation_ids_verificadas]
                 
-                # Enriquecer con verificaciones si se solicita
+                # Enriquecer con verificaciones si se solicita (limitar número para evitar carga excesiva)
                 if include_verificaciones:
                     for translation in translations:
                         translation_id = translation["_id"]
                         verificaciones = verificacion_service.get_verificaciones_by_translation(translation_id)
                         translation["verificaciones"] = verificaciones
             
+            log_info(f"Búsqueda completada: {len(translations)} resultados encontrados", "indigenous_languages.services")
             return translations
         except Exception as e:
-            print(f"Error en búsqueda de traducciones: {str(e)}")
+            log_error("Error en búsqueda de traducciones", e, "indigenous_languages.services")
             return []
 
     def _apply_date_filter(self, search_query, field_name, exact_date=None, desde=None, hasta=None):
@@ -205,7 +219,7 @@ class TranslationService(IndigenousVerificationBaseService):
                         fecha_inicio = datetime.fromisoformat(f"{fecha_str}T00:00:00")
                         fecha_fin = datetime.fromisoformat(f"{fecha_str}T23:59:59.999")
                         search_query[field_name] = {"$gte": fecha_inicio, "$lte": fecha_fin}
-                        print(f"Filtro exacto aplicado a {field_name}: {fecha_inicio} - {fecha_fin}")
+                        log_debug(f"Filtro exacto aplicado a {field_name}: {fecha_inicio} - {fecha_fin}", "indigenous_languages.services")
                     else:
                         # Es una fecha-hora completa
                         # Normalizamos el formato (reemplazar Z por +00:00 si es necesario)
@@ -218,9 +232,9 @@ class TranslationService(IndigenousVerificationBaseService):
                             
                         fecha = datetime.fromisoformat(fecha_str)
                         search_query[field_name] = fecha
-                        print(f"Filtro exacto aplicado a {field_name}: {fecha}")
+                        log_debug(f"Filtro exacto aplicado a {field_name}: {fecha}", "indigenous_languages.services")
                 except Exception as e:
-                    print(f"Error al procesar fecha exacta '{field_name}': {str(e)}, valor: {exact_date}")
+                    log_error(f"Error al procesar fecha exacta '{field_name}'", e, "indigenous_languages.services")
                 return
                 
             # Inicializar el diccionario de rango si se usa desde o hasta
@@ -245,9 +259,9 @@ class TranslationService(IndigenousVerificationBaseService):
                         
                     fecha_desde = datetime.fromisoformat(fecha_str)
                     search_query[field_name]["$gte"] = fecha_desde
-                    print(f"Filtro desde aplicado a {field_name}: {fecha_desde}")
+                    log_debug(f"Filtro desde aplicado a {field_name}: {fecha_desde}", "indigenous_languages.services")
                 except Exception as e:
-                    print(f"Error al procesar 'desde' para {field_name}: {str(e)}, valor: {desde}")
+                    log_error(f"Error al procesar 'desde' para {field_name}", e, "indigenous_languages.services")
             
             # Aplicar filtro hasta
             if hasta:
@@ -266,13 +280,12 @@ class TranslationService(IndigenousVerificationBaseService):
                         
                     fecha_hasta = datetime.fromisoformat(fecha_str)
                     search_query[field_name]["$lte"] = fecha_hasta
-                    print(f"Filtro hasta aplicado a {field_name}: {fecha_hasta}")
+                    log_debug(f"Filtro hasta aplicado a {field_name}: {fecha_hasta}", "indigenous_languages.services")
                 except Exception as e:
-                    print(f"Error al procesar 'hasta' para {field_name}: {str(e)}, valor: {hasta}")
+                    log_error(f"Error al procesar 'hasta' para {field_name}", e, "indigenous_languages.services")
                     
         except Exception as e:
-            print(f"Error general al aplicar filtros de fecha a {field_name}: {str(e)}")
-            # No interrumpir la búsqueda por error en filtros de fecha
+            log_error(f"Error general al aplicar filtros de fecha a {field_name}", e, "indigenous_languages.services")
 
     def validate_language_pair(self, language_pair: str) -> bool:
         # Formato esperado: "español-<code>" donde <code> es el código del idioma indígena

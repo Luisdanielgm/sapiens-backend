@@ -5,6 +5,7 @@ from bson import ObjectId
 from src.shared.database import get_db
 from src.shared.standardization import VerificationBaseService, ErrorCodes
 from src.shared.exceptions import AppException
+from src.shared.logging import log_error, log_info
 from src.profiles.models import TeacherProfile, StudentProfile, AdminProfile
 
 
@@ -28,12 +29,18 @@ class ProfileService(VerificationBaseService):
         Returns:
             ObjectId: ID del usuario si se encuentra, None en caso contrario
         """
-        if ObjectId.is_valid(user_id_or_email):
-            user = self.db.users.find_one({"_id": ObjectId(user_id_or_email)})
-        else:
-            user = self.db.users.find_one({"email": user_id_or_email})
-        
-        return user["_id"] if user else None
+        try:
+            if ObjectId.is_valid(user_id_or_email):
+                user = self.db.users.find_one({"_id": ObjectId(user_id_or_email)})
+            else:
+                user = self.db.users.find_one({"email": user_id_or_email})
+            
+            if user and "_id" in user:
+                return user["_id"]
+            return None
+        except Exception as e:
+            log_error(f"Error al obtener ID de usuario para '{user_id_or_email}'", e, "profiles.services")
+            return None
     
     def get_teacher_profile(self, user_id_or_email: str) -> Optional[Dict]:
         """

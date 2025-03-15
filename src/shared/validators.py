@@ -19,6 +19,7 @@ Ejemplos de uso:
 
 from bson.objectid import ObjectId
 from src.shared.exceptions import AppException
+from src.shared.logging import log_error
 
 def is_valid_object_id(id_str: str) -> bool:
     """
@@ -30,24 +31,33 @@ def is_valid_object_id(id_str: str) -> bool:
     Returns:
         bool: True si es un ObjectId válido, False en caso contrario
     """
+    if id_str is None:
+        return False
+        
     try:
         ObjectId(id_str)
         return True
-    except:
+    except Exception:
         return False
 
-def validate_object_id(id_str: str) -> None:
+def validate_object_id(id_str: str, entity_name: str = "objeto") -> None:
     """
     Valida un ObjectId y lanza una excepción si no es válido.
     
     Args:
         id_str: String a validar
+        entity_name: Nombre de la entidad para personalizar el mensaje de error
         
     Raises:
         AppException: Si el ID no es un ObjectId válido
     """
+    if not id_str:
+        log_error(f"ID no proporcionado para {entity_name}")
+        raise AppException(f"ID de {entity_name} no proporcionado", AppException.BAD_REQUEST)
+        
     if not is_valid_object_id(id_str):
-        raise AppException(f"ID inválido: {id_str}", AppException.BAD_REQUEST)
+        log_error(f"ID inválido: {id_str} para {entity_name}")
+        raise AppException(f"ID de {entity_name} inválido: {id_str}", AppException.BAD_REQUEST)
 
 def validate_schema(data, schema):
     """
@@ -92,25 +102,43 @@ def validate_schema(data, schema):
                 errors[field] = "Debe ser una lista"
             elif expected_type == 'object' and not isinstance(value, dict):
                 errors[field] = "Debe ser un objeto"
-        
-        # Validar longitud mínima/máxima para cadenas
-        if isinstance(value, str):
-            if 'minLength' in rules and len(value) < rules['minLength']:
-                errors[field] = f"Debe tener al menos {rules['minLength']} caracteres"
-            if 'maxLength' in rules and len(value) > rules['maxLength']:
-                errors[field] = f"Debe tener como máximo {rules['maxLength']} caracteres"
-        
-        # Validar valores mínimos/máximos para números
-        if isinstance(value, (int, float)):
-            if 'minimum' in rules and value < rules['minimum']:
-                errors[field] = f"Debe ser al menos {rules['minimum']}"
-            if 'maximum' in rules and value > rules['maximum']:
-                errors[field] = f"Debe ser como máximo {rules['maximum']}"
-        
-        # Validar enumeración (valores permitidos)
-        if 'enum' in rules and value not in rules['enum']:
-            enum_values = ', '.join(str(v) for v in rules['enum'])
-            errors[field] = f"Debe ser uno de los siguientes valores: {enum_values}"
+                
+        # Validar longitud mínima (para strings y arrays)
+        if 'minLength' in rules and isinstance(value, (str, list)):
+            min_length = rules['minLength']
+            if len(value) < min_length:
+                errors[field] = f"Debe tener al menos {min_length} caracteres"
+                
+        # Validar longitud máxima (para strings y arrays)
+        if 'maxLength' in rules and isinstance(value, (str, list)):
+            max_length = rules['maxLength']
+            if len(value) > max_length:
+                errors[field] = f"Debe tener como máximo {max_length} caracteres"
+                
+        # Validar mínimo (para números)
+        if 'minimum' in rules and isinstance(value, (int, float)):
+            minimum = rules['minimum']
+            if value < minimum:
+                errors[field] = f"Debe ser mayor o igual a {minimum}"
+                
+        # Validar máximo (para números)
+        if 'maximum' in rules and isinstance(value, (int, float)):
+            maximum = rules['maximum']
+            if value > maximum:
+                errors[field] = f"Debe ser menor o igual a {maximum}"
+                
+        # Validar patrón (para strings)
+        if 'pattern' in rules and isinstance(value, str):
+            import re
+            pattern = rules['pattern']
+            if not re.match(pattern, value):
+                errors[field] = f"No cumple con el formato requerido"
+                
+        # Validar enum (valores permitidos)
+        if 'enum' in rules:
+            enum = rules['enum']
+            if value not in enum:
+                errors[field] = f"Valor no permitido. Opciones válidas: {', '.join(map(str, enum))}"
     
     return len(errors) == 0, errors
 

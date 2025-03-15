@@ -1,12 +1,15 @@
 from flask import request, jsonify
 from flask_jwt_extended import create_access_token, jwt_required, get_jwt_identity
 from bson.objectid import ObjectId
+import json
+import logging
 
 from .services import UserService, CognitiveProfileService
 from src.shared.standardization import APIBlueprint, APIRoute, ErrorCodes
 from src.shared.constants import ROLES
 from src.shared.exceptions import AppException
 from src.shared.database import get_db
+from src.shared.logging import log_error, log_info
 
 users_bp = APIBlueprint('users', __name__)
 user_service = UserService()
@@ -56,36 +59,6 @@ def get_user_profile(email):
             ErrorCodes.USER_NOT_FOUND,
             f"No se encontró el perfil para el email: {email}",
             status_code=404
-        )
-    except Exception as e:
-        return APIRoute.error(
-            ErrorCodes.SERVER_ERROR,
-            str(e),
-            status_code=500
-        )
-
-@users_bp.route('/cognitive-profile', methods=['PUT'])
-@APIRoute.standard(auth_required_flag=True)
-@APIRoute.standard(required_fields=['email', 'profile'])
-def update_user_cognitive_profile():
-    """Actualiza el perfil cognitivo de un estudiante por ID"""
-    try:
-        data = request.get_json()
-        email = data.get('email')
-        profile_data = data.get('profile')
-        
-        # Asegurarse de que el profile_data esté en formato string JSON
-        if isinstance(profile_data, dict):
-            import json
-            profile_data = json.dumps(profile_data)
-        
-        success = cognitive_profile_service.update_cognitive_profile(email, profile_data)
-        
-        if success:
-            return APIRoute.success(message="Perfil cognitivo actualizado exitosamente")
-        return APIRoute.error(
-            ErrorCodes.UPDATE_ERROR,
-            "Error al actualizar el perfil cognitivo"
         )
     except Exception as e:
         return APIRoute.error(
@@ -216,17 +189,25 @@ def update_cognitive_profile():
     """Actualiza el perfil cognitivo de un usuario por email"""
     try:
         data = request.get_json()
-        success = cognitive_profile_service.update_cognitive_profile(
-            data['email'], 
-            data['profile']
-        )
+        email = data.get('email')
+        profile_data = data.get('profile')
+        
+        # Asegurarse de que el profile_data esté en formato adecuado
+        # Si es un diccionario, convertirlo a string JSON
+        if isinstance(profile_data, dict):
+            profile_data = json.dumps(profile_data)
+        
+        log_info(f"Actualizando perfil cognitivo para usuario: {email}", "users.routes")
+        success = cognitive_profile_service.update_cognitive_profile(email, profile_data)
+        
         if success:
-            return APIRoute.success(message="Perfil actualizado exitosamente")
+            return APIRoute.success(message="Perfil cognitivo actualizado exitosamente")
         return APIRoute.error(
             ErrorCodes.UPDATE_ERROR,
-            "Error al actualizar perfil"
+            "Error al actualizar perfil cognitivo"
         )
     except Exception as e:
+        log_error(f"Error al actualizar perfil cognitivo para {email}", e, "users.routes")
         return APIRoute.error(
             ErrorCodes.SERVER_ERROR,
             str(e),

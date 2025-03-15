@@ -1,4 +1,4 @@
-from pymongo import MongoClient
+from pymongo import MongoClient, ASCENDING, DESCENDING, TEXT
 from typing import Optional
 import dotenv
 from datetime import datetime
@@ -84,3 +84,71 @@ class IndigenousLanguagesDB:
 def get_indigenous_db():
     """Helper function para la BD de lenguas indígenas"""
     return IndigenousLanguagesDB.get_db()
+
+def setup_database_indexes():
+    """
+    Configura los índices necesarios en la base de datos para optimizar consultas frecuentes.
+    
+    Esta función debe llamarse durante la inicialización de la aplicación para asegurar
+    que todos los índices estén configurados correctamente.
+    """
+    try:
+        # Obtener conexiones a las bases de datos
+        db = get_db()
+        indigenous_db = get_indigenous_db()
+        
+        # Crear índices para la base de datos principal
+        
+        # Índices para usuarios
+        db.users.create_index([("email", ASCENDING)], unique=True, background=True)
+        db.users.create_index([("role", ASCENDING)], background=True)
+        
+        # Índices para institutos
+        db.institutes.create_index([("name", ASCENDING)], background=True)
+        db.institute_members.create_index([("institute_id", ASCENDING), ("user_id", ASCENDING)], background=True)
+        db.institute_members.create_index([("user_id", ASCENDING)], background=True)
+        
+        # Índices para clases
+        db.classes.create_index([("subject_id", ASCENDING)], background=True)
+        db.classes.create_index([("institute_id", ASCENDING)], background=True)
+        db.classes.create_index([("period_id", ASCENDING)], background=True)
+        db.class_members.create_index([("class_id", ASCENDING), ("role", ASCENDING)], background=True)
+        db.class_members.create_index([("user_id", ASCENDING)], background=True)
+        
+        # Índices para evaluaciones
+        db.evaluations.create_index([("class_id", ASCENDING)], background=True)
+        db.evaluation_results.create_index([("evaluation_id", ASCENDING), ("student_id", ASCENDING)], 
+                                         unique=True, background=True)
+        db.evaluation_results.create_index([("student_id", ASCENDING)], background=True)
+        
+        # Índices para planes de estudio
+        db.study_plans_per_subject.create_index([("subject_id", ASCENDING)], background=True)
+        db.modules.create_index([("study_plan_id", ASCENDING)], background=True)
+        db.topics.create_index([("module_id", ASCENDING)], background=True)
+        
+        # Índices para invitaciones
+        db.institute_invitations.create_index([("email", ASCENDING), ("institute_id", ASCENDING)], 
+                                             background=True)
+        db.class_invitations.create_index([("email", ASCENDING), ("class_id", ASCENDING)], 
+                                         background=True)
+        
+        # Índices para la base de datos de lenguas indígenas
+        
+        # Índices para traducciones
+        indigenous_db.translations.create_index([("language_pair", ASCENDING)], background=True)
+        indigenous_db.translations.create_index([("type_data", ASCENDING)], background=True)
+        indigenous_db.translations.create_index([("created_at", DESCENDING)], background=True)
+        indigenous_db.translations.create_index([("español", TEXT), ("traduccion", TEXT)], 
+                                              background=True, default_language="spanish")
+        
+        # Índices para verificaciones
+        indigenous_db.verificaciones.create_index([("translation_id", ASCENDING)], background=True)
+        indigenous_db.verificaciones.create_index([("verificador_id", ASCENDING)], background=True)
+        
+        logger.info("Índices de base de datos configurados correctamente")
+        return True
+    
+    except Exception as e:
+        logger.error(f"Error al configurar índices de base de datos: {str(e)}")
+        # No interrumpir el inicio de la aplicación si falla la creación de índices
+        return False

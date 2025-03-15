@@ -1,11 +1,13 @@
 from typing import Tuple, List, Dict, Optional
 from bson import ObjectId
 from datetime import datetime
+import json
 
 from src.shared.database import get_db
-from src.shared.constants import ROLES, COLLECTIONS
+from src.shared.constants import ROLES, COLLECTIONS, STATUS
 from src.shared.standardization import VerificationBaseService, ErrorCodes
 from src.shared.exceptions import AppException
+from src.shared.logging import log_error
 from .models import Institute, EducationalProgram, Level, InstituteMember
 from src.analytics.services import InstituteAnalyticsService
 
@@ -275,6 +277,10 @@ class ProgramService(VerificationBaseService):
 
     def get_program_by_id(self, program_id: str) -> Optional[Dict]:
         try:
+            if not ObjectId.is_valid(program_id):
+                log_error(f"ID de programa inválido: {program_id}", module="institute.services")
+                return None
+                
             program = self.collection.find_one({"_id": ObjectId(program_id)})
             
             if not program:
@@ -305,8 +311,9 @@ class ProgramService(VerificationBaseService):
                 
             return program
         except Exception as e:
-            print(f"Error al obtener programa: {str(e)}")
-            return None
+            log_error("Error al obtener programa", e, "institute.services")
+            # Lanzar AppException para que sea manejada adecuadamente por el decorador handle_errors
+            raise AppException(f"Error al obtener programa: {str(e)}", AppException.INTERNAL_ERROR)
 
 class LevelService(VerificationBaseService):
     def __init__(self):

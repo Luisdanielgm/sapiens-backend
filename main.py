@@ -1,14 +1,27 @@
 from flask import Flask, jsonify, request
 from flask_cors import CORS
 from flask_jwt_extended import JWTManager
-from src.shared.database import get_db
-from config import active_config
+from src.shared.database import get_db, setup_database_indexes
+from config import active_config, validate_env_vars
 import logging
 import os
+import sys
 
 # Configuración de logging
-logging.basicConfig(level=logging.INFO)
+logging_level = logging.DEBUG if active_config.DEBUG else logging.INFO
+logging.basicConfig(
+    level=logging_level,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
 logger = logging.getLogger(__name__)
+
+# Verificar variables de entorno críticas
+if not validate_env_vars():
+    logger.critical("Faltan variables de entorno críticas. Por favor, configure el archivo .env")
+    if os.getenv('ENFORCE_ENV_VALIDATION', '0') == '1':
+        sys.exit(1)
+    else:
+        logger.warning("Continuando a pesar de la falta de variables de entorno. Esto puede causar errores.")
 
 # Importar Blueprints
 from src.users.routes import users_bp
@@ -78,7 +91,7 @@ def create_app(config_object=active_config):
         if request.method in ['POST', 'PUT', 'PATCH'] and request.is_json:
             try:
                 request_data = request.get_json()
-            except:
+            except Exception:
                 request_data = "Error al parsear JSON"
         elif request.form:
             request_data = dict(request.form)
@@ -96,7 +109,7 @@ def create_app(config_object=active_config):
             try:
                 # Guardar los datos originales
                 response_data = response.get_json()
-            except:
+            except Exception:
                 response_data = response.get_data(as_text=True)
         
         # Endpoints específicos que queremos monitorear especialmente
@@ -118,9 +131,20 @@ def create_app(config_object=active_config):
     try:
         db = get_db()
         logger.info("Conexión a MongoDB establecida")
+        
+        # Configurar índices si estamos en modo de desarrollo o la variable de entorno lo indica
+        if app.config['DEBUG'] or os.getenv('SETUP_INDEXES', '0') == '1':
+            logger.info("Configurando índices de la base de datos...")
+            setup_result = setup_database_indexes()
+            if setup_result:
+                logger.info("Índices configurados correctamente")
+            else:
+                logger.warning("No se pudieron configurar todos los índices")
     except Exception as e:
         logger.error(f"Error al conectar a MongoDB: {str(e)}")
         # No lanzar error para permitir ejecución aunque la BD no esté disponible
+        # Pero registrar claramente que puede haber problemas
+        logger.warning("La aplicación se está ejecutando sin conexión a la base de datos. Las operaciones pueden fallar.")
         
     # Registrar manejo de errores global
     @app.errorhandler(500)
