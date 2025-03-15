@@ -136,10 +136,16 @@ def get_institute_by_admin():
     Obtiene el instituto asociado al administrador actual.
     """
     try:
-        admin_email = request.user.get("email", "")
-        if not admin_email:
+        # Obtener el email del usuario usando user_id en lugar de request.user
+        user_id = request.user_id
+        db = get_db()
+        user = db.users.find_one({"_id": ObjectId(user_id)})
+        
+        if not user or "email" not in user:
             return APIRoute.error("No se pudo identificar el correo del administrador", 400)
-            
+        
+        admin_email = user["email"]
+        
         institute = institute_service.get_institute_by_admin(admin_email)
         if institute:
             return APIRoute.success(institute)

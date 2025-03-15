@@ -61,6 +61,10 @@ def auth_required(f):
             # Guardar información relevante del usuario en el request
             request.user_id = user_id
             request.user_role = user.get("role")
+            # Convertir ObjectId a str para poder acceder desde el request
+            user_dict = dict(user)
+            user_dict["_id"] = str(user_dict["_id"])
+            request.user = user_dict
             logger.info(f"Auth_required: Usuario autenticado con rol: {request.user_role}")
             
             return f(*args, **kwargs)
