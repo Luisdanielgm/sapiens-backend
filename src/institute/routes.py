@@ -136,17 +136,30 @@ def get_institute_by_admin():
     Obtiene el instituto asociado al administrador actual.
     """
     try:
-        admin_email = request.user.get("email", "")
+        # Obtener el ID del usuario autenticado
+        user_id = request.user_id
+        if not user_id:
+            return APIRoute.error(ErrorCodes.MISSING_FIELD, "No se pudo identificar el ID del administrador", status_code=400)
+            
+        # Consultar el usuario en la base de datos para obtener su email
+        from src.shared.database import get_db
+        db = get_db()
+        user = db.users.find_one({"_id": ObjectId(user_id)})
+        
+        if not user or "email" not in user:
+            return APIRoute.error(ErrorCodes.NOT_FOUND, "No se pudo obtener la información del administrador", status_code=400)
+            
+        admin_email = user.get("email", "")
         if not admin_email:
-            return APIRoute.error("No se pudo identificar el correo del administrador", 400)
+            return APIRoute.error(ErrorCodes.MISSING_FIELD, "No se pudo identificar el correo del administrador", status_code=400)
             
         institute = institute_service.get_institute_by_admin(admin_email)
         if institute:
             return APIRoute.success(institute)
         else:
-            return APIRoute.error("No se encontró un instituto asociado a este administrador", 404)
+            return APIRoute.error(ErrorCodes.NOT_FOUND, "No se encontró un instituto asociado a este administrador", status_code=404)
     except Exception as e:
-        return APIRoute.error(str(e), 500)
+        return APIRoute.error(ErrorCodes.SERVER_ERROR, str(e), status_code=500)
 
 @institute_bp.route('/all', methods=['GET'])
 @APIRoute.standard(auth_required_flag=True, roles=[ROLES["ADMIN"]])
