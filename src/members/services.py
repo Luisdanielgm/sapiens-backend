@@ -270,6 +270,79 @@ class MembershipService(VerificationBaseService):
         except Exception as e:
             return False, str(e)
 
+    def add_class_member_by_email(self, member_data: dict) -> Tuple[bool, str]:
+        """
+        Añade un miembro a una clase usando su email
+        Verifica que el usuario exista y sea miembro del instituto al que pertenece la clase
+        
+        Args:
+            member_data: dict con class_id, email y role
+            
+        Returns:
+            Tuple[bool, str]: (éxito, mensaje o id del miembro)
+        """
+        try:
+            # Verificar que la clase existe
+            class_obj = get_db().classes.find_one(
+                {"_id": ObjectId(member_data['class_id'])}
+            )
+            if not class_obj:
+                return False, "Clase no encontrada"
+
+            # Buscar usuario por email
+            user = get_db().users.find_one({"email": member_data['email']})
+            if not user:
+                return False, "Usuario no encontrado con ese email"
+
+            # Obtener el instituto al que pertenece la clase
+            class_institute_id = None
+            
+            # Buscar información académica relacionada con la clase
+            subject = get_db().subjects.find_one({"_id": class_obj.get("subject_id")})
+            if subject:
+                level = get_db().levels.find_one({"_id": subject.get("level_id")})
+                if level:
+                    program = get_db().educational_programs.find_one({"_id": level.get("program_id")})
+                    if program:
+                        class_institute_id = program.get("institute_id")
+            
+            if not class_institute_id:
+                return False, "No se pudo determinar el instituto de la clase"
+                
+            # Verificar que el usuario sea miembro del instituto
+            is_institute_member = self.collection.find_one({
+                "institute_id": class_institute_id,
+                "user_id": user['_id']
+            })
+            
+            if not is_institute_member:
+                return False, "El usuario debe ser miembro del instituto para unirse a una clase"
+
+            # Verificar que el usuario no sea ya miembro
+            existing_member = get_db().class_members.find_one({
+                "class_id": ObjectId(member_data['class_id']),
+                "user_id": user['_id']
+            })
+            if existing_member:
+                return False, "El usuario ya es miembro de la clase"
+
+            # Si el rol es profesor, verificar que no haya otro profesor asignado
+            if member_data['role'] == 'teacher':
+                existing_teacher = get_db().class_members.find_one({
+                    "class_id": ObjectId(member_data['class_id']),
+                    "role": "teacher"
+                })
+                if existing_teacher:
+                    return False, "La clase ya tiene un profesor asignado"
+
+            # Crear el nuevo miembro
+            member_data['user_id'] = str(user['_id'])
+            member = ClassMember(**member_data)
+            result = get_db().class_members.insert_one(member.to_dict())
+            return True, str(result.inserted_id)
+        except Exception as e:
+            return False, str(e)
+
     # ========== UTILIDADES ==========
     def get_user_institutes(self, user_id: str) -> List[Dict]:
         """

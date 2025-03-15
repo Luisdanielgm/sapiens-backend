@@ -70,7 +70,8 @@ def get_class_members(class_id):
 @members_bp.route('/class/<class_id>/members', methods=['POST'])
 @APIRoute.standard(
     auth_required_flag=True,
-    roles=[ROLES["TEACHER"]]
+    roles=[ROLES["TEACHER"], ROLES["INSTITUTE_ADMIN"]],
+    required_fields=['user_id', 'role']
 )
 def add_class_member(class_id):
     """Añadir un nuevo miembro a la clase"""
@@ -78,6 +79,30 @@ def add_class_member(class_id):
     data['class_id'] = class_id
     
     success, result = membership_service.add_class_member(data)
+    if success:
+        return APIRoute.success(
+            data={"member_id": result},
+            message="Miembro añadido correctamente", 
+            status_code=201
+        )
+    return APIRoute.error(
+        ErrorCodes.MEMBER_ADD_ERROR,
+        result,
+        status_code=400
+    )
+
+@members_bp.route('/class/<class_id>/members/by-email', methods=['POST'])
+@APIRoute.standard(
+    auth_required_flag=True,
+    roles=[ROLES["TEACHER"], ROLES["INSTITUTE_ADMIN"]],
+    required_fields=['email', 'role']
+)
+def add_class_member_by_email(class_id):
+    """Añadir un nuevo miembro a la clase usando su email"""
+    data = request.get_json()
+    data['class_id'] = class_id
+    
+    success, result = membership_service.add_class_member_by_email(data)
     if success:
         return APIRoute.success(
             data={"member_id": result},
