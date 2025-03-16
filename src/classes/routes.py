@@ -1,9 +1,11 @@
 from flask import request, jsonify
 from bson import ObjectId
+from flask_jwt_extended import get_jwt_identity
 
 from src.shared.standardization import APIBlueprint, APIRoute, ErrorCodes
 from src.shared.constants import ROLES
 from .services import ClassService, MembershipService, SubperiodService
+from src.shared.database import get_db
 
 classes_bp = APIBlueprint('classes', __name__)
 class_service = ClassService()
@@ -26,24 +28,37 @@ def create_class():
             if field not in request.json:
                 return APIRoute.error(ErrorCodes.MISSING_FIELD, f"Campo requerido: {field}")
         
+        # Obtener el usuario actual
+        user_id = get_jwt_identity()
+        
+        # Obtener información del instituto del usuario
+        db = get_db()
+        user = db.users.find_one({"_id": ObjectId(user_id)})
+        if not user:
+            return APIRoute.error(ErrorCodes.USER_NOT_FOUND, "Usuario no encontrado", status_code=404)
+        
         # Crear la clase
         class_data = {
-            'institute_id': request.user.get('institute_id'),
+            'institute_id': request.json.get('institute_id') or ObjectId(user.get('institute_id')),
             'subject_id': ObjectId(request.json['subject_id']),
             'section_id': ObjectId(request.json['section_id']),
             'academic_period_id': ObjectId(request.json['academic_period_id']),
             'level_id': ObjectId(request.json['level_id']),
             'name': request.json['name'],
             'access_code': request.json['access_code'],
-            'created_by': request.user['_id'],
+            'created_by': user_id,
             'created_at': ObjectId(request.json.get('created_at', '')).generation_time if request.json.get('created_at') else None
         }
+        
+        # Si hay un schedule, agregarlo
+        if 'schedule' in request.json:
+            class_data['schedule'] = request.json['schedule']
         
         success, result = class_service.create_class(class_data)
         
         if success:
             # Agregar al creador como miembro con rol de profesor
-            membership_service.add_member(result, request.user['_id'], 'teacher')
+            membership_service.add_member(result, user_id, 'teacher')
             return APIRoute.success({"id": result}, message="Clase creada exitosamente", status_code=201)
         else:
             return APIRoute.error(ErrorCodes.CREATION_ERROR, result)
@@ -186,6 +201,9 @@ def create_subperiod(class_id):
             if field not in request.json:
                 return APIRoute.error(f"Campo requerido: {field}", 400)
         
+        # Obtener el ID del usuario actual
+        user_id = get_jwt_identity()
+        
         # Crear el subperiodo
         subperiod_data = {
             'class_id': ObjectId(class_id),
@@ -193,7 +211,7 @@ def create_subperiod(class_id):
             'start_date': request.json['start_date'],
             'end_date': request.json['end_date'],
             'status': request.json.get('status', 'active'),
-            'created_by': request.user['_id']
+            'created_by': ObjectId(user_id)
         }
         
         success, result = subperiod_service.create_subperiod(subperiod_data)
