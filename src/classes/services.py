@@ -31,6 +31,54 @@ class ClassService(VerificationBaseService):
         except Exception:
             return False
 
+    def check_subject_exists(self, subject_id: str) -> bool:
+        """
+        Verifica si una materia existe
+        
+        Args:
+            subject_id: ID de la materia
+            
+        Returns:
+            bool: True si la materia existe, False en caso contrario
+        """
+        try:
+            subject = self.db.subjects.find_one({"_id": ObjectId(subject_id)})
+            return subject is not None
+        except Exception:
+            return False
+
+    def check_academic_period_exists(self, academic_period_id: str) -> bool:
+        """
+        Verifica si un período académico existe
+        
+        Args:
+            academic_period_id: ID del período académico
+            
+        Returns:
+            bool: True si el período académico existe, False en caso contrario
+        """
+        try:
+            academic_period = self.db.academic_periods.find_one({"_id": ObjectId(academic_period_id)})
+            return academic_period is not None
+        except Exception:
+            return False
+
+    def check_level_exists(self, level_id: str) -> bool:
+        """
+        Verifica si un nivel educativo existe
+        
+        Args:
+            level_id: ID del nivel educativo
+            
+        Returns:
+            bool: True si el nivel educativo existe, False en caso contrario
+        """
+        try:
+            level = self.db.levels.find_one({"_id": ObjectId(level_id)})
+            return level is not None
+        except Exception:
+            return False
+
     def create_class(self, class_data: dict) -> Tuple[bool, str]:
         try:
             # Verificar que la sección, materia, período académico y nivel existan
