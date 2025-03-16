@@ -412,7 +412,7 @@ class SimulationResultService(VerificationBaseService):
             
             return True, str(result.inserted_id)
         except Exception as e:
-            print(f"Error al guardar resultado de simulación: {str(e)}")
+            logging.error(f"Error al guardar resultado de simulación: {str(e)}")
             return False, str(e)
             
     def get_student_results(self, student_id: str) -> List[Dict]:
