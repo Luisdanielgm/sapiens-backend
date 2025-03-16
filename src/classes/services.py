@@ -134,11 +134,34 @@ class ClassService(VerificationBaseService):
             return None
 
     def update_class(self, class_id: str, updates: dict) -> Tuple[bool, str]:
+        """
+        Actualiza una clase existente.
+        
+        Args:
+            class_id: ID de la clase a actualizar
+            updates: Diccionario con los campos a actualizar
+            
+        Returns:
+            Tuple[bool, str]: (Éxito, Mensaje)
+        """
         try:
             # Verificar que la clase existe
             class_data = self.collection.find_one({"_id": ObjectId(class_id)})
             if not class_data:
                 return False, "Clase no encontrada"
+            
+            # Validar campos permitidos
+            allowed_fields = {'name', 'access_code', 'status', 'settings'}
+            invalid_fields = set(updates.keys()) - allowed_fields
+            if invalid_fields:
+                return False, f"Campos no permitidos: {', '.join(invalid_fields)}"
+            
+            # Validar valores
+            if 'status' in updates and updates['status'] not in ['active', 'inactive']:
+                return False, "Estado no válido. Debe ser 'active' o 'inactive'"
+            
+            if 'settings' in updates and not isinstance(updates['settings'], dict):
+                return False, "El campo 'settings' debe ser un objeto"
                 
             # Actualizar la clase
             result = self.collection.update_one(
@@ -146,10 +169,18 @@ class ClassService(VerificationBaseService):
                 {"$set": updates}
             )
             
-            if result.modified_count > 0:
-                return True, "Clase actualizada exitosamente"
-            return False, "No se realizaron cambios"
+            # Verificar si hubo cambios
+            if result.matched_count == 0:
+                return False, "Clase no encontrada"
+            
+            if result.modified_count == 0:
+                # La clase existe pero no hubo cambios
+                return True, "No se requirieron cambios, los valores son idénticos"
+                
+            return True, "Clase actualizada exitosamente"
+            
         except Exception as e:
+            print(f"Error al actualizar clase: {str(e)}")
             return False, str(e)
 
     def get_classes_by_level(self, level_id: str) -> List[Dict]:
