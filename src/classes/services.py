@@ -151,7 +151,7 @@ class ClassService(VerificationBaseService):
                 return False, "Clase no encontrada"
             
             # Validar campos permitidos
-            allowed_fields = {'name', 'access_code', 'status', 'settings'}
+            allowed_fields = {'name', 'access_code', 'status', 'settings', 'section_id', 'subject_id', 'academic_period_id'}
             invalid_fields = set(updates.keys()) - allowed_fields
             if invalid_fields:
                 return False, f"Campos no permitidos: {', '.join(invalid_fields)}"
@@ -162,6 +162,37 @@ class ClassService(VerificationBaseService):
             
             if 'settings' in updates and not isinstance(updates['settings'], dict):
                 return False, "El campo 'settings' debe ser un objeto"
+
+            # Validar existencia de entidades relacionadas si se actualizan
+            if 'section_id' in updates:
+                if not self.check_section_exists(updates['section_id']):
+                    return False, "La sección especificada no existe"
+                updates['section_id'] = ObjectId(updates['section_id'])
+
+            if 'subject_id' in updates:
+                if not self.check_subject_exists(updates['subject_id']):
+                    return False, "La materia especificada no existe"
+                updates['subject_id'] = ObjectId(updates['subject_id'])
+
+            if 'academic_period_id' in updates:
+                if not self.check_academic_period_exists(updates['academic_period_id']):
+                    return False, "El período académico especificado no existe"
+                updates['academic_period_id'] = ObjectId(updates['academic_period_id'])
+            
+            # Verificar si hay cambios reales comparando con los valores actuales
+            needs_update = False
+            for field, new_value in updates.items():
+                current_value = class_data.get(field)
+                if isinstance(current_value, ObjectId):
+                    current_value = str(current_value)
+                if isinstance(new_value, ObjectId):
+                    new_value = str(new_value)
+                if current_value != new_value:
+                    needs_update = True
+                    break
+            
+            if not needs_update:
+                return True, "No se requirieron cambios, los valores son idénticos"
                 
             # Actualizar la clase
             result = self.collection.update_one(
@@ -174,8 +205,7 @@ class ClassService(VerificationBaseService):
                 return False, "Clase no encontrada"
             
             if result.modified_count == 0:
-                # La clase existe pero no hubo cambios
-                return True, "No se requirieron cambios, los valores son idénticos"
+                return False, "No se pudo actualizar la clase"
                 
             return True, "Clase actualizada exitosamente"
             
