@@ -137,6 +137,50 @@ def delete_class(class_id):
             status_code=500
         )
 
+@classes_bp.route('/<class_id>/check-dependencies', methods=['GET'])
+@APIRoute.standard(auth_required_flag=True, roles=[ROLES["TEACHER"], ROLES["INSTITUTE_ADMIN"]])
+def check_class_dependencies(class_id):
+    """
+    Verifica si una clase tiene dependencias que impiden su eliminación.
+    
+    Args:
+        class_id: ID de la clase a verificar
+    """
+    try:
+        # Verificar que la clase existe
+        class_data = class_service.collection.find_one({"_id": ObjectId(class_id)})
+        if not class_data:
+            return APIRoute.error(
+                ErrorCodes.NOT_FOUND,
+                "Clase no encontrada",
+                status_code=404
+            )
+
+        # Verificar miembros
+        members_count = class_service.db.class_members.count_documents({
+            "class_id": ObjectId(class_id)
+        })
+        
+        # Verificar subperiodos
+        subperiods_count = class_service.db.subperiods.count_documents({
+            "class_id": ObjectId(class_id)
+        })
+        
+        return APIRoute.success({
+            "has_dependencies": members_count > 0 or subperiods_count > 0,
+            "dependencies": {
+                "members": members_count,
+                "subperiods": subperiods_count
+            }
+        })
+        
+    except Exception as e:
+        return APIRoute.error(
+            ErrorCodes.SERVER_ERROR,
+            str(e),
+            status_code=500
+        )
+
 # Rutas para manejo de miembros de la clase
 @classes_bp.route('/<class_id>/members/add', methods=['POST'])
 @APIRoute.standard(auth_required_flag=True, roles=[ROLES["TEACHER"], ROLES["INSTITUTE_ADMIN"]])
