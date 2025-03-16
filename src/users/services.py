@@ -5,6 +5,7 @@ import json
 
 from src.shared.database import get_db
 from src.shared.standardization import VerificationBaseService, ErrorCodes
+import logging
 from src.shared.exceptions import AppException
 from .models import User, CognitiveProfile
 
@@ -82,7 +83,7 @@ class UserService(VerificationBaseService):
             return profile_data
 
         except Exception as e:
-            print(f"Error al obtener perfil de usuario: {str(e)}")
+            logging.error(f"Error al obtener perfil de usuario: {str(e)}")
             return None
 
     def verify_user_exists(self, email: str) -> bool:
@@ -143,7 +144,7 @@ class UserService(VerificationBaseService):
                 }
             return None
         except Exception as e:
-            print(f"Error al obtener información del usuario: {str(e)}")
+            logging.error(f"Error al obtener información del usuario: {str(e)}")
             return None
 
     def verify_password(self, plain_password, hashed_password):
@@ -155,7 +156,7 @@ class UserService(VerificationBaseService):
                 return bcrypt.checkpw(plain_password.encode('utf-8'), hashed_password.encode('utf-8'))
             return False
         except Exception as e:
-            print(f"Error verificando contraseña: {str(e)}")
+            logging.error(f"Error verificando contraseña: {str(e)}")
             return False
 
 class CognitiveProfileService(VerificationBaseService):
@@ -184,7 +185,7 @@ class CognitiveProfileService(VerificationBaseService):
             )
             return True
         except Exception as e:
-            print(f"Error al actualizar perfil cognitivo: {str(e)}")
+            logging.error(f"Error al actualizar perfil cognitivo: {str(e)}")
             return False
 
     def get_cognitive_profile(self, email: str) -> Optional[Dict]:
@@ -200,5 +201,5 @@ class CognitiveProfileService(VerificationBaseService):
 
             return json.loads(profile["profile"])
         except Exception as e:
-            print(f"Error al obtener perfil cognitivo: {str(e)}")
+            logging.error(f"Error al obtener perfil cognitivo: {str(e)}")
             return None

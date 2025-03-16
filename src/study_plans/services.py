@@ -7,6 +7,7 @@ from src.shared.database import get_db
 from src.shared.constants import STATUS
 from src.shared.standardization import VerificationBaseService, ErrorCodes
 from src.shared.exceptions import AppException
+import logging
 from src.shared.validators import validate_object_id
 from .models import (
     StudyPlanPerSubject,
@@ -155,7 +156,7 @@ class StudyPlanService(VerificationBaseService):
             
             return plans
         except Exception as e:
-            print(f"Error al listar planes: {str(e)}")
+            logging.error(f"Error al listar planes: {str(e)}")
             return []
 
     def approve_study_plan(self, plan_id: str) -> bool:
@@ -171,7 +172,7 @@ class StudyPlanService(VerificationBaseService):
             )
             return result.modified_count > 0
         except Exception as e:
-            print(f"Error al aprobar plan: {str(e)}")
+            logging.error(f"Error al aprobar plan: {str(e)}")
             return False
 
     def get_study_plan(self, plan_id: str) -> Optional[Dict]:
@@ -211,7 +212,7 @@ class StudyPlanService(VerificationBaseService):
             plan["modules"] = modules
             return plan
         except Exception as e:
-            print(f"Error al obtener plan de estudio: {str(e)}")
+            logging.error(f"Error al obtener plan de estudio: {str(e)}")
             return None
 
 class StudyPlanAssignmentService(VerificationBaseService):
@@ -820,4 +821,4 @@ class EvaluationService(VerificationBaseService):
             
             return enriched_results
         except Exception as e:
-            return [] 
+            return []

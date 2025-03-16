@@ -6,6 +6,7 @@ from src.shared.database import get_db
 from src.shared.constants import STATUS
 from src.shared.standardization import VerificationBaseService, ErrorCodes
 from src.shared.exceptions import AppException
+import logging
 from .models import Simulation, VirtualSimulation, SimulationResult
 
 class SimulationService(VerificationBaseService):
@@ -70,7 +71,7 @@ class SimulationService(VerificationBaseService):
             
             return simulation
         except Exception as e:
-            print(f"Error al obtener simulación: {str(e)}")
+            logging.error(f"Error al obtener simulación: {str(e)}")
             return None
 
     def update_simulation(self, simulation_id: str, update_data: dict) -> Tuple[bool, str]:
@@ -84,7 +85,7 @@ class SimulationService(VerificationBaseService):
                 return True, "Simulación actualizada con éxito"
             return False, "No se realizaron cambios o simulación no encontrada"
         except Exception as e:
-            print(f"Error al actualizar simulación: {str(e)}")
+            logging.error(f"Error al actualizar simulación: {str(e)}")
             return False, str(e)
 
     def delete_simulation(self, simulation_id: str) -> Tuple[bool, str]:
@@ -117,7 +118,7 @@ class SimulationService(VerificationBaseService):
                 return True, f"Simulación eliminada con éxito: {deleted_v_sims} simulaciones virtuales y {deleted_results} resultados eliminados"
             return False, "Simulación no encontrada"
         except Exception as e:
-            print(f"Error al eliminar simulación: {str(e)}")
+            logging.error(f"Error al eliminar simulación: {str(e)}")
             return False, str(e)
 
     def get_simulations_by_topic(self, topic_id: str) -> List[Dict]:
@@ -131,7 +132,7 @@ class SimulationService(VerificationBaseService):
                     simulation["creator_id"] = str(simulation["creator_id"])
             return simulations
         except Exception as e:
-            print(f"Error al obtener simulaciones: {str(e)}")
+            logging.error(f"Error al obtener simulaciones: {str(e)}")
             return []
 
     def toggle_evaluation_mode(self, simulation_id: str) -> Tuple[bool, str]:
@@ -154,7 +155,7 @@ class SimulationService(VerificationBaseService):
                 return True, f"Simulación actualizada como {new_status}"
             return False, "No se realizaron cambios"
         except Exception as e:
-            print(f"Error al cambiar modo de evaluación: {str(e)}")
+            logging.error(f"Error al cambiar modo de evaluación: {str(e)}")
             return False, str(e)
 
     def delete_all_topic_simulations(self, topic_id: str) -> Tuple[int, int, int]:
@@ -194,7 +195,7 @@ class SimulationService(VerificationBaseService):
                 
             return sims_deleted, v_sims_deleted, results_deleted
         except Exception as e:
-            print(f"Error al eliminar simulaciones del tema: {str(e)}")
+            logging.error(f"Error al eliminar simulaciones del tema: {str(e)}")
             return 0, 0, 0
 
 class VirtualSimulationService(VerificationBaseService):
@@ -264,7 +265,7 @@ class VirtualSimulationService(VerificationBaseService):
             result = self.collection.insert_one(virtual_simulation.to_dict())
             return True, str(result.inserted_id)
         except Exception as e:
-            print(f"Error al crear simulación virtual: {str(e)}")
+            logging.error(f"Error al crear simulación virtual: {str(e)}")
             return False, str(e)
 
     def get_virtual_simulation(self, virtual_simulation_id: str) -> Optional[Dict]:
@@ -281,7 +282,7 @@ class VirtualSimulationService(VerificationBaseService):
             
             return virtual_simulation
         except Exception as e:
-            print(f"Error al obtener simulación virtual: {str(e)}")
+            logging.error(f"Error al obtener simulación virtual: {str(e)}")
             return None
 
     def update_virtual_simulation(self, virtual_simulation_id: str, update_data: dict) -> Tuple[bool, str]:
@@ -453,4 +454,4 @@ class SimulationResultService(VerificationBaseService):
             return result
         except Exception as e:
             print(f"Error al obtener resultado: {str(e)}")
-            return None 
+            return None

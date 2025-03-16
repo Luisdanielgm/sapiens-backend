@@ -81,7 +81,7 @@ class VirtualModuleService(VerificationBaseService):
             
             return module
         except Exception as e:
-            print(f"Error al obtener detalles del módulo: {str(e)}")
+            logging.error(f"Error al obtener detalles del módulo: {str(e)}")
             return None
 
 class VirtualTopicService(VerificationBaseService):
@@ -327,4 +327,4 @@ class VirtualEvaluationService(VerificationBaseService):
         else:
             final_score = 0
             
-        return round(final_score, 2) 
+        return round(final_score, 2)
