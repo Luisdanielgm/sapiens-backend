@@ -225,6 +225,49 @@ class ClassService(VerificationBaseService):
             print(f"Error al obtener clases del nivel: {str(e)}")
             return []
 
+    def delete_class(self, class_id: str) -> Tuple[bool, str]:
+        """
+        Elimina una clase si no tiene miembros o subperiodos asociados.
+        
+        Args:
+            class_id: ID de la clase a eliminar
+            
+        Returns:
+            Tuple[bool, str]: (Éxito, Mensaje)
+        """
+        try:
+            # Validar que la clase existe
+            class_data = self.collection.find_one({"_id": ObjectId(class_id)})
+            if not class_data:
+                return False, "Clase no encontrada"
+
+            # Verificar si hay miembros asociados
+            members_count = self.db.class_members.count_documents({
+                "class_id": ObjectId(class_id)
+            })
+            
+            if members_count > 0:
+                return False, f"No se puede eliminar la clase porque tiene {members_count} miembros asociados"
+
+            # Verificar si hay subperiodos asociados
+            subperiods_count = self.db.subperiods.count_documents({
+                "class_id": ObjectId(class_id)
+            })
+            
+            if subperiods_count > 0:
+                return False, f"No se puede eliminar la clase porque tiene {subperiods_count} subperiodos asociados"
+
+            # Si no hay dependencias, eliminar la clase
+            result = self.collection.delete_one({"_id": ObjectId(class_id)})
+            
+            if result.deleted_count > 0:
+                return True, "Clase eliminada correctamente"
+            return False, "No se pudo eliminar la clase"
+            
+        except Exception as e:
+            print(f"Error al eliminar clase: {str(e)}")
+            return False, str(e)
+
 class MembershipService(VerificationBaseService):
     def __init__(self):
         super().__init__(collection_name="classroom_members")

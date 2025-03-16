@@ -111,6 +111,32 @@ def update_class(class_id):
     except Exception as e:
         return APIRoute.error(str(e), 500)
 
+@classes_bp.route('/<class_id>', methods=['DELETE'])
+@APIRoute.standard(auth_required_flag=True, roles=[ROLES["TEACHER"], ROLES["INSTITUTE_ADMIN"]])
+def delete_class(class_id):
+    """
+    Elimina una clase específica si no tiene dependencias.
+    
+    Args:
+        class_id: ID de la clase a eliminar
+    """
+    try:
+        success, message = class_service.delete_class(class_id)
+        
+        if success:
+            return APIRoute.success(message=message)
+        return APIRoute.error(
+            ErrorCodes.DELETE_ERROR,
+            message,
+            status_code=400
+        )
+    except Exception as e:
+        return APIRoute.error(
+            ErrorCodes.SERVER_ERROR,
+            str(e),
+            status_code=500
+        )
+
 # Rutas para manejo de miembros de la clase
 @classes_bp.route('/<class_id>/members/add', methods=['POST'])
 @APIRoute.standard(auth_required_flag=True, roles=[ROLES["TEACHER"], ROLES["INSTITUTE_ADMIN"]])
