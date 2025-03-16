@@ -152,6 +152,49 @@ class ClassService(VerificationBaseService):
         except Exception as e:
             return False, str(e)
 
+    def get_classes_by_level(self, level_id: str) -> List[Dict]:
+        """
+        Obtiene todas las clases de un nivel específico
+        
+        Args:
+            level_id: ID del nivel educativo
+            
+        Returns:
+            List[Dict]: Lista de clases con información detallada
+        """
+        try:
+            # Obtener todas las clases del nivel
+            classes = list(self.collection.find({"level_id": ObjectId(level_id)}))
+            result = []
+            
+            for class_item in classes:
+                # Obtener información relacionada
+                subject = self.db.subjects.find_one({"_id": class_item["subject_id"]})
+                section = self.db.sections.find_one({"_id": class_item["section_id"]})
+                
+                # Convertir ObjectIds a strings
+                class_item["_id"] = str(class_item["_id"])
+                class_item["subject_id"] = str(class_item["subject_id"])
+                class_item["section_id"] = str(class_item["section_id"])
+                class_item["institute_id"] = str(class_item["institute_id"])
+                class_item["academic_period_id"] = str(class_item["academic_period_id"])
+                class_item["level_id"] = str(class_item["level_id"])
+                
+                # Agregar información del subject
+                if subject:
+                    class_item["subject_name"] = subject.get("name", "")
+                    
+                # Agregar información de la sección
+                if section:
+                    class_item["section_name"] = section.get("name", "")
+                
+                result.append(class_item)
+                
+            return result
+        except Exception as e:
+            print(f"Error al obtener clases del nivel: {str(e)}")
+            return []
+
 class MembershipService(VerificationBaseService):
     def __init__(self):
         super().__init__(collection_name="classroom_members")

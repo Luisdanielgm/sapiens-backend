@@ -235,6 +235,19 @@ def get_class_subperiods(class_id):
     except Exception as e:
         return APIRoute.error(str(e), 500)
 
+@classes_bp.route('/level/<level_id>', methods=['GET'])
+@APIRoute.standard(auth_required_flag=True, roles=[ROLES["INSTITUTE_ADMIN"]])
+def get_level_classes(level_id):
+    """
+    Obtiene todas las clases de un nivel específico.
+    Solo accesible para administradores del instituto.
+    """
+    try:
+        classes = class_service.get_classes_by_level(level_id)
+        return APIRoute.success(classes)
+    except Exception as e:
+        return APIRoute.error(str(e), 500)
+
 @classes_bp.route('/', methods=['OPTIONS'])
 @classes_bp.route('/<path:path>', methods=['OPTIONS'])
 def handle_options(path=None):
