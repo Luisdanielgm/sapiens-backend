@@ -296,7 +296,7 @@ class VirtualSimulationService(VerificationBaseService):
                 return True, "Simulación virtual actualizada con éxito"
             return False, "No se realizaron cambios o simulación virtual no encontrada"
         except Exception as e:
-            print(f"Error al actualizar simulación virtual: {str(e)}")
+            logging.error(f"Error al actualizar simulación virtual: {str(e)}")
             return False, str(e)
 
     def get_student_simulations(self, student_id: str) -> List[Dict]:
@@ -324,7 +324,7 @@ class VirtualSimulationService(VerificationBaseService):
             
             return virtual_simulations
         except Exception as e:
-            print(f"Error al obtener simulaciones del estudiante: {str(e)}")
+            logging.error(f"Error al obtener simulaciones del estudiante: {str(e)}")
             return []
 
     def update_simulation_progress(self, virtual_simulation_id: str, completion_status: str, time_spent: int, interactions: int) -> Tuple[bool, str]:
@@ -353,7 +353,7 @@ class VirtualSimulationService(VerificationBaseService):
                 return True, "Progreso de la simulación actualizado con éxito"
             return False, "No se realizaron cambios"
         except Exception as e:
-            print(f"Error al actualizar progreso de la simulación: {str(e)}")
+            logging.error(f"Error al actualizar progreso de la simulación: {str(e)}")
             return False, str(e)
 
 class SimulationResultService(VerificationBaseService):
