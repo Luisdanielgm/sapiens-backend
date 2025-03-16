@@ -215,4 +215,12 @@ def get_class_subperiods(class_id):
         subperiods = subperiod_service.get_class_subperiods(class_id)
         return APIRoute.success(subperiods)
     except Exception as e:
-        return APIRoute.error(str(e), 500) 
+        return APIRoute.error(str(e), 500)
+
+@classes_bp.route('/', methods=['OPTIONS'])
+@classes_bp.route('/<path:path>', methods=['OPTIONS'])
+def handle_options(path=None):
+    """
+    Manejador para solicitudes OPTIONS - requerido para CORS
+    """
+    return "", 200 

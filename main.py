@@ -54,7 +54,8 @@ def create_app(config_object=active_config):
             "origins": app.config["CORS_ORIGINS"],
             "methods": ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
             "allow_headers": ["Content-Type", "Authorization"],
-            "supports_credentials": True
+            "supports_credentials": True,
+            "automatic_options": True
         }
     })
 
