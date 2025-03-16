@@ -154,13 +154,17 @@ class ClassService(VerificationBaseService):
 
     def get_classes_by_level(self, level_id: str) -> List[Dict]:
         """
-        Obtiene todas las clases de un nivel específico
+        Obtiene todas las clases de un nivel específico con información detallada
         
         Args:
             level_id: ID del nivel educativo
             
         Returns:
-            List[Dict]: Lista de clases con información detallada
+            List[Dict]: Lista de clases con información detallada incluyendo:
+                - Nombre de la materia
+                - Código de la sección
+                - Nombre del período académico
+                - Información del horario de la sección
         """
         try:
             # Obtener todas las clases del nivel
@@ -169,26 +173,52 @@ class ClassService(VerificationBaseService):
             
             for class_item in classes:
                 # Obtener información relacionada
-                subject = self.db.subjects.find_one({"_id": class_item["subject_id"]})
-                section = self.db.sections.find_one({"_id": class_item["section_id"]})
+                subject = self.db.subjects.find_one({"_id": ObjectId(class_item["subject_id"])})
+                section = self.db.sections.find_one({"_id": ObjectId(class_item["section_id"])})
+                academic_period = self.db.academic_periods.find_one({"_id": ObjectId(class_item["academic_period_id"])})
                 
                 # Convertir ObjectIds a strings
-                class_item["_id"] = str(class_item["_id"])
-                class_item["subject_id"] = str(class_item["subject_id"])
-                class_item["section_id"] = str(class_item["section_id"])
-                class_item["institute_id"] = str(class_item["institute_id"])
-                class_item["academic_period_id"] = str(class_item["academic_period_id"])
-                class_item["level_id"] = str(class_item["level_id"])
+                class_data = {
+                    "_id": str(class_item["_id"]),
+                    "name": class_item["name"],
+                    "subject_id": str(class_item["subject_id"]),
+                    "section_id": str(class_item["section_id"]),
+                    "institute_id": str(class_item["institute_id"]),
+                    "academic_period_id": str(class_item["academic_period_id"]),
+                    "level_id": str(class_item["level_id"]),
+                    "access_code": class_item.get("access_code"),
+                    "status": class_item.get("status", "active"),
+                    "settings": class_item.get("settings", {}),
+                    "created_by": str(class_item["created_by"]) if "created_by" in class_item else None,
+                    "created_at": class_item["created_at"].isoformat() if "created_at" in class_item else None
+                }
                 
                 # Agregar información del subject
                 if subject:
-                    class_item["subject_name"] = subject.get("name", "")
+                    class_data.update({
+                        "subject_name": subject.get("name"),
+                        "subject_code": subject.get("code"),
+                        "subject_credits": subject.get("credits")
+                    })
                     
                 # Agregar información de la sección
                 if section:
-                    class_item["section_name"] = section.get("name", "")
+                    class_data.update({
+                        "section_code": section.get("code"),
+                        "section_capacity": section.get("capacity"),
+                        "section_schedule": section.get("schedule", {})
+                    })
                 
-                result.append(class_item)
+                # Agregar información del período académico
+                if academic_period:
+                    class_data.update({
+                        "period_name": academic_period.get("name"),
+                        "period_type": academic_period.get("type"),
+                        "period_start_date": academic_period.get("start_date"),
+                        "period_end_date": academic_period.get("end_date")
+                    })
+                
+                result.append(class_data)
                 
             return result
         except Exception as e:
