@@ -13,7 +13,7 @@ subperiod_service = SubperiodService()
 
 # Rutas para manejo de clases
 @classes_bp.route('/create', methods=['POST'])
-@APIRoute.standard(auth_required_flag=True, roles=[ROLES["TEACHER"]])
+@APIRoute.standard(auth_required_flag=True, roles=[ROLES["TEACHER"], ROLES["INSTITUTE_ADMIN"]])
 def create_class():
     """
     Crea una nueva clase con los parámetros especificados.
@@ -66,7 +66,7 @@ def get_class_details(class_id):
         return APIRoute.error(str(e), 500)
 
 @classes_bp.route('/<class_id>/update', methods=['PUT'])
-@APIRoute.standard(auth_required_flag=True, roles=[ROLES["TEACHER"]])
+@APIRoute.standard(auth_required_flag=True, roles=[ROLES["TEACHER"], ROLES["INSTITUTE_ADMIN"]])
 def update_class(class_id):
     """
     Actualiza una clase existente.
@@ -98,7 +98,7 @@ def update_class(class_id):
 
 # Rutas para manejo de miembros de la clase
 @classes_bp.route('/<class_id>/members/add', methods=['POST'])
-@APIRoute.standard(auth_required_flag=True, roles=[ROLES["TEACHER"]])
+@APIRoute.standard(auth_required_flag=True, roles=[ROLES["TEACHER"], ROLES["INSTITUTE_ADMIN"]])
 def add_class_member(class_id):
     """
     Agrega un miembro a una clase.
@@ -161,7 +161,7 @@ def get_student_classes(student_id_or_email):
         return APIRoute.error(str(e), 500)
 
 @classes_bp.route('/<class_id>/students', methods=['GET'])
-@APIRoute.standard(auth_required_flag=True, roles=[ROLES["TEACHER"]])
+@APIRoute.standard(auth_required_flag=True, roles=[ROLES["TEACHER"], ROLES["INSTITUTE_ADMIN"]])
 def get_class_students(class_id):
     """
     Obtiene todos los estudiantes de una clase.
@@ -174,7 +174,7 @@ def get_class_students(class_id):
 
 # Rutas para manejo de subperiodos
 @classes_bp.route('/<class_id>/subperiod/create', methods=['POST'])
-@APIRoute.standard(auth_required_flag=True, roles=[ROLES["TEACHER"]])
+@APIRoute.standard(auth_required_flag=True, roles=[ROLES["TEACHER"], ROLES["INSTITUTE_ADMIN"]])
 def create_subperiod(class_id):
     """
     Crea un nuevo subperíodo para una clase.
