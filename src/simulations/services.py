@@ -453,5 +453,5 @@ class SimulationResultService(VerificationBaseService):
             
             return result
         except Exception as e:
-            print(f"Error al obtener resultado: {str(e)}")
+            logging.error(f"Error al obtener resultado: {str(e)}")
             return None
