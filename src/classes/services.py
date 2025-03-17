@@ -547,6 +547,118 @@ class MembershipService(VerificationBaseService):
             print(f"Error al obtener estudiantes de la clase: {str(e)}")
             return []
 
+    def remove_member(self, class_id: str, member_id: str) -> Tuple[bool, str]:
+        """
+        Elimina un miembro de una clase
+        
+        Args:
+            class_id: ID de la clase
+            member_id: ID del miembro a eliminar
+            
+        Returns:
+            Tuple[bool, str]: (Éxito, Mensaje)
+        """
+        try:
+            # Verificar que la clase existe
+            class_data = self.db.classes.find_one({"_id": ObjectId(class_id)})
+            if not class_data:
+                return False, "Clase no encontrada"
+                
+            # Verificar que el miembro existe
+            member = self.collection.find_one({
+                "_id": ObjectId(member_id),
+                "class_id": ObjectId(class_id)
+            })
+            
+            if not member:
+                return False, "Miembro no encontrado en la clase especificada"
+                
+            # Eliminar el miembro
+            result = self.collection.delete_one({
+                "_id": ObjectId(member_id),
+                "class_id": ObjectId(class_id)
+            })
+            
+            if result.deleted_count > 0:
+                return True, "Miembro eliminado correctamente"
+            return False, "No se pudo eliminar el miembro"
+        except Exception as e:
+            print(f"Error al eliminar miembro: {str(e)}")
+            return False, str(e)
+    
+    def add_member_by_email(self, class_id: str, email: str, role: str) -> Tuple[bool, Union[str, Dict]]:
+        """
+        Agrega un miembro a una clase mediante su email
+        
+        Args:
+            class_id: ID de la clase
+            email: Email del usuario
+            role: Rol a asignar ('teacher' o 'student')
+            
+        Returns:
+            Tuple[bool, Union[str, Dict]]: (Éxito, Mensaje o datos)
+        """
+        try:
+            # Verificar que la clase existe
+            class_data = self.db.classes.find_one({"_id": ObjectId(class_id)})
+            if not class_data:
+                return False, "Clase no encontrada"
+                
+            # Buscar al usuario por email
+            user = self.db.users.find_one({"email": email})
+            if not user:
+                return False, f"No se encontró ningún usuario con el email {email}"
+                
+            user_id = str(user["_id"])
+            
+            # Verificar que el rol es válido para miembros de clase
+            if role not in ["teacher", "student"]:
+                return False, "Rol no válido para miembros de clase"
+                
+            # Verificar si ya es miembro
+            existing_member = self.collection.find_one({
+                "class_id": ObjectId(class_id),
+                "user_id": ObjectId(user_id)
+            })
+            
+            if existing_member:
+                # Si ya existe pero con rol diferente, actualizar
+                if existing_member.get("role") != role:
+                    self.collection.update_one(
+                        {"_id": existing_member["_id"]},
+                        {"$set": {"role": role}}
+                    )
+                    return True, {
+                        "id": str(existing_member["_id"]),
+                        "message": f"Rol de miembro actualizado a {role}",
+                        "user_info": {
+                            "id": user_id,
+                            "name": user.get("name", ""),
+                            "email": email
+                        }
+                    }
+                return False, f"El usuario ya es miembro de esta clase con el rol de {role}"
+                
+            # Crear nueva membresía
+            member = ClassMember(
+                class_id=ObjectId(class_id),
+                user_id=ObjectId(user_id),
+                role=role
+            )
+            result = self.collection.insert_one(member.to_dict())
+            
+            return True, {
+                "id": str(result.inserted_id),
+                "user_info": {
+                    "id": user_id,
+                    "name": user.get("name", ""),
+                    "email": email
+                }
+            }
+        except Exception as e:
+            print(f"Error al agregar miembro por email: {str(e)}")
+            return False, str(e)
+
 class SubperiodService(VerificationBaseService):
     def __init__(self):
         super().__init__(collection_name="subperiods")

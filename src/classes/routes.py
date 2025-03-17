@@ -257,6 +257,89 @@ def get_class_students(class_id):
     except Exception as e:
         return APIRoute.error(str(e), 500)
 
+@classes_bp.route('/<class_id>/members/<member_id>', methods=['DELETE'])
+@APIRoute.standard(auth_required_flag=True, roles=[ROLES["TEACHER"], ROLES["INSTITUTE_ADMIN"]])
+def remove_class_member(class_id, member_id):
+    """
+    Elimina un miembro de una clase.
+    
+    Args:
+        class_id: ID de la clase
+        member_id: ID del miembro a eliminar
+    """
+    try:
+        success, message = membership_service.remove_member(class_id, member_id)
+        
+        if success:
+            return APIRoute.success(message=message)
+        return APIRoute.error(
+            ErrorCodes.DELETE_ERROR,
+            message,
+            status_code=400
+        )
+    except Exception as e:
+        return APIRoute.error(
+            ErrorCodes.SERVER_ERROR,
+            str(e),
+            status_code=500
+        )
+
+@classes_bp.route('/<class_id>/members/add-by-email', methods=['POST'])
+@APIRoute.standard(auth_required_flag=True, roles=[ROLES["TEACHER"], ROLES["INSTITUTE_ADMIN"]])
+def add_class_member_by_email(class_id):
+    """
+    Agrega un miembro a una clase mediante su email.
+    
+    Args:
+        class_id: ID de la clase
+    """
+    try:
+        # Validar que vienen los campos requeridos
+        if 'email' not in request.json or 'role' not in request.json:
+            return APIRoute.error(
+                ErrorCodes.MISSING_FIELD,
+                "Se requieren los campos email y role",
+                status_code=400
+            )
+        
+        email = request.json['email']
+        role = request.json['role']
+        
+        # Validar formato de email básico
+        if '@' not in email:
+            return APIRoute.error(
+                ErrorCodes.INVALID_FORMAT,
+                "Formato de email inválido",
+                status_code=400
+            )
+        
+        # Validar que el rol es válido
+        if role not in ["teacher", "student"]:
+            return APIRoute.error(
+                ErrorCodes.INVALID_DATA,
+                "Rol no válido. Debe ser 'teacher' o 'student'",
+                status_code=400
+            )
+        
+        success, result = membership_service.add_member_by_email(class_id, email, role)
+        
+        if success:
+            if isinstance(result, dict) and "message" in result:
+                return APIRoute.success(result, message=result["message"], status_code=200)
+            return APIRoute.success(result, status_code=201)
+        else:
+            return APIRoute.error(
+                ErrorCodes.OPERATION_FAILED,
+                result,
+                status_code=400
+            )
+    except Exception as e:
+        return APIRoute.error(
+            ErrorCodes.SERVER_ERROR,
+            str(e),
+            status_code=500
+        )
+
 # Rutas para manejo de subperiodos
 @classes_bp.route('/<class_id>/subperiod/create', methods=['POST'])
 @APIRoute.standard(auth_required_flag=True, roles=[ROLES["TEACHER"], ROLES["INSTITUTE_ADMIN"]])

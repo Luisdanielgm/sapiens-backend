@@ -5,6 +5,7 @@ from bson import ObjectId
 from src.shared.database import get_db
 from src.shared.standardization import VerificationBaseService, ErrorCodes
 from src.shared.exceptions import AppException
+import logging
 from src.student_individual_content.models import StudentIndividualContent
 
 
@@ -133,7 +134,7 @@ class StudentIndividualContentService(VerificationBaseService):
             return True, str(result.inserted_id)
             
         except Exception as e:
-            print(f"Error al crear contenido: {str(e)}")
+            logging.error(f"Error al crear contenido: {str(e)}")
             return False, str(e)
             
     def update_content(self, content_id: str, updates: Dict) -> Tuple[bool, str]:
@@ -213,7 +214,7 @@ class StudentIndividualContentService(VerificationBaseService):
             return content
             
         except Exception as e:
-            print(f"Error al obtener contenido: {str(e)}")
+            logging.error(f"Error al obtener contenido: {str(e)}")
             return None
             
     def get_student_content(self, student_id: str, class_id: Optional[str] = None) -> List[Dict]:
@@ -252,7 +253,7 @@ class StudentIndividualContentService(VerificationBaseService):
             return contents
             
         except Exception as e:
-            print(f"Error al obtener contenido del estudiante: {str(e)}")
+            logging.error(f"Error al obtener contenido del estudiante: {str(e)}")
             return []
             
     def delete_content(self, content_id: str) -> Tuple[bool, str]:
@@ -277,5 +278,5 @@ class StudentIndividualContentService(VerificationBaseService):
             return False, "No se pudo eliminar el contenido"
             
         except Exception as e:
-            print(f"Error al eliminar contenido: {str(e)}")
-            return False, str(e) 
+            logging.error(f"Error al eliminar contenido: {str(e)}")
+            return False, str(e)

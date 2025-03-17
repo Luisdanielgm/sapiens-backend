@@ -7,8 +7,10 @@ from .services import (
     TopicService
 )
 from src.shared.standardization import APIBlueprint, APIRoute, ErrorCodes
+import logging
 from src.shared.constants import ROLES
 from bson import ObjectId
+from src.shared.utils import ensure_json_serializable
 
 study_plan_bp = APIBlueprint('study_plan', __name__)
 
@@ -63,7 +65,7 @@ def get_study_plan(plan_id):
             "Plan de estudios no encontrado"
         )
     except Exception as e:
-        print(f"Error al obtener plan de estudios: {str(e)}")
+        logging.error(f"Error al obtener plan de estudios: {str(e)}")
         return APIRoute.error(
             ErrorCodes.SERVER_ERROR,
             str(e),
@@ -148,7 +150,7 @@ def get_class_assigned_plan(class_id, subperiod_id):
             "No hay plan asignado para esta clase y subperiodo"
         )
     except Exception as e:
-        print(f"Error al obtener plan asignado: {str(e)}")
+        logging.error(f"Error al obtener plan asignado: {str(e)}")
         return APIRoute.error(
             ErrorCodes.SERVER_ERROR,
             str(e),
@@ -166,7 +168,7 @@ def list_plan_assignments():
         assignments = ensure_json_serializable(assignments)
         return APIRoute.success(data=assignments)
     except Exception as e:
-        print(f"Error al listar asignaciones: {str(e)}")
+        logging.error(f"Error al listar asignaciones: {str(e)}")
         return APIRoute.error(
             ErrorCodes.SERVER_ERROR,
             str(e),
@@ -182,21 +184,20 @@ def create_module():
     
     # Extraer topics del payload si existen
     topics_data = data.pop('topics', [])
-    print(f"Topics extraídos del payload: {len(topics_data)}")
+    logging.info(f"Topics extraídos del payload: {len(topics_data)}")
     
     success, module_id = module_service.create_module(data)
-    print(f"Módulo creado: {success}, ID: {module_id}")
+    logging.info(f"Módulo creado: {success}, ID: {module_id}")
     
     if success:
         # Crear topics asociados al módulo
         topics_ids = []
         for i, topic_data in enumerate(topics_data):
             topic_data['module_id'] = module_id
-            print(f"Creando topic {i+1}/{len(topics_data)}: {topic_data['name']}")
             topic_success, topic_id = topic_service.create_topic(topic_data)
             if topic_success:
                 topics_ids.append(topic_id)
-                print(f"Topic creado exitosamente: {topic_id}")
+                logging.info(f"Topic creado exitosamente: {topic_id}")
             
         return APIRoute.success(
             {
@@ -638,4 +639,4 @@ def delete_topic_theory():
             ErrorCodes.SERVER_ERROR,
             str(e),
             status_code=500
-        ) 
+        )
