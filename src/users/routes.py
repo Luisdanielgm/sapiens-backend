@@ -6,6 +6,7 @@ import logging
 
 from .services import UserService, CognitiveProfileService
 from src.shared.standardization import APIBlueprint, APIRoute, ErrorCodes
+from src.shared.utils import ensure_json_serializable
 from src.shared.constants import ROLES
 from src.shared.exceptions import AppException
 from src.shared.database import get_db

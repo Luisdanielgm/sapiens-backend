@@ -1,7 +1,9 @@
 from flask import request
+import logging
 
 from src.shared.standardization import APIBlueprint, APIRoute, ErrorCodes
 from src.shared.constants import ROLES
+from src.shared.utils import ensure_json_serializable
 from src.student_individual_content.services import StudentIndividualContentService
 
 student_individual_content_bp = APIBlueprint('student_individual_content', __name__)
@@ -44,6 +46,7 @@ def create_student_content():
             status_code=400
         )
     except Exception as e:
+        logging.error(str(e))
         return APIRoute.error(
             ErrorCodes.SERVER_ERROR,
             str(e),
@@ -82,6 +85,7 @@ def update_student_content(content_id):
             status_code=400
         )
     except Exception as e:
+        logging.error(str(e))
         return APIRoute.error(
             ErrorCodes.SERVER_ERROR,
             str(e),
@@ -108,6 +112,7 @@ def get_student_content_by_id(content_id):
             status_code=404
         )
     except Exception as e:
+        logging.error(str(e))
         return APIRoute.error(
             ErrorCodes.SERVER_ERROR,
             str(e),
@@ -132,6 +137,7 @@ def get_student_all_content(student_id):
         
         return APIRoute.success(data={"contents": contents})
     except Exception as e:
+        logging.error(str(e))
         return APIRoute.error(
             ErrorCodes.SERVER_ERROR,
             str(e),
@@ -161,8 +167,9 @@ def delete_student_content(content_id):
             status_code=400
         )
     except Exception as e:
+        logging.error(str(e))
         return APIRoute.error(
             ErrorCodes.SERVER_ERROR,
             str(e),
             status_code=500
-        ) 
+        )

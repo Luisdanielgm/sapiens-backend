@@ -1,7 +1,9 @@
 from flask import request
+import logging
 
 from src.shared.standardization import APIBlueprint, APIRoute, ErrorCodes
 from src.shared.constants import ROLES
+from src.shared.utils import ensure_json_serializable
 from .services import SimulationService, VirtualSimulationService, SimulationResultService
 
 # Crear blueprint
@@ -39,6 +41,7 @@ def create_simulation():
             status_code=400
         )
     except Exception as e:
+        logging.error(str(e))
         return APIRoute.error(
             ErrorCodes.SERVER_ERROR,
             str(e),
@@ -59,6 +62,7 @@ def get_simulation(simulation_id):
             status_code=404
         )
     except Exception as e:
+        logging.error(str(e))
         return APIRoute.error(
             ErrorCodes.SERVER_ERROR,
             str(e),
@@ -84,6 +88,7 @@ def update_simulation(simulation_id):
             status_code=400
         )
     except Exception as e:
+        logging.error(str(e))
         return APIRoute.error(
             ErrorCodes.SERVER_ERROR,
             str(e),
@@ -108,6 +113,7 @@ def delete_simulation(simulation_id):
             status_code=400
         )
     except Exception as e:
+        logging.error(str(e))
         return APIRoute.error(
             ErrorCodes.SERVER_ERROR,
             str(e),
@@ -122,6 +128,7 @@ def get_simulations_by_topic(topic_id):
         simulations = simulation_service.get_simulations_by_topic(topic_id)
         return APIRoute.success(data={"simulations": simulations})
     except Exception as e:
+        logging.error(str(e))
         return APIRoute.error(
             ErrorCodes.SERVER_ERROR,
             str(e),
@@ -146,6 +153,7 @@ def toggle_evaluation_mode(simulation_id):
             status_code=400
         )
     except Exception as e:
+        logging.error(str(e))
         return APIRoute.error(
             ErrorCodes.SERVER_ERROR,
             str(e),
@@ -176,6 +184,7 @@ def create_virtual_simulation():
             status_code=400
         )
     except Exception as e:
+        logging.error(str(e))
         return APIRoute.error(
             ErrorCodes.SERVER_ERROR,
             str(e),
@@ -196,6 +205,7 @@ def get_virtual_simulation(virtual_simulation_id):
             status_code=404
         )
     except Exception as e:
+        logging.error(str(e))
         return APIRoute.error(
             ErrorCodes.SERVER_ERROR,
             str(e),
@@ -210,6 +220,7 @@ def get_student_simulations(student_id):
         simulations = virtual_simulation_service.get_student_simulations(student_id)
         return APIRoute.success(data={"simulations": simulations})
     except Exception as e:
+        logging.error(str(e))
         return APIRoute.error(
             ErrorCodes.SERVER_ERROR,
             str(e),
@@ -241,6 +252,7 @@ def update_simulation_progress(virtual_simulation_id):
             status_code=400
         )
     except Exception as e:
+        logging.error(str(e))
         return APIRoute.error(
             ErrorCodes.SERVER_ERROR,
             str(e),
@@ -271,6 +283,7 @@ def save_simulation_result():
             status_code=400
         )
     except Exception as e:
+        logging.error(str(e))
         return APIRoute.error(
             ErrorCodes.SERVER_ERROR,
             str(e),
@@ -285,6 +298,7 @@ def get_student_results(student_id):
         results = simulation_result_service.get_student_results(student_id)
         return APIRoute.success(data={"results": results})
     except Exception as e:
+        logging.error(str(e))
         return APIRoute.error(
             ErrorCodes.SERVER_ERROR,
             str(e),
@@ -309,4 +323,4 @@ def get_simulation_result(result_id):
             ErrorCodes.SERVER_ERROR,
             str(e),
             status_code=500
-        ) 
+        )
