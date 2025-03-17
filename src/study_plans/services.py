@@ -421,6 +421,95 @@ class StudyPlanAssignmentService(VerificationBaseService):
         except Exception as e:
             raise AppException(f"Error al remover asignación: {str(e)}", AppException.BAD_REQUEST)
 
+    def get_class_assigned_plan(self, class_id: str, subperiod_id: str) -> Optional[Dict]:
+        """
+        Obtiene el plan de estudios asignado a una clase durante un subperiodo específico
+        
+        Args:
+            class_id: ID de la clase
+            subperiod_id: ID del subperiodo
+            
+        Returns:
+            Dict: Datos del plan asignado o None si no hay
+        """
+        try:
+            # Convertir IDs a ObjectId
+            class_id_obj = ObjectId(class_id)
+            subperiod_id_obj = ObjectId(subperiod_id)
+            
+            # Buscar asignación activa
+            assignment = self.collection.find_one({
+                "class_id": class_id_obj,
+                "subperiod_id": subperiod_id_obj,
+                "is_active": True
+            })
+            
+            if not assignment:
+                return None
+                
+            # Convertir ObjectIds a strings
+            assignment['_id'] = str(assignment['_id'])
+            assignment['study_plan_id'] = str(assignment['study_plan_id'])
+            assignment['class_id'] = str(assignment['class_id'])
+            assignment['subperiod_id'] = str(assignment['subperiod_id'])
+            assignment['assigned_by'] = str(assignment['assigned_by'])
+            
+            # Obtener detalles del plan asignado
+            study_plan = get_db().study_plans_per_subject.find_one({"_id": ObjectId(assignment['study_plan_id'])})
+            if study_plan:
+                study_plan['_id'] = str(study_plan['_id'])
+                if 'author_id' in study_plan and isinstance(study_plan['author_id'], ObjectId):
+                    study_plan['author_id'] = str(study_plan['author_id'])
+                assignment['study_plan'] = study_plan
+                
+            return assignment
+        except Exception as e:
+            logging.error(f"Error al obtener plan asignado: {str(e)}")
+            return None
+            
+    def list_plan_assignments(self, plan_id: str = None) -> List[Dict]:
+        """
+        Lista todas las asignaciones de planes, opcionalmente filtrando por plan
+        
+        Args:
+            plan_id: ID del plan para filtrar (opcional)
+            
+        Returns:
+            List[Dict]: Lista de asignaciones
+        """
+        try:
+            query = {"is_active": True}
+            if plan_id:
+                query["study_plan_id"] = ObjectId(plan_id)
+                
+            assignments = list(self.collection.find(query))
+            
+            # Convertir ObjectIds a strings
+            for assignment in assignments:
+                assignment['_id'] = str(assignment['_id'])
+                assignment['study_plan_id'] = str(assignment['study_plan_id'])
+                assignment['class_id'] = str(assignment['class_id'])
+                assignment['subperiod_id'] = str(assignment['subperiod_id'])
+                assignment['assigned_by'] = str(assignment['assigned_by'])
+                
+                # Obtener información básica de la clase
+                class_doc = get_db().classes.find_one({"_id": ObjectId(assignment['class_id'])})
+                if class_doc:
+                    assignment['class_info'] = {
+                        "name": class_doc.get("name", ""),
+                        "section": class_doc.get("section", "")
+                    }
+                    
+                # Obtener nombre del plan
+                plan = get_db().study_plans_per_subject.find_one({"_id": ObjectId(assignment['study_plan_id'])})
+                if plan:
+                    assignment['plan_name'] = plan.get("name", "Plan sin nombre")
+                    
+            return assignments
+        except Exception as e:
+            logging.error(f"Error al listar asignaciones: {str(e)}")
+            return []
+
 class ModuleService(VerificationBaseService):
     def __init__(self):
         super().__init__(collection_name="modules")
