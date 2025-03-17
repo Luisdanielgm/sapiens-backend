@@ -43,11 +43,14 @@ class UserService(VerificationBaseService):
                 cognitive_profile = CognitiveProfile(str(user_id))
                 profile_dict = cognitive_profile.to_dict()
                 
+                # Convertir ObjectId a string antes de serializar a JSON
+                profile_dict_serializable = profile_dict.copy()
+                profile_dict_serializable["user_id"] = str(profile_dict["user_id"])
+                
                 # Guardar el perfil cognitivo en el formato correcto
                 # Almacenamos tanto los campos individuales como el campo 'profile'
-                # que contiene todos los datos como JSON string
                 db.cognitive_profiles.insert_one({
-                    "user_id": profile_dict["user_id"],
+                    "user_id": profile_dict["user_id"],  # Mantener como ObjectId para la BD
                     "learning_style": profile_dict["learning_style"],
                     "diagnosis": profile_dict["diagnosis"],
                     "cognitive_strengths": profile_dict["cognitive_strengths"],
@@ -55,7 +58,7 @@ class UserService(VerificationBaseService):
                     "personal_context": profile_dict["personal_context"],
                     "recommended_strategies": profile_dict["recommended_strategies"],
                     "created_at": profile_dict["created_at"],
-                    "profile": json.dumps(profile_dict)  # Guardar como JSON string
+                    "profile": json.dumps(profile_dict_serializable)  # Versión serializable
                 })
 
             return True, str(user_id)
@@ -201,27 +204,49 @@ class CognitiveProfileService(VerificationBaseService):
                 profile_dict = json.loads(profile_data)
             else:
                 profile_dict = profile_data
-                profile_data = json.dumps(profile_dict)
+
+            # Asegurar que el user_id sea un ObjectId para la base de datos 
+            # si existe en el diccionario
+            if "user_id" in profile_dict and not isinstance(profile_dict["user_id"], ObjectId):
+                # Si user_id es un string, convertirlo a ObjectId para la BD
+                if isinstance(profile_dict["user_id"], str):
+                    # Crear una copia para no modificar el original
+                    profile_dict_for_db = profile_dict.copy()
+                    try:
+                        profile_dict_for_db["user_id"] = ObjectId(profile_dict["user_id"])
+                    except:
+                        # Si no es un ObjectId válido, usar el ID del usuario encontrado
+                        profile_dict_for_db["user_id"] = user["_id"]
+                else:
+                    # Si no es string ni ObjectId, usar el ID del usuario
+                    profile_dict_for_db = profile_dict.copy()
+                    profile_dict_for_db["user_id"] = user["_id"]
+            else:
+                # Si no hay user_id o ya es ObjectId, usar como está
+                profile_dict_for_db = profile_dict.copy()
+                if "user_id" not in profile_dict_for_db:
+                    profile_dict_for_db["user_id"] = user["_id"]
+
+            # Crear una versión serializable para JSON (con user_id como string)
+            profile_dict_serializable = profile_dict.copy()
+            if "user_id" in profile_dict_serializable:
+                if isinstance(profile_dict_serializable["user_id"], ObjectId):
+                    profile_dict_serializable["user_id"] = str(profile_dict_serializable["user_id"])
+
+            # Convertir a JSON para almacenar en el campo 'profile'
+            profile_json = json.dumps(profile_dict_serializable)
 
             # Preparar actualización manteniendo los campos individuales también
             update_data = {
-                "profile": profile_data,
+                "profile": profile_json,
                 "updated_at": datetime.now()
             }
             
             # Actualizar también los campos individuales si existen en profile_dict
-            if "learning_style" in profile_dict:
-                update_data["learning_style"] = profile_dict["learning_style"]
-            if "diagnosis" in profile_dict:
-                update_data["diagnosis"] = profile_dict["diagnosis"]
-            if "cognitive_strengths" in profile_dict:
-                update_data["cognitive_strengths"] = profile_dict["cognitive_strengths"]
-            if "cognitive_difficulties" in profile_dict:
-                update_data["cognitive_difficulties"] = profile_dict["cognitive_difficulties"]
-            if "personal_context" in profile_dict:
-                update_data["personal_context"] = profile_dict["personal_context"]
-            if "recommended_strategies" in profile_dict:
-                update_data["recommended_strategies"] = profile_dict["recommended_strategies"]
+            for field in ["learning_style", "diagnosis", "cognitive_strengths", 
+                          "cognitive_difficulties", "personal_context", "recommended_strategies"]:
+                if field in profile_dict_for_db:
+                    update_data[field] = profile_dict_for_db[field]
 
             # Actualizar documento en la base de datos
             result = self.collection.update_one(
@@ -267,7 +292,7 @@ class CognitiveProfileService(VerificationBaseService):
             # usando los campos individuales (formato antiguo)
             try:
                 profile_data = {
-                    "user_id": str(profile["user_id"]),
+                    "user_id": str(profile["user_id"]),  # Convertir ObjectId a string
                     "learning_style": profile.get("learning_style", {
                         "visual": 0,
                         "kinesthetic": 0,
@@ -279,8 +304,17 @@ class CognitiveProfileService(VerificationBaseService):
                     "cognitive_difficulties": profile.get("cognitive_difficulties", []),
                     "personal_context": profile.get("personal_context", ""),
                     "recommended_strategies": profile.get("recommended_strategies", []),
-                    "created_at": profile.get("created_at", datetime.now()).isoformat()
                 }
+                
+                # Manejar la fecha de creación
+                if "created_at" in profile:
+                    # Convertir datetime a string ISO para serialización JSON
+                    if isinstance(profile["created_at"], datetime):
+                        profile_data["created_at"] = profile["created_at"].isoformat()
+                    else:
+                        profile_data["created_at"] = profile["created_at"]
+                else:
+                    profile_data["created_at"] = datetime.now().isoformat()
                 
                 # Actualizar el campo 'profile' para futuras consultas
                 self.collection.update_one(
