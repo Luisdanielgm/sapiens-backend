@@ -114,7 +114,7 @@ class ClassAnalyticsService(BaseService):
                 return None
 
             # Obtener todos los estudiantes de la clase
-            students = list(self.db.classroom_members.find({
+            students = list(self.db.class_members.find({
                 "class_id": ObjectId(class_id),
                 "role": "STUDENT"
             }))

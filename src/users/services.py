@@ -113,7 +113,7 @@ class UserService(VerificationBaseService):
             user_id = user["_id"]
 
             # Eliminar datos asociados
-            get_db().classroom_members.delete_many({"user_id": user_id})
+            get_db().class_members.delete_many({"user_id": user_id})
             get_db().classroom_invitations.delete_many({
                 "$or": [
                     {"invitee_id": user_id},

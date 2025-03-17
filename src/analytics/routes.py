@@ -272,7 +272,7 @@ def get_student_dashboard(student_id):
     """Obtiene el dashboard para un estudiante con su progreso académico"""
     try:
         # Obtener clases del estudiante
-        memberships = list(ClassAnalyticsService().db.classroom_members.find({
+        memberships = list(ClassAnalyticsService().db.class_members.find({
             "user_id": ObjectId(student_id),
             "role": "STUDENT"
         }))

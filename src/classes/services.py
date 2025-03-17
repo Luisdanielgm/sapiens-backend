@@ -331,7 +331,7 @@ class ClassService(VerificationBaseService):
 
 class MembershipService(VerificationBaseService):
     def __init__(self):
-        super().__init__(collection_name="classroom_members")
+        super().__init__(collection_name="class_members")
 
     def add_member(self, class_id: str, user_id: str, role: str) -> Tuple[bool, str]:
         try:
