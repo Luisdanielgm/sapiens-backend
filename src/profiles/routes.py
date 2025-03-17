@@ -24,7 +24,7 @@ def get_teacher_profile(user_id_or_email):
         if profile:
             return APIRoute.success(data={"profile": profile})
         return APIRoute.error(
-            ErrorCodes.NOT_FOUND,
+            ErrorCodes.RESOURCE_NOT_FOUND,
             "Perfil de profesor no encontrado",
             status_code=404
         )
@@ -74,7 +74,7 @@ def get_student_profile(user_id_or_email):
         if profile:
             return APIRoute.success(data={"profile": profile})
         return APIRoute.error(
-            ErrorCodes.NOT_FOUND,
+            ErrorCodes.RESOURCE_NOT_FOUND,
             "Perfil de estudiante no encontrado",
             status_code=404
         )
@@ -127,7 +127,7 @@ def get_admin_profile(user_id_or_email):
         if profile:
             return APIRoute.success(data={"profile": profile})
         return APIRoute.error(
-            ErrorCodes.NOT_FOUND,
+            ErrorCodes.RESOURCE_NOT_FOUND,
             "Perfil de administrador no encontrado",
             status_code=404
         )
