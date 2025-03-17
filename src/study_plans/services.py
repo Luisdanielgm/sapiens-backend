@@ -425,13 +425,23 @@ class ModuleService(VerificationBaseService):
             if not study_plan:
                 return False, "Plan de estudio no encontrado"
             
-            # Crear el módulo
-            module_data['study_plan_id'] = ObjectId(study_plan_id)
-            module_data['created_at'] = datetime.now()
-            module_data['updated_at'] = datetime.now()
+            # Crear una copia de los datos para no modificarlos directamente
+            module_dict = {
+                "study_plan_id": ObjectId(study_plan_id),
+                "name": module_data.get('name'),
+                "learning_outcomes": module_data.get('learning_outcomes'),
+                "evaluation_rubric": module_data.get('evaluation_rubric')
+            }
             
-            module = Module(**module_data)
-            result = self.collection.insert_one(module.to_dict())
+            # Crear el módulo con parámetros exactos
+            module = Module(**module_dict)
+            
+            # Obtener el diccionario del módulo y agregar timestamps
+            module_to_insert = module.to_dict()
+            module_to_insert['created_at'] = datetime.now()
+            module_to_insert['updated_at'] = datetime.now()
+            
+            result = self.collection.insert_one(module_to_insert)
             
             return True, str(result.inserted_id)
         except Exception as e:
