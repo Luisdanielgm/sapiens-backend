@@ -285,7 +285,15 @@ class StudyPlanAssignmentService(VerificationBaseService):
             study_plan_id = ObjectId(assignment_data['study_plan_id'])
             class_id = ObjectId(assignment_data['class_id'])
             subperiod_id = ObjectId(assignment_data['subperiod_id'])
-            assigned_by = ObjectId(assignment_data['assigned_by'])
+            
+            # Buscar el usuario por email si se proporciona email
+            if isinstance(assignment_data['assigned_by'], str) and '@' in assignment_data['assigned_by']:
+                user = get_db().users.find_one({"email": assignment_data['assigned_by']})
+                if not user:
+                    raise AppException("Usuario no encontrado", AppException.NOT_FOUND)
+                assigned_by = user['_id']
+            else:
+                assigned_by = ObjectId(assignment_data['assigned_by'])
                 
             # Verificar que la clase existe
             if not self.check_class_exists(assignment_data['class_id']):
