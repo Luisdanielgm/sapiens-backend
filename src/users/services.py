@@ -9,6 +9,18 @@ import logging
 from src.shared.exceptions import AppException
 from .models import User, CognitiveProfile
 
+# Función auxiliar para hacer objetos serializables
+def make_json_serializable(obj):
+    if isinstance(obj, ObjectId):
+        return str(obj)
+    elif isinstance(obj, datetime):
+        return obj.isoformat()
+    elif isinstance(obj, dict):
+        return {k: make_json_serializable(v) for k, v in obj.items()}
+    elif isinstance(obj, list):
+        return [make_json_serializable(item) for item in obj]
+    return obj
+
 class UserService(VerificationBaseService):
     def __init__(self):
         super().__init__(collection_name="users")
@@ -43,9 +55,8 @@ class UserService(VerificationBaseService):
                 cognitive_profile = CognitiveProfile(str(user_id))
                 profile_dict = cognitive_profile.to_dict()
                 
-                # Convertir ObjectId a string antes de serializar a JSON
-                profile_dict_serializable = profile_dict.copy()
-                profile_dict_serializable["user_id"] = str(profile_dict["user_id"])
+                # Convertir a versión serializable (ObjectId y datetime a string)
+                profile_dict_serializable = make_json_serializable(profile_dict)
                 
                 # Guardar el perfil cognitivo en el formato correcto
                 # Almacenamos tanto los campos individuales como el campo 'profile'
@@ -67,6 +78,7 @@ class UserService(VerificationBaseService):
             # Limpiar datos si algo falla
             if 'user_id' in locals():
                 self.collection.delete_one({'_id': user_id})
+            logging.error(f"Error en register_user: {str(e)}")
             return False, str(e)
 
     def get_user_profile(self, email: str) -> Optional[Dict]:
@@ -227,11 +239,8 @@ class CognitiveProfileService(VerificationBaseService):
                 if "user_id" not in profile_dict_for_db:
                     profile_dict_for_db["user_id"] = user["_id"]
 
-            # Crear una versión serializable para JSON (con user_id como string)
-            profile_dict_serializable = profile_dict.copy()
-            if "user_id" in profile_dict_serializable:
-                if isinstance(profile_dict_serializable["user_id"], ObjectId):
-                    profile_dict_serializable["user_id"] = str(profile_dict_serializable["user_id"])
+            # Crear una versión serializable para JSON usando la función auxiliar
+            profile_dict_serializable = make_json_serializable(profile_dict_for_db)
 
             # Convertir a JSON para almacenar en el campo 'profile'
             profile_json = json.dumps(profile_dict_serializable)
@@ -291,8 +300,9 @@ class CognitiveProfileService(VerificationBaseService):
             # Si no hay campo 'profile' o falló al decodificarlo, construimos el perfil 
             # usando los campos individuales (formato antiguo)
             try:
+                # Construir el perfil a partir de los campos individuales
                 profile_data = {
-                    "user_id": str(profile["user_id"]),  # Convertir ObjectId a string
+                    "user_id": profile["user_id"],
                     "learning_style": profile.get("learning_style", {
                         "visual": 0,
                         "kinesthetic": 0,
@@ -304,25 +314,19 @@ class CognitiveProfileService(VerificationBaseService):
                     "cognitive_difficulties": profile.get("cognitive_difficulties", []),
                     "personal_context": profile.get("personal_context", ""),
                     "recommended_strategies": profile.get("recommended_strategies", []),
+                    "created_at": profile.get("created_at", datetime.now())
                 }
                 
-                # Manejar la fecha de creación
-                if "created_at" in profile:
-                    # Convertir datetime a string ISO para serialización JSON
-                    if isinstance(profile["created_at"], datetime):
-                        profile_data["created_at"] = profile["created_at"].isoformat()
-                    else:
-                        profile_data["created_at"] = profile["created_at"]
-                else:
-                    profile_data["created_at"] = datetime.now().isoformat()
+                # Convertir a formato serializable
+                profile_data_serializable = make_json_serializable(profile_data)
                 
                 # Actualizar el campo 'profile' para futuras consultas
                 self.collection.update_one(
                     {"_id": profile["_id"]},
-                    {"$set": {"profile": json.dumps(profile_data)}}
+                    {"$set": {"profile": json.dumps(profile_data_serializable)}}
                 )
                 
-                return profile_data
+                return profile_data_serializable
             except Exception as e:
                 logging.error(f"Error al construir perfil desde campos individuales: {str(e)}")
                 return None
