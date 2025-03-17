@@ -375,12 +375,17 @@ class MembershipService(VerificationBaseService):
         except Exception as e:
             return False, str(e)
 
-    def get_class_members(self, class_id: str) -> List[Dict]:
+    def get_class_members(self, class_id: str, role: str = None) -> List[Dict]:
         try:
-            # Obtener todos los miembros
-            members = list(self.collection.find({
-                "class_id": ObjectId(class_id)
-            }))
+            # Crear el filtro base
+            filter_query = {"class_id": ObjectId(class_id)}
+            
+            # Agregar filtro de rol si se proporciona
+            if role:
+                filter_query["role"] = role
+            
+            # Obtener los miembros que coinciden con el filtro
+            members = list(self.collection.find(filter_query))
             
             # Enriquecer con información del usuario
             for member in members:

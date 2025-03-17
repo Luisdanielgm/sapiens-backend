@@ -214,9 +214,24 @@ def add_class_member(class_id):
 def get_class_members(class_id):
     """
     Obtiene todos los miembros de una clase.
+    
+    Query Parameters:
+        role: (opcional) Filtrar miembros por rol ('TEACHER' o 'STUDENT')
     """
     try:
-        members = membership_service.get_class_members(class_id)
+        # Obtener el parámetro role de la consulta si existe
+        role = request.args.get('role')
+        
+        # Validar el rol si se proporciona
+        if role and role not in ["TEACHER", "STUDENT"]:
+            return APIRoute.error(
+                ErrorCodes.INVALID_DATA,
+                "Rol no válido. Debe ser 'TEACHER' o 'STUDENT'",
+                status_code=400
+            )
+        
+        # Modificar el servicio para filtrar por rol
+        members = membership_service.get_class_members(class_id, role)
         return APIRoute.success(members)
     except Exception as e:
         return APIRoute.error(str(e), 500)
