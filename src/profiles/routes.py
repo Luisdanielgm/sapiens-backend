@@ -4,6 +4,7 @@ from typing import Dict
 from src.shared.standardization import APIBlueprint, APIRoute, ErrorCodes
 from src.shared.constants import ROLES
 from src.profiles.services import ProfileService
+from src.shared.logging import log_info, log_error
 
 profiles_bp = APIBlueprint('profiles', __name__)
 profile_service = ProfileService()
@@ -69,6 +70,8 @@ def get_student_profile(user_id_or_email):
         user_id_or_email: ID o email del usuario estudiante
     """
     try:
+        log_info(f"Solicitud de perfil estudiante para: {user_id_or_email}", "profiles.routes")
+        
         profile = profile_service.get_student_profile(user_id_or_email)
         
         if profile:
@@ -79,6 +82,7 @@ def get_student_profile(user_id_or_email):
             status_code=404
         )
     except Exception as e:
+        log_error(f"Error al obtener perfil de estudiante: {str(e)}", e, "profiles.routes")
         return APIRoute.error(
             ErrorCodes.SERVER_ERROR,
             str(e),
