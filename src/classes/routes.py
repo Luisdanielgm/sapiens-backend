@@ -403,6 +403,102 @@ def get_class_subperiods(class_id):
     except Exception as e:
         return APIRoute.error(str(e), 500)
 
+@classes_bp.route('/<class_id>/subperiod/<subperiod_id>', methods=['PUT'])
+@APIRoute.standard(auth_required_flag=True, roles=[ROLES["TEACHER"], ROLES["INSTITUTE_ADMIN"]])
+def update_subperiod(class_id, subperiod_id):
+    """
+    Actualiza un subperíodo existente.
+    
+    Args:
+        class_id: ID de la clase
+        subperiod_id: ID del subperíodo a actualizar
+    
+    Request JSON:
+        name: (opcional) Nuevo nombre del subperíodo
+        start_date: (opcional) Nueva fecha de inicio
+        end_date: (opcional) Nueva fecha de fin
+        status: (opcional) Nuevo estado ('active' o 'inactive')
+    """
+    try:
+        # Verificar que vienen datos para actualizar
+        if not request.json:
+            return APIRoute.error(
+                ErrorCodes.MISSING_FIELDS,
+                "No se proporcionaron datos para actualizar",
+                status_code=400
+            )
+        
+        # Verificar que el subperíodo pertenece a la clase especificada
+        subperiod = subperiod_service.collection.find_one({
+            "_id": ObjectId(subperiod_id),
+            "class_id": ObjectId(class_id)
+        })
+        
+        if not subperiod:
+            return APIRoute.error(
+                ErrorCodes.NOT_FOUND,
+                "Subperíodo no encontrado o no pertenece a la clase especificada",
+                status_code=404
+            )
+        
+        # Actualizar el subperíodo
+        success, message = subperiod_service.update_subperiod(subperiod_id, request.json)
+        
+        if success:
+            return APIRoute.success(message=message)
+        return APIRoute.error(
+            ErrorCodes.OPERATION_FAILED,
+            message,
+            status_code=400
+        )
+    except Exception as e:
+        return APIRoute.error(
+            ErrorCodes.SERVER_ERROR,
+            str(e),
+            status_code=500
+        )
+
+@classes_bp.route('/<class_id>/subperiod/<subperiod_id>', methods=['DELETE'])
+@APIRoute.standard(auth_required_flag=True, roles=[ROLES["TEACHER"], ROLES["INSTITUTE_ADMIN"]])
+def delete_subperiod(class_id, subperiod_id):
+    """
+    Elimina un subperíodo existente.
+    
+    Args:
+        class_id: ID de la clase
+        subperiod_id: ID del subperíodo a eliminar
+    """
+    try:
+        # Verificar que el subperíodo pertenece a la clase especificada
+        subperiod = subperiod_service.collection.find_one({
+            "_id": ObjectId(subperiod_id),
+            "class_id": ObjectId(class_id)
+        })
+        
+        if not subperiod:
+            return APIRoute.error(
+                ErrorCodes.NOT_FOUND,
+                "Subperíodo no encontrado o no pertenece a la clase especificada",
+                status_code=404
+            )
+        
+        # Eliminar el subperíodo
+        success, message = subperiod_service.delete_subperiod(subperiod_id)
+        
+        if success:
+            return APIRoute.success(message=message)
+        return APIRoute.error(
+            ErrorCodes.DELETE_ERROR,
+            message,
+            status_code=400
+        )
+    except Exception as e:
+        return APIRoute.error(
+            ErrorCodes.SERVER_ERROR,
+            str(e),
+            status_code=500
+        )
+
 @classes_bp.route('/level/<level_id>', methods=['GET'])
 @APIRoute.standard(auth_required_flag=True, roles=[ROLES["INSTITUTE_ADMIN"]])
 def get_level_classes(level_id):

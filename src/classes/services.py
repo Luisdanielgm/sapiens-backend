@@ -696,4 +696,75 @@ class SubperiodService(VerificationBaseService):
             return subperiods
         except Exception as e:
             print(f"Error al obtener subperiodos de la clase: {str(e)}")
-            return [] 
+            return []
+    
+    def update_subperiod(self, subperiod_id: str, update_data: dict) -> Tuple[bool, str]:
+        """
+        Actualiza un subperiodo existente.
+        
+        Args:
+            subperiod_id: ID del subperiodo a actualizar
+            update_data: Datos a actualizar
+            
+        Returns:
+            Tuple[bool, str]: (Éxito, Mensaje)
+        """
+        try:
+            # Verificar que el subperiodo existe
+            subperiod = self.collection.find_one({"_id": ObjectId(subperiod_id)})
+            if not subperiod:
+                return False, "Subperiodo no encontrado"
+            
+            # Eliminar campos no actualizables
+            if "_id" in update_data:
+                del update_data["_id"]
+            if "class_id" in update_data:
+                del update_data["class_id"]
+            if "created_by" in update_data:
+                del update_data["created_by"]
+            if "created_at" in update_data:
+                del update_data["created_at"]
+            
+            # Actualizar el subperiodo
+            result = self.collection.update_one(
+                {"_id": ObjectId(subperiod_id)},
+                {"$set": update_data}
+            )
+            
+            if result.modified_count > 0:
+                return True, "Subperiodo actualizado correctamente"
+            return False, "No se realizaron cambios en el subperiodo"
+        except Exception as e:
+            print(f"Error al actualizar subperiodo: {str(e)}")
+            return False, str(e)
+    
+    def delete_subperiod(self, subperiod_id: str) -> Tuple[bool, str]:
+        """
+        Elimina un subperiodo existente.
+        
+        Args:
+            subperiod_id: ID del subperiodo a eliminar
+            
+        Returns:
+            Tuple[bool, str]: (Éxito, Mensaje)
+        """
+        try:
+            # Verificar que el subperiodo existe
+            subperiod = self.collection.find_one({"_id": ObjectId(subperiod_id)})
+            if not subperiod:
+                return False, "Subperiodo no encontrado"
+            
+            # Verificar si hay contenido asociado al subperiodo
+            # Esto dependerá de cómo estén estructurados los datos en tu aplicación
+            # Por ejemplo, si los contenidos o actividades están vinculados a subperiodos
+            # Puedes verificar en las colecciones correspondientes
+            
+            # Eliminar el subperiodo
+            result = self.collection.delete_one({"_id": ObjectId(subperiod_id)})
+            
+            if result.deleted_count > 0:
+                return True, "Subperiodo eliminado correctamente"
+            return False, "No se pudo eliminar el subperiodo"
+        except Exception as e:
+            print(f"Error al eliminar subperiodo: {str(e)}")
+            return False, str(e) 
