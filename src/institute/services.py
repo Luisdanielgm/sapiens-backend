@@ -201,11 +201,12 @@ class InstituteService(VerificationBaseService):
                 if admin:
                     user = self.db.users.find_one({"_id": admin["user_id"]})
                     if user:
-                        institute["admin"] = {
+                        institute["ADMIN"] = {
                             "id": str(user["_id"]),
                             "name": user.get("name", ""),
                             "email": user.get("email", "")
                         }
+                # cambie a ADMIN pero tenemos que checar luego
             
             return institutes
         except Exception as e:

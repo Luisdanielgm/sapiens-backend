@@ -10,10 +10,10 @@ STATUS = {
 
 # Roles de usuario
 ROLES = {
-    "ADMIN": "admin",               # Administrador de toda la plataforma
-    "INSTITUTE_ADMIN": "institute_admin",  # Administrador de instituto
-    "TEACHER": "teacher",           # Profesor
-    "STUDENT": "student"            # Estudiante
+    "ADMIN": "ADMIN",               # Administrador de toda la plataforma
+    "INSTITUTE_ADMIN": "INSTITUTE_ADMIN",  # Administrador de instituto
+    "TEACHER": "TEACHER",           # Profesor
+    "STUDENT": "STUDENT"            # Estudiante
 }
 
 # Niveles de dificultad

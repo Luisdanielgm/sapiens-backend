@@ -121,7 +121,7 @@ def role_required(required_roles):
                     return f(*args, **kwargs)
             
             # Roles que pueden ser verificados en institutos
-            institute_roles = ['admin', 'institute_admin', 'teacher', 'student']
+            institute_roles = ['ADMIN', 'INSTITUTE_ADMIN', 'TEACHER', 'STUDENT']
             institute_roles_upper = [role.upper() for role in institute_roles]
             all_institute_roles = institute_roles + institute_roles_upper
             
@@ -144,7 +144,7 @@ def role_required(required_roles):
             class_id = kwargs.get('class_id')
             if class_id:
                 for role in all_roles:
-                    if role.lower() in ['teacher', 'student']:
+                    if role.lower() in ['TEACHER', 'STUDENT']:
                         # Verificar si el usuario es miembro de la clase con el rol requerido
                         member = db.class_members.find_one({
                             "class_id": ObjectId(class_id),

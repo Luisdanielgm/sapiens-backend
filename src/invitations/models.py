@@ -60,7 +60,7 @@ class ClassInvitation(Invitation):
                  class_id: str,
                  inviter_id: str,
                  invitee_email: str,
-                 role: str = "student",
+                 role: str = "STUDENT",
                  message: Optional[str] = None,
                  status: str = "pending"):
         super().__init__(inviter_id, invitee_email, role, message, status)

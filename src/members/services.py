@@ -211,10 +211,10 @@ class MembershipService(VerificationBaseService):
                 return False, "El usuario ya es miembro de la clase"
 
             # Si el rol es profesor, verificar que no haya otro profesor asignado
-            if member_data['role'] == 'teacher':
+            if member_data['role'] == 'TEACHER':
                 existing_teacher = get_db().class_members.find_one({
                     "class_id": ObjectId(member_data['class_id']),
-                    "role": "teacher"
+                    "role": "TEACHER"
                 })
                 if existing_teacher:
                     return False, "La clase ya tiene un profesor asignado"
@@ -327,10 +327,10 @@ class MembershipService(VerificationBaseService):
                 return False, "El usuario ya es miembro de la clase"
 
             # Si el rol es profesor, verificar que no haya otro profesor asignado
-            if member_data['role'] == 'teacher':
+            if member_data['role'] == 'TEACHER':
                 existing_teacher = get_db().class_members.find_one({
                     "class_id": ObjectId(member_data['class_id']),
-                    "role": "teacher"
+                    "role": "TEACHER"
                 })
                 if existing_teacher:
                     return False, "La clase ya tiene un profesor asignado"

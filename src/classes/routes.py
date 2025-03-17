@@ -58,7 +58,7 @@ def create_class():
         
         if success:
             # Agregar al creador como miembro con rol de profesor
-            membership_service.add_member(result, user_id, 'teacher')
+            membership_service.add_member(result, user_id, 'TEACHER')
             return APIRoute.success({"id": result}, message="Clase creada exitosamente", status_code=201)
         else:
             return APIRoute.error(ErrorCodes.CREATION_ERROR, result)
@@ -197,8 +197,8 @@ def add_class_member(class_id):
         role = request.json['role']
         
         # Validar que el rol es válido
-        if role not in ["teacher", "student"]:
-            return APIRoute.error("Rol no válido. Debe ser 'teacher' o 'student'", 400)
+        if role not in ["TEACHER", "STUDENT"]:
+            return APIRoute.error("Rol no válido. Debe ser 'TEACHER' o 'STUDENT'", 400)
         
         success, result = membership_service.add_member(class_id, user_id, role)
         
@@ -314,10 +314,10 @@ def add_class_member_by_email(class_id):
             )
         
         # Validar que el rol es válido
-        if role not in ["teacher", "student"]:
+        if role not in ["TEACHER", "STUDENT"]:
             return APIRoute.error(
                 ErrorCodes.INVALID_DATA,
-                "Rol no válido. Debe ser 'teacher' o 'student'",
+                "Rol no válido. Debe ser 'TEACHER' o 'STUDENT'",
                 status_code=400
             )
         

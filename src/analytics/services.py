@@ -116,7 +116,7 @@ class ClassAnalyticsService(BaseService):
             # Obtener todos los estudiantes de la clase
             students = list(self.db.classroom_members.find({
                 "class_id": ObjectId(class_id),
-                "role": "student"
+                "role": "STUDENT"
             }))
             student_ids = [s["user_id"] for s in students]
 
@@ -558,7 +558,7 @@ class InstituteAnalyticsService(BaseService):
             })
 
             # Contar usuarios totales
-            total_users = members_by_role.get("teacher", 0) + members_by_role.get("INSTITUTE_ADMIN", 0)
+            total_users = members_by_role.get("TEACHER", 0) + members_by_role.get("INSTITUTE_ADMIN", 0)
             
             # Obtener clases activas
             total_classes = self.db[COLLECTIONS["CLASSES"]].count_documents({
@@ -1074,7 +1074,7 @@ class InstituteDashboardService(BaseService):
                 "institute_id": ObjectId(institute_id)
             }))
             
-            total_teachers = sum(1 for m in institute_members if m.get("role") == "teacher")
+            total_teachers = sum(1 for m in institute_members if m.get("role") == "TEACHER")
             total_admins = sum(1 for m in institute_members if m.get("role") == "INSTITUTE_ADMIN")
             
             # Contar estudiantes (estudiantes matriculados en clases)
@@ -1082,7 +1082,7 @@ class InstituteDashboardService(BaseService):
             
             class_members = list(self.db.class_members.find({
                 "class_id": {"$in": class_ids},
-                "role": "student"
+                "role": "STUDENT"
             }))
             
             # Obtener IDs únicos de estudiantes
@@ -1137,7 +1137,7 @@ class InstituteDashboardService(BaseService):
                 
                 student_members = list(self.db.class_members.find({
                     "class_id": {"$in": class_ids},
-                    "role": "student"
+                    "role": "STUDENT"
                 }))
                 
                 unique_students = set(str(m["user_id"]) for m in student_members)
@@ -1198,7 +1198,7 @@ class InstituteDashboardService(BaseService):
                 
                 student_members = list(self.db.class_members.find({
                     "class_id": {"$in": class_ids},
-                    "role": "student"
+                    "role": "STUDENT"
                 }))
                 
                 unique_students = set(str(m["user_id"]) for m in student_members)
@@ -1452,7 +1452,7 @@ class InstituteDashboardService(BaseService):
             # Promedio de estudiantes por clase
             students_by_class = {}
             for class_id in class_ids:
-                student_count = sum(1 for m in class_members if m.get("class_id") == class_id and m.get("role") == "student")
+                student_count = sum(1 for m in class_members if m.get("class_id") == class_id and m.get("role") == "STUDENT")
                 students_by_class[str(class_id)] = student_count
             
             avg_students_per_class = 0
@@ -1488,7 +1488,7 @@ class InstituteDashboardService(BaseService):
             # Obtener todos los miembros del instituto con rol de profesor
             teacher_members = list(self.db.institute_members.find({
                 "institute_id": ObjectId(institute_id),
-                "role": "teacher"
+                "role": "TEACHER"
             }))
             
             total_teachers = len(teacher_members)
@@ -1516,7 +1516,7 @@ class InstituteDashboardService(BaseService):
             # Obtener miembros de clase que son profesores
             teacher_class_members = list(self.db.class_members.find({
                 "class_id": {"$in": class_ids},
-                "role": "teacher"
+                "role": "TEACHER"
             }))
             
             # Contar clases por profesor
@@ -1575,7 +1575,7 @@ class InstituteDashboardService(BaseService):
             # Obtener miembros de clase que son estudiantes
             student_class_members = list(self.db.class_members.find({
                 "class_id": {"$in": class_ids},
-                "role": "student"
+                "role": "STUDENT"
             }))
             
             # Identificar estudiantes únicos

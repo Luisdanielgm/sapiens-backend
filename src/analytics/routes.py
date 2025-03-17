@@ -274,7 +274,7 @@ def get_student_dashboard(student_id):
         # Obtener clases del estudiante
         memberships = list(ClassAnalyticsService().db.classroom_members.find({
             "user_id": ObjectId(student_id),
-            "role": "student"
+            "role": "STUDENT"
         }))
         
         if not memberships:

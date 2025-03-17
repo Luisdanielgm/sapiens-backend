@@ -252,7 +252,7 @@ class VirtualSimulationService(VerificationBaseService):
 
             # Verificar que el estudiante existe
             student = get_db().users.find_one(
-                {"_id": ObjectId(virtual_simulation_data['student_id']), "role": "student"}
+                {"_id": ObjectId(virtual_simulation_data['student_id']), "role": "STUDENT"}
             )
             if not student:
                 return False, "Estudiante no encontrado"

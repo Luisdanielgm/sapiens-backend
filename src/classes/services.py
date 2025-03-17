@@ -346,7 +346,7 @@ class MembershipService(VerificationBaseService):
                 return False, "Usuario no encontrado"
                 
             # Verificar que el rol es válido para miembros de clase
-            if role not in ["teacher", "student"]:
+            if role not in ["TEACHER", "STUDENT"]:
                 return False, "Rol no válido para miembros de clase"
                 
             # Verificar si ya es miembro
@@ -417,7 +417,7 @@ class MembershipService(VerificationBaseService):
             # Obtener membresías del profesor
             memberships = list(self.collection.find({
                 "user_id": teacher_id,
-                "role": "teacher"
+                "role": "TEACHER"
             }))
             
             # Obtener detalles de cada clase
@@ -470,7 +470,7 @@ class MembershipService(VerificationBaseService):
             # Obtener membresías del estudiante
             memberships = list(self.collection.find({
                 "user_id": student_id,
-                "role": "student"
+                "role": "STUDENT"
             }))
             
             # Obtener detalles de cada clase
@@ -514,7 +514,7 @@ class MembershipService(VerificationBaseService):
             # Obtener todos los miembros estudiantes
             members = list(self.collection.find({
                 "class_id": ObjectId(class_id),
-                "role": "student"
+                "role": "STUDENT"
             }))
             
             # Enriquecer con información del usuario
@@ -593,7 +593,7 @@ class MembershipService(VerificationBaseService):
         Args:
             class_id: ID de la clase
             email: Email del usuario
-            role: Rol a asignar ('teacher' o 'student')
+            role: Rol a asignar ('TEACHER' o 'STUDENT')
             
         Returns:
             Tuple[bool, Union[str, Dict]]: (Éxito, Mensaje o datos)
@@ -612,7 +612,7 @@ class MembershipService(VerificationBaseService):
             user_id = str(user["_id"])
             
             # Verificar que el rol es válido para miembros de clase
-            if role not in ["teacher", "student"]:
+            if role not in ["TEACHER", "STUDENT"]:
                 return False, "Rol no válido para miembros de clase"
                 
             # Verificar si ya es miembro
