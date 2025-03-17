@@ -1,5 +1,6 @@
 from datetime import datetime
 from typing import Dict, List, Optional
+from bson import ObjectId
 
 
 class TeacherProfile:
@@ -13,7 +14,7 @@ class TeacherProfile:
                 education: List[Dict] = None,
                 teaching_experience: int = 0,
                 bio: str = ""):
-        self.user_id = user_id
+        self.user_id = ObjectId(user_id) if isinstance(user_id, str) else user_id
         self.specialties = specialties or []
         self.education = education or []
         self.teaching_experience = teaching_experience
@@ -43,7 +44,7 @@ class StudentProfile:
                 educational_background: str = "",
                 interests: List[str] = None,
                 preferred_learning_style: str = ""):
-        self.user_id = user_id
+        self.user_id = ObjectId(user_id) if isinstance(user_id, str) else user_id
         self.educational_background = educational_background
         self.interests = interests or []
         self.preferred_learning_style = preferred_learning_style
@@ -70,7 +71,7 @@ class AdminProfile:
                 user_id: str,
                 responsibilities: List[str] = None,
                 supervised_areas: List[str] = None):
-        self.user_id = user_id
+        self.user_id = ObjectId(user_id) if isinstance(user_id, str) else user_id
         self.responsibilities = responsibilities or []
         self.supervised_areas = supervised_areas or []
         self.created_at = datetime.now()

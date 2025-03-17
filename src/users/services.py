@@ -9,6 +9,9 @@ import logging
 from src.shared.exceptions import AppException
 from .models import User, CognitiveProfile
 
+# Añadir esta importación para poder crear perfiles de estudiante
+from src.profiles.models import StudentProfile
+
 # Función auxiliar para hacer objetos serializables
 def make_json_serializable(obj):
     if isinstance(obj, ObjectId):
@@ -49,9 +52,11 @@ class UserService(VerificationBaseService):
                     'joined_at': datetime.now()
                 })
 
-            # Crear perfil cognitivo para estudiantes
+            # Crear perfiles para estudiantes
             if user.role == 'STUDENT':
                 db = get_db()
+                
+                # 1. Crear perfil cognitivo
                 cognitive_profile = CognitiveProfile(str(user_id))
                 profile_dict = cognitive_profile.to_dict()
                 
@@ -59,7 +64,6 @@ class UserService(VerificationBaseService):
                 profile_dict_serializable = make_json_serializable(profile_dict)
                 
                 # Guardar el perfil cognitivo en el formato correcto
-                # Almacenamos tanto los campos individuales como el campo 'profile'
                 db.cognitive_profiles.insert_one({
                     "user_id": profile_dict["user_id"],  # Mantener como ObjectId para la BD
                     "learning_style": profile_dict["learning_style"],
@@ -71,6 +75,27 @@ class UserService(VerificationBaseService):
                     "created_at": profile_dict["created_at"],
                     "profile": json.dumps(profile_dict_serializable)  # Versión serializable
                 })
+                
+                # 2. Crear perfil de estudiante
+                try:
+                    # Determinar estilo de aprendizaje preferido basado en el valor más alto
+                    # (iniciamos con 'visual' por defecto, ya que todos los valores son 0)
+                    preferred_style = "visual"
+                    
+                    # Crear perfil de estudiante con valores iniciales
+                    student_profile = StudentProfile(
+                        user_id=str(user_id),
+                        educational_background="",
+                        interests=[],
+                        preferred_learning_style=preferred_style
+                    )
+                    
+                    # Guardar en la colección student_profiles
+                    db.student_profiles.insert_one(student_profile.to_dict())
+                    logging.info(f"Perfil de estudiante creado para: {user.email}")
+                except Exception as e:
+                    logging.error(f"Error al crear perfil de estudiante: {str(e)}")
+                    # No fallamos todo el registro si solo falla este perfil
 
             return True, str(user_id)
 
