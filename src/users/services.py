@@ -41,7 +41,22 @@ class UserService(VerificationBaseService):
             if user.role == 'STUDENT':
                 db = get_db()
                 cognitive_profile = CognitiveProfile(str(user_id))
-                db.cognitive_profiles.insert_one(cognitive_profile.to_dict())
+                profile_dict = cognitive_profile.to_dict()
+                
+                # Guardar el perfil cognitivo en el formato correcto
+                # Almacenamos tanto los campos individuales como el campo 'profile'
+                # que contiene todos los datos como JSON string
+                db.cognitive_profiles.insert_one({
+                    "user_id": profile_dict["user_id"],
+                    "learning_style": profile_dict["learning_style"],
+                    "diagnosis": profile_dict["diagnosis"],
+                    "cognitive_strengths": profile_dict["cognitive_strengths"],
+                    "cognitive_difficulties": profile_dict["cognitive_difficulties"],
+                    "personal_context": profile_dict["personal_context"],
+                    "recommended_strategies": profile_dict["recommended_strategies"],
+                    "created_at": profile_dict["created_at"],
+                    "profile": json.dumps(profile_dict)  # Guardar como JSON string
+                })
 
             return True, str(user_id)
 
@@ -164,42 +179,120 @@ class CognitiveProfileService(VerificationBaseService):
         super().__init__(collection_name="cognitive_profiles")
 
     def update_cognitive_profile(self, email: str, profile_data: str) -> bool:
-        """Actualiza el perfil cognitivo de un usuario"""
+        """
+        Actualiza el perfil cognitivo de un usuario.
+        Actualiza tanto el campo 'profile' como los campos individuales para asegurar consistencia.
+        
+        Args:
+            email: Email del usuario
+            profile_data: Datos del perfil en formato JSON string o diccionario
+            
+        Returns:
+            bool: True si la actualización fue exitosa, False en caso contrario
+        """
         try:
             user = get_db().users.find_one({"email": email})
             if not user:
+                logging.warning(f"Usuario no encontrado al actualizar perfil cognitivo: {email}")
                 return False
 
-            # Verificar que el string sea un JSON válido
-            json.loads(profile_data)
+            # Convertir profile_data a diccionario si es string
+            if isinstance(profile_data, str):
+                profile_dict = json.loads(profile_data)
+            else:
+                profile_dict = profile_data
+                profile_data = json.dumps(profile_dict)
 
+            # Preparar actualización manteniendo los campos individuales también
+            update_data = {
+                "profile": profile_data,
+                "updated_at": datetime.now()
+            }
+            
+            # Actualizar también los campos individuales si existen en profile_dict
+            if "learning_style" in profile_dict:
+                update_data["learning_style"] = profile_dict["learning_style"]
+            if "diagnosis" in profile_dict:
+                update_data["diagnosis"] = profile_dict["diagnosis"]
+            if "cognitive_strengths" in profile_dict:
+                update_data["cognitive_strengths"] = profile_dict["cognitive_strengths"]
+            if "cognitive_difficulties" in profile_dict:
+                update_data["cognitive_difficulties"] = profile_dict["cognitive_difficulties"]
+            if "personal_context" in profile_dict:
+                update_data["personal_context"] = profile_dict["personal_context"]
+            if "recommended_strategies" in profile_dict:
+                update_data["recommended_strategies"] = profile_dict["recommended_strategies"]
+
+            # Actualizar documento en la base de datos
             result = self.collection.update_one(
                 {"user_id": user["_id"]},
-                {
-                    "$set": {
-                        "profile": profile_data,
-                        "updated_at": datetime.now()
-                    }
-                },
+                {"$set": update_data},
                 upsert=True
             )
+            
+            logging.info(f"Perfil cognitivo actualizado para: {email}")
             return True
+        except json.JSONDecodeError as e:
+            logging.error(f"Error de formato JSON en profile_data: {str(e)}")
+            return False
         except Exception as e:
             logging.error(f"Error al actualizar perfil cognitivo: {str(e)}")
             return False
 
     def get_cognitive_profile(self, email: str) -> Optional[Dict]:
-        """Obtiene el perfil cognitivo de un usuario"""
+        """
+        Obtiene el perfil cognitivo de un usuario.
+        Maneja tanto perfiles nuevos (con campo 'profile') como perfiles antiguos.
+        """
         try:
             user = get_db().users.find_one({"email": email})
             if not user:
+                logging.warning(f"Usuario no encontrado: {email}")
                 return None
 
             profile = self.collection.find_one({"user_id": user["_id"]})
             if not profile:
+                logging.warning(f"Perfil cognitivo no encontrado para: {email}")
                 return None
 
-            return json.loads(profile["profile"])
+            # Intentar obtener el perfil del campo 'profile' (formato nuevo)
+            if "profile" in profile and profile["profile"]:
+                try:
+                    return json.loads(profile["profile"])
+                except Exception as e:
+                    logging.error(f"Error al decodificar el campo 'profile': {str(e)}")
+                    # Si falla, intentaremos construir el perfil desde los campos individuales
+            
+            # Si no hay campo 'profile' o falló al decodificarlo, construimos el perfil 
+            # usando los campos individuales (formato antiguo)
+            try:
+                profile_data = {
+                    "user_id": str(profile["user_id"]),
+                    "learning_style": profile.get("learning_style", {
+                        "visual": 0,
+                        "kinesthetic": 0,
+                        "auditory": 0,
+                        "readingWriting": 0
+                    }),
+                    "diagnosis": profile.get("diagnosis", ""),
+                    "cognitive_strengths": profile.get("cognitive_strengths", []),
+                    "cognitive_difficulties": profile.get("cognitive_difficulties", []),
+                    "personal_context": profile.get("personal_context", ""),
+                    "recommended_strategies": profile.get("recommended_strategies", []),
+                    "created_at": profile.get("created_at", datetime.now()).isoformat()
+                }
+                
+                # Actualizar el campo 'profile' para futuras consultas
+                self.collection.update_one(
+                    {"_id": profile["_id"]},
+                    {"$set": {"profile": json.dumps(profile_data)}}
+                )
+                
+                return profile_data
+            except Exception as e:
+                logging.error(f"Error al construir perfil desde campos individuales: {str(e)}")
+                return None
+                
         except Exception as e:
             logging.error(f"Error al obtener perfil cognitivo: {str(e)}")
             return None
