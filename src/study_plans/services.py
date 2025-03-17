@@ -415,7 +415,7 @@ class StudyPlanAssignmentService(VerificationBaseService):
 
 class ModuleService(VerificationBaseService):
     def __init__(self):
-        super().__init__(collection_name="study_plan_modules")
+        super().__init__(collection_name="modules")
 
     def create_module(self, module_data: dict) -> Tuple[bool, str]:
         try:
@@ -511,23 +511,34 @@ class ModuleService(VerificationBaseService):
 
 class TopicService(VerificationBaseService):
     def __init__(self):
-        super().__init__(collection_name="study_plan_topics")
+        super().__init__(collection_name="topics")
 
     def create_topic(self, topic_data: dict) -> Tuple[bool, str]:
         try:
             # Validar que existe el módulo
             module_id = topic_data.get('module_id')
-            module = get_db().study_plan_modules.find_one({"_id": ObjectId(module_id)})
+            module = get_db().modules.find_one({"_id": ObjectId(module_id)})
             if not module:
                 return False, "Módulo no encontrado"
             
-            # Crear el tema
-            topic_data['module_id'] = ObjectId(module_id)
-            topic_data['created_at'] = datetime.now()
-            topic_data['updated_at'] = datetime.now()
+            # Crear una copia con los datos necesarios para el constructor
+            topic_dict = {
+                "module_id": ObjectId(module_id),
+                "name": topic_data.get("name"),
+                "difficulty": topic_data.get("difficulty"),
+                "multimedia_resources": topic_data.get("multimedia_resources", []),
+                "theory_content": topic_data.get("theory_content", "")
+            }
             
-            topic = Topic(**topic_data)
-            result = self.collection.insert_one(topic.to_dict())
+            # Crear el tema con parámetros exactos
+            topic = Topic(**topic_dict)
+            
+            # Obtener el diccionario y agregar timestamps
+            topic_to_insert = topic.to_dict()
+            topic_to_insert['created_at'] = datetime.now()
+            topic_to_insert['updated_at'] = datetime.now()
+            
+            result = self.collection.insert_one(topic_to_insert)
             
             return True, str(result.inserted_id)
         except Exception as e:
@@ -651,23 +662,35 @@ class TopicService(VerificationBaseService):
 
 class EvaluationService(VerificationBaseService):
     def __init__(self):
-        super().__init__(collection_name="study_plan_evaluations")
+        super().__init__(collection_name="evaluations")
 
     def create_evaluation(self, evaluation_data: dict) -> Tuple[bool, str]:
         try:
             # Validar que existe el módulo
             module_id = evaluation_data.get('module_id')
-            module = get_db().study_plan_modules.find_one({"_id": ObjectId(module_id)})
+            module = get_db().modules.find_one({"_id": ObjectId(module_id)})
             if not module:
                 return False, "Módulo no encontrado"
             
-            # Crear la evaluación
-            evaluation_data['module_id'] = ObjectId(module_id)
-            evaluation_data['created_at'] = datetime.now()
-            evaluation_data['updated_at'] = datetime.now()
+            # Crear una copia con los datos necesarios para el constructor
+            evaluation_dict = {
+                "module_id": ObjectId(module_id),
+                "title": evaluation_data.get("title"),
+                "description": evaluation_data.get("description", ""),
+                "weight": evaluation_data.get("weight", 0),
+                "criteria": evaluation_data.get("criteria", []),
+                "due_date": evaluation_data.get("due_date")
+            }
             
-            evaluation = Evaluation(**evaluation_data)
-            result = self.collection.insert_one(evaluation.to_dict())
+            # Crear la evaluación con parámetros exactos
+            evaluation = Evaluation(**evaluation_dict)
+            
+            # Obtener el diccionario y agregar timestamps
+            evaluation_to_insert = evaluation.to_dict()
+            evaluation_to_insert['created_at'] = datetime.now()
+            evaluation_to_insert['updated_at'] = datetime.now()
+            
+            result = self.collection.insert_one(evaluation_to_insert)
             
             return True, str(result.inserted_id)
         except Exception as e:
@@ -820,7 +843,7 @@ class EvaluationService(VerificationBaseService):
                     }
                     
                     # Obtener detalles del módulo
-                    module = get_db().study_plan_modules.find_one({"_id": evaluation.get("module_id")})
+                    module = get_db().modules.find_one({"_id": evaluation.get("module_id")})
                     if module:
                         result['module'] = {
                             "name": module.get("name", ""),
