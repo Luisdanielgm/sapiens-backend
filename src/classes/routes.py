@@ -66,7 +66,7 @@ def create_class():
         return APIRoute.error(ErrorCodes.SERVER_ERROR, str(e), status_code=500)
 
 @classes_bp.route('/<class_id>', methods=['GET'])
-@APIRoute.standard(auth_required_flag=True, roles=[ROLES["TEACHER"], ROLES["STUDENT"]])
+@APIRoute.standard(auth_required_flag=True, roles=[ROLES["TEACHER"], ROLES["STUDENT"], ROLES["INSTITUTE_ADMIN"]])
 def get_class_details(class_id):
     """
     Obtiene los detalles de una clase específica.
@@ -210,7 +210,7 @@ def add_class_member(class_id):
         return APIRoute.error(str(e), 500)
 
 @classes_bp.route('/<class_id>/members', methods=['GET'])
-@APIRoute.standard(auth_required_flag=True, roles=[ROLES["TEACHER"], ROLES["STUDENT"]])
+@APIRoute.standard(auth_required_flag=True, roles=[ROLES["TEACHER"], ROLES["STUDENT"], ROLES["INSTITUTE_ADMIN"]])
 def get_class_members(class_id):
     """
     Obtiene todos los miembros de una clase.
