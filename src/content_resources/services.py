@@ -28,9 +28,26 @@ class PDFProcessingService(VerificationBaseService):
     """
     def __init__(self):
         super().__init__(collection_name="processed_pdfs")
-        # Directorio para almacenar imágenes extraídas
-        self.image_extract_dir = os.path.join(os.environ.get("UPLOAD_FOLDER", "uploads"), "extracted_images")
-        os.makedirs(self.image_extract_dir, exist_ok=True)
+        
+        # Determinar si estamos en un entorno serverless
+        self.is_serverless = os.environ.get("VERCEL") == "1" or os.environ.get("SERVERLESS") == "1"
+        
+        # Si estamos en un entorno local, intentar crear el directorio
+        # En entornos serverless, usaremos un enfoque basado en memoria
+        if not self.is_serverless:
+            # Directorio para almacenar imágenes extraídas en entornos locales
+            self.image_extract_dir = os.path.join(os.environ.get("UPLOAD_FOLDER", "uploads"), "extracted_images")
+            try:
+                os.makedirs(self.image_extract_dir, exist_ok=True)
+                logging.info(f"Directorio creado: {self.image_extract_dir}")
+            except Exception as e:
+                logging.warning(f"No se pudo crear el directorio: {str(e)}. Usando almacenamiento en memoria.")
+                self.is_serverless = True
+        
+        # En entornos serverless, no usamos el sistema de archivos
+        if self.is_serverless:
+            self.image_extract_dir = None
+            logging.info("Ejecutando en modo serverless: usando almacenamiento en memoria para archivos temporales")
         
     def process_pdf(self, file_path: str, title: str, original_filename: str, creator_id: str = None) -> Tuple[bool, str]:
         """
@@ -132,24 +149,52 @@ class PDFProcessingService(VerificationBaseService):
             pdf_pages = convert_from_path(file_path, 300)
             
             for i, page in enumerate(pdf_pages):
-                # Guardar la imagen de la página
+                # Generar nombre para la imagen
                 image_filename = f"{base_filename.split('.')[0]}_page_{i+1}.jpg"
-                image_path = os.path.join(self.image_extract_dir, image_filename)
-                page.save(image_path, "JPEG")
                 
-                # Analizar texto en la imagen usando OCR
-                ocr_text = pytesseract.image_to_string(page)
-                
-                # Añadir información de la imagen
-                images.append({
-                    "filename": image_filename,
-                    "path": image_path,
-                    "page_number": i + 1,
-                    "width": page.width,
-                    "height": page.height,
-                    "ocr_text": ocr_text,
-                    "type": "page_image"
-                })
+                # Procesamiento de la imagen según el entorno
+                if self.is_serverless:
+                    # En serverless: convertir a base64 y almacenar en memoria
+                    img_byte_arr = io.BytesIO()
+                    page.save(img_byte_arr, format='JPEG')
+                    img_byte_arr.seek(0)
+                    
+                    # Convertir a base64 para almacenamiento
+                    base64_encoded = base64.b64encode(img_byte_arr.read()).decode('utf-8')
+                    image_path = f"data:image/jpeg;base64,{base64_encoded}"
+                    
+                    # Analizar texto en la imagen usando OCR
+                    ocr_text = pytesseract.image_to_string(page)
+                    
+                    # Añadir información de la imagen
+                    images.append({
+                        "filename": image_filename,
+                        "path": None,  # No hay ruta en el sistema de archivos
+                        "base64_data": image_path,
+                        "page_number": i + 1,
+                        "width": page.width,
+                        "height": page.height,
+                        "ocr_text": ocr_text,
+                        "type": "page_image"
+                    })
+                else:
+                    # En entorno local: guardar en el sistema de archivos
+                    image_path = os.path.join(self.image_extract_dir, image_filename)
+                    page.save(image_path, "JPEG")
+                    
+                    # Analizar texto en la imagen usando OCR
+                    ocr_text = pytesseract.image_to_string(page)
+                    
+                    # Añadir información de la imagen
+                    images.append({
+                        "filename": image_filename,
+                        "path": image_path,
+                        "page_number": i + 1,
+                        "width": page.width,
+                        "height": page.height,
+                        "ocr_text": ocr_text,
+                        "type": "page_image"
+                    })
                 
             return images
         except Exception as e:
