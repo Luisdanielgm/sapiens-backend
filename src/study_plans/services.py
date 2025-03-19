@@ -514,6 +514,40 @@ class ModuleService(VerificationBaseService):
     def __init__(self):
         super().__init__(collection_name="modules")
 
+    def get_module_details(self, module_id: str) -> Optional[Dict]:
+        """
+        Obtiene los detalles de un módulo junto con sus temas y evaluaciones.
+        
+        Args:
+            module_id: ID del módulo a consultar
+            
+        Returns:
+            Diccionario con detalles del módulo, sus temas y evaluaciones, o None si no existe
+        """
+        try:
+            # Validar el ID
+            validate_object_id(module_id)
+            
+            # Obtener el módulo
+            module = self.collection.find_one({"_id": ObjectId(module_id)})
+            if not module:
+                return None
+                
+            # Obtener temas relacionados
+            topics = list(get_db().topics.find({"module_id": ObjectId(module_id)}))
+            
+            # Obtener evaluaciones relacionadas
+            evaluations = list(get_db().evaluations.find({"module_id": ObjectId(module_id)}))
+            
+            # Agregar temas y evaluaciones al módulo
+            module['topics'] = topics
+            module['evaluations'] = evaluations
+            
+            return module
+        except Exception as e:
+            logging.error(f"Error al obtener detalles del módulo: {str(e)}")
+            return None
+            
     def create_module(self, module_data: dict) -> Tuple[bool, str]:
         try:
             # Validar que existe el plan de estudio
