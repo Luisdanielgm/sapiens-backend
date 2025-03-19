@@ -1,12 +1,13 @@
-from typing import Tuple, List, Dict, Optional
+from typing import Tuple, List, Dict, Optional, Union
 from bson import ObjectId
 from datetime import datetime
+import logging
 
 from src.shared.database import get_db
 from src.shared.constants import STATUS
 from src.shared.standardization import VerificationBaseService, ErrorCodes
 from src.shared.exceptions import AppException
-from .models import Game, VirtualGame
+from .models import Game, VirtualGame, GameTemplate, GameResult
 
 class GameService(VerificationBaseService):
     def __init__(self):
@@ -303,3 +304,416 @@ class VirtualGameService(VerificationBaseService):
         except Exception as e:
             print(f"Error al actualizar progreso del juego: {str(e)}")
             return False, str(e) 
+
+class GameTemplateService(VerificationBaseService):
+    """
+    Servicio para gestionar plantillas de juegos educativos.
+    """
+    def __init__(self):
+        super().__init__(collection_name="game_templates")
+        
+    def create_template(self, template_data: dict) -> Tuple[bool, str]:
+        """
+        Crea una nueva plantilla de juego.
+        
+        Args:
+            template_data: Datos de la plantilla
+            
+        Returns:
+            Tupla con estado y mensaje/ID
+        """
+        try:
+            # Verificar si ya existe una plantilla con el mismo nombre
+            existing = self.collection.find_one({"name": template_data.get("name")})
+            if existing:
+                return False, "Ya existe una plantilla con ese nombre"
+                
+            # Crear la plantilla
+            template = GameTemplate(**template_data)
+            result = self.collection.insert_one(template.to_dict())
+            
+            return True, str(result.inserted_id)
+        except Exception as e:
+            logging.error(f"Error al crear plantilla de juego: {str(e)}")
+            return False, str(e)
+            
+    def list_templates(self, game_type: str = None, tags: List[str] = None) -> List[Dict]:
+        """
+        Lista plantillas de juegos disponibles, opcionalmente filtradas.
+        
+        Args:
+            game_type: Tipo de juego para filtrar (opcional)
+            tags: Etiquetas para filtrar (opcional)
+            
+        Returns:
+            Lista de plantillas
+        """
+        try:
+            filter_query = {"status": "active"}
+            if game_type:
+                filter_query["game_type"] = game_type
+                
+            if tags:
+                filter_query["tags"] = {"$in": tags}
+                
+            templates = list(self.collection.find(filter_query))
+            
+            # Convertir a formato serializable
+            for template in templates:
+                template = ensure_json_serializable(template)
+                    
+            return templates
+        except Exception as e:
+            logging.error(f"Error al listar plantillas de juegos: {str(e)}")
+            return []
+            
+    def get_template(self, template_id: str) -> Optional[Dict]:
+        """
+        Obtiene una plantilla específica por su ID.
+        
+        Args:
+            template_id: ID de la plantilla
+            
+        Returns:
+            Datos de la plantilla o None si no existe
+        """
+        try:
+            template = self.collection.find_one({"_id": ObjectId(template_id)})
+            if not template:
+                return None
+                
+            # Convertir a formato serializable
+            template = ensure_json_serializable(template)
+                
+            return template
+        except Exception as e:
+            logging.error(f"Error al obtener plantilla: {str(e)}")
+            return None
+            
+    def update_template(self, template_id: str, update_data: dict) -> Tuple[bool, str]:
+        """
+        Actualiza una plantilla existente.
+        
+        Args:
+            template_id: ID de la plantilla
+            update_data: Datos a actualizar
+            
+        Returns:
+            Tupla con estado y mensaje
+        """
+        try:
+            # Verificar que la plantilla existe
+            template = self.collection.find_one({"_id": ObjectId(template_id)})
+            if not template:
+                return False, "Plantilla no encontrada"
+                
+            # Actualizar
+            update_data["updated_at"] = datetime.now()
+            result = self.collection.update_one(
+                {"_id": ObjectId(template_id)},
+                {"$set": update_data}
+            )
+            
+            if result.modified_count > 0:
+                return True, "Plantilla actualizada exitosamente"
+            return False, "No se realizaron cambios"
+        except Exception as e:
+            logging.error(f"Error al actualizar plantilla: {str(e)}")
+            return False, str(e)
+            
+    def generate_game_from_template(self, template_id: str, topic_id: str, template_variables: Dict, creator_id: str = None) -> Tuple[bool, Union[str, Dict]]:
+        """
+        Genera un juego basado en una plantilla.
+        
+        Args:
+            template_id: ID de la plantilla
+            topic_id: ID del tema al que se asociará el juego
+            template_variables: Variables para personalizar la plantilla
+            creator_id: ID del creador (opcional)
+            
+        Returns:
+            Tupla con estado y ID del juego generado/mensaje de error
+        """
+        try:
+            # Obtener la plantilla
+            template = self.get_template(template_id)
+            if not template:
+                return False, "Plantilla no encontrada"
+                
+            # Obtener tema para validación
+            topic = get_db().topics.find_one({"_id": ObjectId(topic_id)})
+            if not topic:
+                return False, "Tema no encontrado"
+                
+            # Validar variables requeridas
+            schema = template.get("template_schema", {})
+            required_vars = schema.get("required_variables", [])
+            
+            for var in required_vars:
+                var_name = var.get("name", "")
+                if var_name not in template_variables:
+                    return False, f"Falta variable requerida: {var_name}"
+            
+            # Procesar código con variables
+            code = template.get("default_code", "")
+            for var_name, var_value in template_variables.items():
+                # Reemplazar marcadores de posición (usando formato ${nombre_variable})
+                code = code.replace(f"${{{var_name}}}", str(var_value))
+            
+            # Crear datos para el juego
+            game_data = {
+                "topic_id": topic_id,
+                "title": template_variables.get("title", template.get("name")),
+                "description": template_variables.get("description", template.get("description")),
+                "game_type": template.get("game_type"),
+                "code": code,
+                "metadata": {
+                    "template_id": template_id,
+                    "template_variables": template_variables,
+                    "template_name": template.get("name")
+                },
+                "creator_id": creator_id,
+                "tags": template.get("tags", []),
+                "difficulty": template_variables.get("difficulty", "medium")
+            }
+            
+            # Si hay opciones adicionales, añadirlas
+            for option in ["time_limit", "visual_style", "audio_enabled", 
+                          "accessibility_options", "cognitive_adaptations"]:
+                if option in template_variables:
+                    game_data[option] = template_variables[option]
+            
+            # Crear el juego usando el servicio
+            game_service = GameService()
+            success, result = game_service.create_game(game_data)
+            
+            return success, result
+        except Exception as e:
+            logging.error(f"Error al generar juego desde plantilla: {str(e)}")
+            return False, str(e)
+
+class GameResultService(VerificationBaseService):
+    """
+    Servicio para gestionar resultados de sesiones de juego.
+    """
+    def __init__(self):
+        super().__init__(collection_name="game_results")
+        
+    def record_result(self, result_data: dict) -> Tuple[bool, str]:
+        """
+        Registra un nuevo resultado de juego.
+        
+        Args:
+            result_data: Datos del resultado
+            
+        Returns:
+            Tupla con estado y mensaje/ID
+        """
+        try:
+            # Verificar que el juego virtual existe
+            virtual_game_id = result_data.get("virtual_game_id")
+            virtual_game = get_db().virtual_games.find_one({"_id": ObjectId(virtual_game_id)})
+            if not virtual_game:
+                return False, "Juego virtual no encontrado"
+                
+            # Verificar que el estudiante existe
+            student_id = result_data.get("student_id")
+            student = get_db().users.find_one({"_id": ObjectId(student_id)})
+            if not student:
+                return False, "Estudiante no encontrado"
+                
+            # Crear el resultado
+            game_result = GameResult(**result_data)
+            result = self.collection.insert_one(game_result.to_dict())
+            
+            # Actualizar datos del juego virtual
+            update_data = {
+                "last_played": datetime.now(),
+                "updated_at": datetime.now()
+            }
+            
+            # Actualizar porcentaje de completado si es mayor al actual
+            completion_percentage = result_data.get("completion_percentage", 0)
+            if completion_percentage > virtual_game.get("completion_percentage", 0):
+                update_data["completion_percentage"] = completion_percentage
+                
+            # Actualizar datos de rendimiento
+            performance_data = virtual_game.get("performance_data", {})
+            
+            # Agregar puntuación a historial
+            if "score_history" not in performance_data:
+                performance_data["score_history"] = []
+                
+            if "score" in result_data and result_data["score"] is not None:
+                performance_data["score_history"].append({
+                    "date": datetime.now(),
+                    "score": result_data["score"]
+                })
+                
+                # Calcular mejor puntuación
+                all_scores = [s.get("score", 0) for s in performance_data["score_history"] if s.get("score") is not None]
+                if all_scores:
+                    performance_data["best_score"] = max(all_scores)
+                    performance_data["average_score"] = sum(all_scores) / len(all_scores)
+            
+            # Actualizar tiempo total de juego
+            time_spent = result_data.get("time_spent", 0)
+            if time_spent > 0:
+                performance_data["total_time_spent"] = performance_data.get("total_time_spent", 0) + time_spent
+                performance_data["sessions_count"] = performance_data.get("sessions_count", 0) + 1
+            
+            update_data["performance_data"] = performance_data
+            
+            # Aplicar actualización
+            get_db().virtual_games.update_one(
+                {"_id": ObjectId(virtual_game_id)},
+                {"$set": update_data}
+            )
+            
+            return True, str(result.inserted_id)
+        except Exception as e:
+            logging.error(f"Error al registrar resultado de juego: {str(e)}")
+            return False, str(e)
+            
+    def get_student_results(self, student_id: str, virtual_game_id: str = None) -> List[Dict]:
+        """
+        Obtiene resultados de juegos de un estudiante.
+        
+        Args:
+            student_id: ID del estudiante
+            virtual_game_id: ID del juego virtual (opcional, para filtrar)
+            
+        Returns:
+            Lista de resultados
+        """
+        try:
+            filter_query = {"student_id": ObjectId(student_id)}
+            if virtual_game_id:
+                filter_query["virtual_game_id"] = ObjectId(virtual_game_id)
+                
+            results = list(self.collection.find(filter_query))
+            
+            # Convertir a formato serializable
+            for result in results:
+                result = ensure_json_serializable(result)
+                
+            return results
+        except Exception as e:
+            logging.error(f"Error al obtener resultados del estudiante: {str(e)}")
+            return []
+            
+    def get_learning_analytics(self, student_id: str, topic_id: str = None) -> Dict:
+        """
+        Obtiene análisis de aprendizaje basado en resultados de juegos.
+        
+        Args:
+            student_id: ID del estudiante
+            topic_id: ID del tema (opcional, para filtrar)
+            
+        Returns:
+            Análisis de aprendizaje
+        """
+        try:
+            # Obtener todos los juegos virtuales del estudiante
+            virtual_games_query = {"student_id": ObjectId(student_id)}
+            
+            # Si se proporciona un tema, primero buscar módulos virtuales del tema
+            if topic_id:
+                # Buscar temas virtuales asociados al tema
+                virtual_topics = list(get_db().virtual_topics.find(
+                    {"topic_id": ObjectId(topic_id)}
+                ))
+                
+                if virtual_topics:
+                    virtual_topic_ids = [vt["_id"] for vt in virtual_topics]
+                    virtual_games_query["virtual_topic_id"] = {"$in": virtual_topic_ids}
+            
+            # Obtener juegos virtuales
+            virtual_games = list(get_db().virtual_games.find(virtual_games_query))
+            
+            if not virtual_games:
+                return {
+                    "message": "No hay juegos virtuales para el estudiante y tema especificados",
+                    "metrics": {}
+                }
+                
+            # Obtener IDs de juegos virtuales
+            virtual_game_ids = [vg["_id"] for vg in virtual_games]
+            
+            # Obtener resultados de juegos
+            results = list(self.collection.find({
+                "virtual_game_id": {"$in": virtual_game_ids}
+            }))
+            
+            # Si no hay resultados, devolver métricas vacías
+            if not results:
+                return {
+                    "total_games": len(virtual_games),
+                    "games_played": 0,
+                    "metrics": {}
+                }
+                
+            # Calcular métricas
+            metrics = {
+                "total_games": len(virtual_games),
+                "games_played": len(set(str(r["virtual_game_id"]) for r in results)),
+                "total_time_spent": sum(r.get("time_spent", 0) for r in results),
+                "average_completion": sum(r.get("completion_percentage", 0) for r in results) / len(results),
+                "total_sessions": len(results)
+            }
+            
+            # Calcular puntuaciones medias y mejores si hay datos disponibles
+            scores = [r.get("score") for r in results if r.get("score") is not None]
+            if scores:
+                metrics["average_score"] = sum(scores) / len(scores)
+                metrics["best_score"] = max(scores)
+                metrics["lowest_score"] = min(scores)
+            
+            # Calcular progreso por tipo de juego
+            game_type_progress = {}
+            for vg in virtual_games:
+                # Obtener el juego original para saber su tipo
+                original_game = get_db().games.find_one({"_id": vg["game_id"]})
+                if original_game:
+                    game_type = original_game.get("game_type")
+                    if game_type not in game_type_progress:
+                        game_type_progress[game_type] = {
+                            "total": 0,
+                            "completed": 0,
+                            "in_progress": 0,
+                            "not_started": 0
+                        }
+                        
+                    game_type_progress[game_type]["total"] += 1
+                    
+                    # Determinar estado según porcentaje de completado
+                    completion = vg.get("completion_percentage", 0)
+                    if completion >= 99:
+                        game_type_progress[game_type]["completed"] += 1
+                    elif completion > 0:
+                        game_type_progress[game_type]["in_progress"] += 1
+                    else:
+                        game_type_progress[game_type]["not_started"] += 1
+                        
+            metrics["game_type_progress"] = game_type_progress
+            
+            # Análisis de tendencias de aprendizaje (mejora con el tiempo)
+            if len(results) > 1:
+                # Ordenar resultados por fecha
+                sorted_results = sorted(results, key=lambda r: r.get("session_date", datetime.now()))
+                
+                # Comparar primer y último resultado
+                first_result = sorted_results[0]
+                last_result = sorted_results[-1]
+                
+                if first_result.get("score") is not None and last_result.get("score") is not None:
+                    metrics["score_improvement"] = last_result.get("score") - first_result.get("score")
+                    
+            return {
+                "student_id": student_id,
+                "topic_id": topic_id,
+                "metrics": metrics
+            }
+        except Exception as e:
+            logging.error(f"Error al obtener análisis de aprendizaje: {str(e)}")
+            return {"error": str(e), "metrics": {}} 

@@ -108,6 +108,13 @@ def setup_database_indexes():
         db.institutes.create_index([("status", ASCENDING)])
         
         # Índices de miembros del instituto
+        # Primero eliminar el índice existente si existe
+        try:
+            db.institute_members.drop_index("institute_id_1_user_id_1")
+        except Exception as e:
+            logger.warning(f"No se pudo eliminar el índice existente: {str(e)}")
+            
+        # Crear el nuevo índice con unique=True
         db.institute_members.create_index([("institute_id", ASCENDING), ("user_id", ASCENDING)], unique=True)
         db.institute_members.create_index([("user_id", ASCENDING)])
         db.institute_members.create_index([("role", ASCENDING)])
@@ -125,13 +132,54 @@ def setup_database_indexes():
         db.classes.create_index([("teacher_id", ASCENDING)])
         db.classes.create_index([("subject_id", ASCENDING)])
         db.classes.create_index([("section_id", ASCENDING)])
-        db.class_members.create_index([("class_id", ASCENDING), ("student_id", ASCENDING)], unique=True)
+        
+        # Índices de miembros de clase
+        try:
+            db.class_members.drop_index("class_id_1_student_id_1")
+        except Exception as e:
+            logger.warning(f"No se pudo eliminar el índice existente de class_members: {str(e)}")
+            
+        # Crear índice parcial que solo aplica unique cuando student_id no es null
+        db.class_members.create_index(
+            [("class_id", ASCENDING), ("student_id", ASCENDING)],
+            unique=True,
+            partialFilterExpression={"student_id": {"$type": "string"}}
+        )
         db.class_members.create_index([("student_id", ASCENDING)])
         
         # Índices de invitaciones
-        db.institute_invitations.create_index([("email", ASCENDING), ("institute_id", ASCENDING)], unique=True)
+        try:
+            db.institute_invitations.drop_index("email_1_institute_id_1")
+        except Exception as e:
+            logger.warning(f"No se pudo eliminar el índice existente de institute_invitations: {str(e)}")
+            
+        try:
+            db.institute_invitations.drop_index("token_1")
+        except Exception as e:
+            logger.warning(f"No se pudo eliminar el índice token de institute_invitations: {str(e)}")
+            
+        try:
+            db.class_invitations.drop_index("email_1_class_id_1")
+        except Exception as e:
+            logger.warning(f"No se pudo eliminar el índice existente de class_invitations: {str(e)}")
+            
+        try:
+            db.class_invitations.drop_index("token_1")
+        except Exception as e:
+            logger.warning(f"No se pudo eliminar el índice token de class_invitations: {str(e)}")
+        
+        # Crear los nuevos índices
+        db.institute_invitations.create_index(
+            [("email", ASCENDING), ("institute_id", ASCENDING)],
+            unique=True,
+            partialFilterExpression={"email": {"$type": "string"}}
+        )
         db.institute_invitations.create_index([("token", ASCENDING)], unique=True)
-        db.class_invitations.create_index([("email", ASCENDING), ("class_id", ASCENDING)], unique=True)
+        db.class_invitations.create_index(
+            [("email", ASCENDING), ("class_id", ASCENDING)],
+            unique=True,
+            partialFilterExpression={"email": {"$type": "string"}}
+        )
         db.class_invitations.create_index([("token", ASCENDING)], unique=True)
         
         # Índices de contenido individual de estudiantes

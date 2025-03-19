@@ -5,6 +5,8 @@ from src.shared.standardization import APIBlueprint, APIRoute, ErrorCodes
 from src.shared.constants import ROLES
 from src.shared.utils import ensure_json_serializable
 from .services import SimulationService, VirtualSimulationService, SimulationResultService
+from src.shared.database import get_db
+from bson.objectid import ObjectId
 
 # Crear blueprint
 simulations_bp = APIBlueprint('simulations', __name__, url_prefix='/api/simulations')
@@ -319,6 +321,147 @@ def get_simulation_result(result_id):
             status_code=404
         )
     except Exception as e:
+        return APIRoute.error(
+            ErrorCodes.SERVER_ERROR,
+            str(e),
+            status_code=500
+        )
+
+@simulations_bp.route('/templates', methods=['GET'])
+@APIRoute.standard(auth_required_flag=True)
+def list_simulation_templates():
+    """Lista plantillas de simulaciones disponibles"""
+    try:
+        # Obtener filtros opcionales
+        simulation_type = request.args.get('type')
+        complexity = request.args.get('complexity')
+        
+        # Filtrar por tipo o complejidad si se proporciona
+        filter_query = {"status": "active"}
+        if simulation_type:
+            filter_query["simulation_type"] = simulation_type
+        if complexity:
+            filter_query["complexity"] = complexity
+            
+        # Obtener plantillas
+        templates = list(get_db().simulation_templates.find(filter_query))
+        
+        # Convertir a formato serializable
+        for template in templates:
+            template = ensure_json_serializable(template)
+            
+        return APIRoute.success(data=templates)
+    except Exception as e:
+        logging.error(f"Error al listar plantillas de simulaciones: {str(e)}")
+        return APIRoute.error(
+            ErrorCodes.SERVER_ERROR,
+            str(e),
+            status_code=500
+        )
+
+@simulations_bp.route('/templates', methods=['POST'])
+@APIRoute.standard(auth_required_flag=True, roles=[ROLES["TEACHER"], ROLES["INSTITUTE_ADMIN"]], 
+                  required_fields=['title', 'description', 'simulation_type', 'parameters'])
+def create_simulation_template():
+    """Crea una nueva plantilla de simulación"""
+    try:
+        data = request.get_json()
+        
+        # Añadir ID del creador
+        data['creator_id'] = request.user_id
+        
+        # Crear la plantilla como simulación base marcada como template
+        data['is_template'] = True
+        
+        # Crear simulación usando el servicio existente
+        success, result = simulation_service.create_simulation(data)
+        
+        if not success:
+            return APIRoute.error(
+                ErrorCodes.BAD_REQUEST,
+                result,
+                status_code=400
+            )
+            
+        return APIRoute.success(
+            {"id": result},
+            message="Plantilla de simulación creada exitosamente",
+            status_code=201
+        )
+    except Exception as e:
+        logging.error(f"Error al crear plantilla de simulación: {str(e)}")
+        return APIRoute.error(
+            ErrorCodes.SERVER_ERROR,
+            str(e),
+            status_code=500
+        )
+        
+@simulations_bp.route('/generate', methods=['POST'])
+@APIRoute.standard(auth_required_flag=True, roles=[ROLES["TEACHER"]], 
+                  required_fields=['topic_id', 'template_id', 'parameters'])
+def generate_simulation():
+    """Genera una simulación a partir de una plantilla"""
+    try:
+        data = request.get_json()
+        topic_id = data.get('topic_id')
+        template_id = data.get('template_id')
+        parameters = data.get('parameters', {})
+        
+        # Verificar que existe la plantilla
+        template = get_db().simulations.find_one({
+            "_id": ObjectId(template_id),
+            "is_template": True
+        })
+        
+        if not template:
+            return APIRoute.error(
+                ErrorCodes.NOT_FOUND,
+                "Plantilla de simulación no encontrada",
+                status_code=404
+            )
+            
+        # Verificar que existe el tema
+        topic = get_db().topics.find_one({"_id": ObjectId(topic_id)})
+        if not topic:
+            return APIRoute.error(
+                ErrorCodes.NOT_FOUND,
+                "Tema no encontrado",
+                status_code=404
+            )
+            
+        # Crear una copia de la plantilla con los parámetros personalizados
+        simulation_data = {
+            "topic_id": topic_id,
+            "title": data.get('title', template.get('title')),
+            "description": data.get('description', template.get('description')),
+            "simulation_type": template.get('simulation_type'),
+            "code": template.get('code'),
+            "parameters": {**template.get('parameters', {}), **parameters},
+            "visual_assets": template.get('visual_assets'),
+            "creator_id": request.user_id,
+            "complexity": data.get('complexity', template.get('complexity', "medium")),
+            "estimated_duration": data.get('estimated_duration', template.get('estimated_duration', 30)),
+            "learning_objectives": data.get('learning_objectives', template.get('learning_objectives', [])),
+            "is_template": False  # Marca como simulación normal, no plantilla
+        }
+        
+        # Crear la simulación
+        success, result = simulation_service.create_simulation(simulation_data)
+        
+        if not success:
+            return APIRoute.error(
+                ErrorCodes.BAD_REQUEST,
+                result,
+                status_code=400
+            )
+            
+        return APIRoute.success(
+            {"id": result},
+            message="Simulación generada exitosamente",
+            status_code=201
+        )
+    except Exception as e:
+        logging.error(f"Error al generar simulación: {str(e)}")
         return APIRoute.error(
             ErrorCodes.SERVER_ERROR,
             str(e),

@@ -2,6 +2,7 @@ from typing import Tuple, List, Dict, Optional
 from bson import ObjectId
 from datetime import datetime
 import json
+import re
 
 from src.shared.database import get_db
 from src.shared.constants import STATUS
@@ -1025,3 +1026,1010 @@ class EvaluationService(VerificationBaseService):
             return enriched_results
         except Exception as e:
             return []
+
+# Nuevos servicios para gestión de contenido
+
+class ContentTypeService(VerificationBaseService):
+    """
+    Servicio para gestionar los tipos de contenido disponibles en el sistema.
+    """
+    def __init__(self):
+        super().__init__(collection_name="content_types")
+        
+    def create_content_type(self, content_type_data: dict) -> Tuple[bool, str]:
+        """
+        Crea un nuevo tipo de contenido en el catálogo.
+        
+        Args:
+            content_type_data: Datos del tipo de contenido a crear
+            
+        Returns:
+            Tupla con estado y mensaje/ID
+        """
+        try:
+            # Verificar si ya existe un tipo de contenido con el mismo código
+            existing = self.collection.find_one({"code": content_type_data.get("code")})
+            if existing:
+                return False, "Ya existe un tipo de contenido con ese código"
+                
+            # Crear objeto y obtener diccionario para inserción
+            content_type = ContentTypeDefinition(**content_type_data)
+            result = self.collection.insert_one(content_type.to_dict())
+            
+            return True, str(result.inserted_id)
+        except Exception as e:
+            logging.error(f"Error al crear tipo de contenido: {str(e)}")
+            return False, str(e)
+            
+    def list_content_types(self, category: str = None) -> List[Dict]:
+        """
+        Lista todos los tipos de contenido disponibles, opcionalmente filtrados por categoría.
+        
+        Args:
+            category: Categoría para filtrar (opcional)
+            
+        Returns:
+            Lista de tipos de contenido
+        """
+        try:
+            filter_query = {"status": "active"}
+            if category:
+                filter_query["category"] = category
+                
+            content_types = list(self.collection.find(filter_query))
+            
+            # Convertir ObjectId a str para serialización
+            for content_type in content_types:
+                if "_id" in content_type:
+                    content_type["_id"] = str(content_type["_id"])
+                    
+            return content_types
+        except Exception as e:
+            logging.error(f"Error al listar tipos de contenido: {str(e)}")
+            return []
+            
+    def get_content_type(self, code: str) -> Optional[Dict]:
+        """
+        Obtiene un tipo de contenido por su código.
+        
+        Args:
+            code: Código del tipo de contenido
+            
+        Returns:
+            Diccionario con datos del tipo de contenido o None si no existe
+        """
+        try:
+            content_type = self.collection.find_one({"code": code, "status": "active"})
+            if not content_type:
+                return None
+                
+            # Convertir ObjectId a str para serialización
+            if "_id" in content_type:
+                content_type["_id"] = str(content_type["_id"])
+                
+            return content_type
+        except Exception as e:
+            logging.error(f"Error al obtener tipo de contenido: {str(e)}")
+            return None
+
+class LearningMethodologyService(VerificationBaseService):
+    """
+    Servicio para gestionar las metodologías de aprendizaje.
+    """
+    def __init__(self):
+        super().__init__(collection_name="learning_methodologies")
+        
+    def create_methodology(self, methodology_data: dict) -> Tuple[bool, str]:
+        """
+        Crea una nueva metodología de aprendizaje.
+        
+        Args:
+            methodology_data: Datos de la metodología a crear
+            
+        Returns:
+            Tupla con estado y mensaje/ID
+        """
+        try:
+            # Verificar si ya existe una metodología con el mismo código
+            existing = self.collection.find_one({"code": methodology_data.get("code")})
+            if existing:
+                return False, "Ya existe una metodología con ese código"
+                
+            # Crear objeto y obtener diccionario para inserción
+            methodology = LearningMethodology(**methodology_data)
+            result = self.collection.insert_one(methodology.to_dict())
+            
+            return True, str(result.inserted_id)
+        except Exception as e:
+            logging.error(f"Error al crear metodología: {str(e)}")
+            return False, str(e)
+            
+    def list_methodologies(self) -> List[Dict]:
+        """
+        Lista todas las metodologías de aprendizaje disponibles.
+        
+        Returns:
+            Lista de metodologías
+        """
+        try:
+            methodologies = list(self.collection.find({"status": "active"}))
+            
+            # Convertir ObjectId a str para serialización
+            for methodology in methodologies:
+                if "_id" in methodology:
+                    methodology["_id"] = str(methodology["_id"])
+                    
+            return methodologies
+        except Exception as e:
+            logging.error(f"Error al listar metodologías: {str(e)}")
+            return []
+            
+    def get_methodology(self, code: str) -> Optional[Dict]:
+        """
+        Obtiene una metodología por su código.
+        
+        Args:
+            code: Código de la metodología
+            
+        Returns:
+            Diccionario con datos de la metodología o None si no existe
+        """
+        try:
+            methodology = self.collection.find_one({"code": code, "status": "active"})
+            if not methodology:
+                return None
+                
+            # Convertir ObjectId a str para serialización
+            if "_id" in methodology:
+                methodology["_id"] = str(methodology["_id"])
+                
+            return methodology
+        except Exception as e:
+            logging.error(f"Error al obtener metodología: {str(e)}")
+            return None
+            
+    def get_compatible_methodologies(self, cognitive_profile: Dict) -> List[Dict]:
+        """
+        Obtiene las metodologías compatibles con un perfil cognitivo.
+        
+        Args:
+            cognitive_profile: Perfil cognitivo del estudiante
+            
+        Returns:
+            Lista de metodologías compatibles ordenadas por relevancia
+        """
+        try:
+            methodologies = self.list_methodologies()
+            
+            # Calcular puntuación de compatibilidad para cada metodología
+            scored_methodologies = []
+            for methodology in methodologies:
+                score = 0
+                profile_match = methodology.get("cognitive_profile_match", {})
+                
+                # Calcular puntuación basada en coincidencias del perfil
+                for profile_key, profile_value in cognitive_profile.items():
+                    if profile_key in profile_match:
+                        # Mayor valor en profile_match indica mayor compatibilidad
+                        match_value = profile_match[profile_key]
+                        score += match_value * profile_value
+                        
+                methodology["compatibility_score"] = score
+                scored_methodologies.append(methodology)
+                
+            # Ordenar por puntuación de compatibilidad (descendente)
+            return sorted(scored_methodologies, key=lambda m: m["compatibility_score"], reverse=True)
+        except Exception as e:
+            logging.error(f"Error al obtener metodologías compatibles: {str(e)}")
+            return []
+
+class TopicContentService(VerificationBaseService):
+    """
+    Servicio para gestionar los diferentes tipos de contenido asociados a temas.
+    """
+    def __init__(self):
+        super().__init__(collection_name="topic_contents")
+        self.content_type_service = ContentTypeService()
+        
+    def create_content(self, content_data: dict) -> Tuple[bool, str]:
+        """
+        Crea un nuevo contenido para un tema.
+        
+        Args:
+            content_data: Datos del contenido a crear
+            
+        Returns:
+            Tupla con estado y mensaje/ID
+        """
+        try:
+            # Validar que existe el tema
+            topic_id = content_data.get("topic_id")
+            topic = get_db().topics.find_one({"_id": ObjectId(topic_id)})
+            if not topic:
+                return False, "Tema no encontrado"
+                
+            # Validar que existe el tipo de contenido
+            content_type = content_data.get("content_type")
+            if not self.content_type_service.get_content_type(content_type):
+                return False, f"Tipo de contenido '{content_type}' no válido"
+                
+            # Crear el contenido
+            topic_content = TopicContent(**content_data)
+            result = self.collection.insert_one(topic_content.to_dict())
+            
+            return True, str(result.inserted_id)
+        except Exception as e:
+            logging.error(f"Error al crear contenido para tema: {str(e)}")
+            return False, str(e)
+            
+    def get_topic_contents(self, topic_id: str) -> List[Dict]:
+        """
+        Obtiene todos los contenidos asociados a un tema.
+        
+        Args:
+            topic_id: ID del tema
+            
+        Returns:
+            Lista de contenidos
+        """
+        try:
+            contents = list(self.collection.find({"topic_id": ObjectId(topic_id)}))
+            
+            # Convertir ObjectId a str para serialización
+            for content in contents:
+                if "_id" in content:
+                    content["_id"] = str(content["_id"])
+                if "topic_id" in content:
+                    content["topic_id"] = str(content["topic_id"])
+                    
+            return contents
+        except Exception as e:
+            logging.error(f"Error al obtener contenidos del tema: {str(e)}")
+            return []
+            
+    def get_content(self, content_id: str) -> Optional[Dict]:
+        """
+        Obtiene un contenido específico por su ID.
+        
+        Args:
+            content_id: ID del contenido
+            
+        Returns:
+            Diccionario con datos del contenido o None si no existe
+        """
+        try:
+            content = self.collection.find_one({"_id": ObjectId(content_id)})
+            if not content:
+                return None
+                
+            # Convertir ObjectId a str para serialización
+            if "_id" in content:
+                content["_id"] = str(content["_id"])
+            if "topic_id" in content:
+                content["topic_id"] = str(content["topic_id"])
+                
+            return content
+        except Exception as e:
+            logging.error(f"Error al obtener contenido: {str(e)}")
+            return None
+            
+    def update_content(self, content_id: str, update_data: dict) -> Tuple[bool, str]:
+        """
+        Actualiza un contenido existente.
+        
+        Args:
+            content_id: ID del contenido a actualizar
+            update_data: Datos a actualizar
+            
+        Returns:
+            Tupla con estado y mensaje
+        """
+        try:
+            # Verificar que el contenido existe
+            content = self.collection.find_one({"_id": ObjectId(content_id)})
+            if not content:
+                return False, "Contenido no encontrado"
+                
+            # Actualizar timestamp
+            update_data["updated_at"] = datetime.now()
+            
+            # Actualizar el contenido
+            result = self.collection.update_one(
+                {"_id": ObjectId(content_id)},
+                {"$set": update_data}
+            )
+            
+            if result.modified_count > 0:
+                return True, "Contenido actualizado exitosamente"
+            return False, "No se realizaron cambios"
+        except Exception as e:
+            logging.error(f"Error al actualizar contenido: {str(e)}")
+            return False, str(e)
+            
+    def delete_content(self, content_id: str) -> Tuple[bool, str]:
+        """
+        Elimina un contenido existente.
+        
+        Args:
+            content_id: ID del contenido a eliminar
+            
+        Returns:
+            Tupla con estado y mensaje
+        """
+        try:
+            # Verificar que el contenido existe
+            content = self.collection.find_one({"_id": ObjectId(content_id)})
+            if not content:
+                return False, "Contenido no encontrado"
+                
+            # Eliminar el contenido
+            result = self.collection.delete_one({"_id": ObjectId(content_id)})
+            
+            if result.deleted_count > 0:
+                return True, "Contenido eliminado exitosamente"
+            return False, "No se pudo eliminar el contenido"
+        except Exception as e:
+            logging.error(f"Error al eliminar contenido: {str(e)}")
+            return False, str(e)
+            
+    def get_topic_content_by_type(self, topic_id: str, content_type: str) -> Optional[Dict]:
+        """
+        Obtiene un contenido específico de un tema según su tipo.
+        
+        Args:
+            topic_id: ID del tema
+            content_type: Tipo de contenido a buscar
+            
+        Returns:
+            Diccionario con datos del contenido o None si no existe
+        """
+        try:
+            content = self.collection.find_one({
+                "topic_id": ObjectId(topic_id),
+                "content_type": content_type
+            })
+            
+            if not content:
+                return None
+                
+            # Convertir ObjectId a str para serialización
+            if "_id" in content:
+                content["_id"] = str(content["_id"])
+            if "topic_id" in content:
+                content["topic_id"] = str(content["topic_id"])
+                
+            return content
+        except Exception as e:
+            logging.error(f"Error al obtener contenido por tipo: {str(e)}")
+            return None
+
+    def adapt_content_to_methodology(self, content_id: str, methodology_code: str) -> Tuple[bool, Dict]:
+        """
+        Adapta un contenido según una metodología de aprendizaje específica.
+        
+        Args:
+            content_id: ID del contenido
+            methodology_code: Código de la metodología
+            
+        Returns:
+            Tupla con estado y datos del contenido adaptado
+        """
+        try:
+            # Obtener el contenido
+            content = self.get_content(content_id)
+            if not content:
+                return False, {"error": "Contenido no encontrado"}
+            
+            # Obtener la metodología
+            methodology_service = LearningMethodologyService()
+            methodology = methodology_service.get_methodology(methodology_code)
+            if not methodology:
+                return False, {"error": f"Metodología '{methodology_code}' no encontrada"}
+            
+            # Verificar compatibilidad
+            content_type = content.get("content_type")
+            if not content_type in methodology.get("compatible_content_types", []):
+                return False, {"error": f"La metodología '{methodology_code}' no es compatible con el tipo de contenido '{content_type}'"}
+            
+            # Obtener el tema
+            topic_id = content.get("topic_id")
+            topic = get_db().topics.find_one({"_id": ObjectId(topic_id)})
+            if not topic:
+                return False, {"error": "Tema no encontrado"}
+            
+            # Convertir a formato serializable
+            topic = ensure_json_serializable(topic)
+            
+            # Obtener el contenido original
+            original_content = content.get("content", "")
+            
+            # Adaptaciones según metodología
+            adapted_content = original_content
+            adaptation_notes = []
+            
+            if methodology_code == "feynman":
+                # Adaptación según el método Feynman (simplificación y analogías)
+                adapted_content = self._adapt_feynman(original_content, topic.get("name", ""))
+                adaptation_notes.append("Contenido simplificado usando lenguaje claro y analogías")
+                
+            elif methodology_code == "spaced_repetition":
+                # Adaptación para repetición espaciada (resúmenes y puntos clave)
+                adapted_content = self._adapt_spaced_repetition(original_content)
+                adaptation_notes.append("Contenido estructurado para repetición espaciada con puntos clave destacados")
+                
+            elif methodology_code == "mind_map":
+                # Adaptación para mapas mentales (estructura jerárquica y conectada)
+                adapted_content = self._adapt_mind_map(original_content, topic.get("name", ""))
+                adaptation_notes.append("Contenido estructurado para ser representado como mapa mental")
+                
+            elif methodology_code == "project_based":
+                # Adaptación para aprendizaje basado en proyectos
+                adapted_content = self._adapt_project_based(original_content, topic.get("name", ""))
+                adaptation_notes.append("Contenido orientado a proyectos prácticos de aplicación")
+                
+            elif methodology_code == "socratic":
+                # Adaptación para método socrático (preguntas y reflexión)
+                adapted_content = self._adapt_socratic(original_content)
+                adaptation_notes.append("Contenido transformado en preguntas de reflexión y cuestionamiento")
+                
+            else:
+                # Si no hay adaptación específica, mantener el contenido original
+                adaptation_notes.append("Metodología sin adaptación específica, manteniendo contenido original")
+            
+            # Estructura de respuesta
+            result = {
+                "original_content": original_content,
+                "adapted_content": adapted_content,
+                "methodology": methodology,
+                "adaptation_notes": adaptation_notes,
+                "content_type": content_type,
+                "topic_name": topic.get("name", "")
+            }
+            
+            return True, result
+        except Exception as e:
+            logging.error(f"Error al adaptar contenido: {str(e)}")
+            return False, {"error": str(e)}
+        
+    def _adapt_feynman(self, content: str, topic_name: str) -> str:
+        """Adapta contenido según el método Feynman (simplificación)"""
+        lines = content.split("\n")
+        adapted = [f"# Explicación simplificada de {topic_name}", ""]
+        
+        # Simplificar y añadir analogías
+        paragraphs = []
+        current_paragraph = ""
+        
+        for line in lines:
+            line = line.strip()
+            if not line:
+                if current_paragraph:
+                    paragraphs.append(current_paragraph)
+                    current_paragraph = ""
+            else:
+                current_paragraph += line + " "
+            
+        if current_paragraph:
+            paragraphs.append(current_paragraph)
+        
+        # Procesar cada párrafo
+        for i, paragraph in enumerate(paragraphs):
+            # Simplificar terminología técnica
+            simplifications = [
+                (r'[\w\s]+ es una metodología que', 'es un método que'),
+                (r'se puede conceptualizar como', 'es como'),
+                (r'es necesario [.\w\s]+ para', 'necesitas'),
+                (r'se fundamenta en', 'se basa en'),
+                (r'implementación', 'uso'),
+                (r'([A-Z]\w+(?:\s[A-Z]\w+)+) es', r'"\1" es')  # Destacar términos técnicos
+            ]
+            
+            simplified = paragraph
+            for pattern, replacement in simplifications:
+                simplified = re.sub(pattern, replacement, simplified)
+            
+            # Añadir una analogía para párrafos largos
+            if len(simplified) > 200 and i == 0:
+                simplified += f"\n\nPiensa en {topic_name} como si fuera un..."
+            
+            adapted.append(simplified)
+            adapted.append("")
+        
+        # Añadir resumen final
+        adapted.append("## En resumen:")
+        adapted.append("* Punto clave 1")
+        adapted.append("* Punto clave 2")
+        adapted.append("* Punto clave 3")
+        
+        return "\n".join(adapted)
+        
+    def _adapt_spaced_repetition(self, content: str) -> str:
+        """Adapta contenido para repetición espaciada (puntos clave y resúmenes)"""
+        lines = content.split("\n")
+        
+        # Extraer puntos clave y conceptos
+        key_points = []
+        concepts = []
+        
+        # Buscar frases importantes (contienen palabras clave)
+        important_indicators = ['importante', 'clave', 'fundamental', 'destacar', 'esencial', 'recordar', 'principal']
+        concept_indicators = ['concepto', 'definición', 'término', 'significa', 'se define como']
+        
+        paragraphs = []
+        current_paragraph = ""
+        
+        for line in lines:
+            line = line.strip()
+            if not line:
+                if current_paragraph:
+                    paragraphs.append(current_paragraph)
+                    current_paragraph = ""
+            else:
+                current_paragraph += line + " "
+            
+        if current_paragraph:
+            paragraphs.append(current_paragraph)
+        
+        # Extraer puntos clave
+        for paragraph in paragraphs:
+            # Buscar puntos clave
+            if any(indicator in paragraph.lower() for indicator in important_indicators):
+                sentences = re.split(r'(?<=[.!?])\s+', paragraph)
+                for sentence in sentences:
+                    if any(indicator in sentence.lower() for indicator in important_indicators):
+                        key_points.append(sentence.strip())
+            
+            # Buscar conceptos
+            if any(indicator in paragraph.lower() for indicator in concept_indicators):
+                sentences = re.split(r'(?<=[.!?])\s+', paragraph)
+                for sentence in sentences:
+                    if any(indicator in sentence.lower() for indicator in concept_indicators):
+                        concepts.append(sentence.strip())
+        
+        # Si no encontramos suficientes puntos clave, usar las primeras oraciones de algunos párrafos
+        if len(key_points) < 3 and paragraphs:
+            for paragraph in paragraphs[:3]:
+                sentences = re.split(r'(?<=[.!?])\s+', paragraph)
+                if sentences:
+                    key_points.append(sentences[0].strip())
+        
+        # Estructurar el contenido para repetición espaciada
+        adapted = ["# Contenido para Repetición Espaciada", ""]
+        
+        # Añadir sección de revisión rápida
+        adapted.append("## Revisión Rápida (5 min)")
+        if key_points:
+            for point in key_points:
+                adapted.append(f"* {point}")
+        else:
+            adapted.append("* Punto clave extraído del contenido")
+        adapted.append("")
+        
+        # Añadir sección de conceptos
+        adapted.append("## Conceptos Clave")
+        if concepts:
+            for concept in concepts:
+                adapted.append(f"* {concept}")
+        else:
+            adapted.append("* No se encontraron definiciones claras en el contenido")
+        adapted.append("")
+        
+        # Añadir contenido completo
+        adapted.append("## Contenido Completo (Revisión detallada)")
+        adapted.append(content)
+        
+        return "\n".join(adapted)
+        
+    def _adapt_mind_map(self, content: str, topic_name: str) -> str:
+        """Adapta contenido para estructura de mapa mental"""
+        try:
+            # Convertir el contenido a estructura jerárquica para mapas mentales
+            adapted = [f"# Mapa Mental: {topic_name}", ""]
+            
+            # Añadir nodo central
+            adapted.append(f"## Nodo Central: {topic_name}")
+            
+            # Procesar el contenido
+            lines = content.split('\n')
+            current_level = 0
+            
+            for line in lines:
+                line = line.strip()
+                if not line:
+                    continue
+                    
+                # Determinar nivel basado en encabezados
+                if line.startswith('#'):
+                    level = len(re.match(r'^#+', line).group())
+                    current_level = level - 1
+                    line = line.lstrip('#').strip()
+                    
+                # Añadir línea con indentación apropiada
+                indent = "  " * current_level
+                adapted.append(f"{indent}- {line}")
+                
+            return "\n".join(adapted)
+            
+        except Exception as e:
+            logging.error(f"Error al generar recomendaciones: {str(e)}")
+            return f"# Error al generar mapa mental\n{str(e)}"
+        
+    def _extract_keywords_from_topic(self, topic: Dict) -> List[str]:
+        """
+        Extrae palabras clave de un tema.
+        
+        Args:
+            topic: Diccionario del tema
+            
+        Returns:
+            Lista de palabras clave
+        """
+        keywords = []
+        
+        # Añadir nombre del tema
+        if "name" in topic:
+            keywords.append(topic["name"])
+            
+        # Extraer palabras del contenido teórico
+        if "theory_content" in topic and topic["theory_content"]:
+            # Definir palabras a ignorar (stop words)
+            stop_words = set(['el', 'la', 'los', 'las', 'un', 'una', 'unos', 'unas', 'y', 'o', 'a', 
+                             'de', 'del', 'en', 'con', 'por', 'para', 'es', 'son', 'al', 'e', 'u'])
+                             
+            # Extraer palabras relevantes
+            words = re.findall(r'\b[a-zA-ZáéíóúÁÉÍÓÚñÑ]{4,}\b', topic["theory_content"].lower())
+            
+            # Filtrar stop words y contar frecuencia
+            word_counts = {}
+            for word in words:
+                if word not in stop_words:
+                    word_counts[word] = word_counts.get(word, 0) + 1
+                    
+            # Obtener las 10 palabras más frecuentes
+            sorted_words = sorted(word_counts.items(), key=lambda x: x[1], reverse=True)
+            frequent_words = [word for word, count in sorted_words[:10]]
+            
+            keywords.extend(frequent_words)
+            
+        # Si no hay suficientes palabras clave, usar el módulo
+        if len(keywords) < 3 and "module_id" in topic:
+            try:
+                module = get_db().modules.find_one({"_id": ObjectId(topic["module_id"])})
+                if module and "name" in module:
+                    keywords.append(module["name"])
+            except:
+                pass
+                
+        return list(set(keywords))  # Eliminar duplicados
+        
+    def _recommend_pdfs(self, pdf_service, keywords: List[str]) -> List[Dict]:
+        """
+        Recomienda PDFs según palabras clave.
+        
+        Args:
+            pdf_service: Servicio de procesamiento de PDFs
+            keywords: Lista de palabras clave
+            
+        Returns:
+            Lista de PDFs recomendados
+        """
+        try:
+            # Buscar PDFs que contengan las palabras clave
+            relevant_pdfs = []
+            
+            # Usamos una consulta de MongoDB para encontrar PDFs relevantes
+            query = {
+                "$or": [
+                    {"tags": {"$in": keywords}},
+                    {"title": {"$regex": "|".join(keywords), "$options": "i"}},
+                    {"extracted_text": {"$regex": "|".join(keywords), "$options": "i"}}
+                ],
+                "status": "active"
+            }
+            
+            pdfs = list(pdf_service.collection.find(query).limit(5))
+            
+            # Convertir a formato serializable
+            for pdf in pdfs:
+                pdf = ensure_json_serializable(pdf)
+                
+                # Añadir puntuación de relevancia
+                score = 0
+                for keyword in keywords:
+                    if keyword.lower() in pdf.get("title", "").lower():
+                        score += 3
+                    if keyword.lower() in " ".join(pdf.get("tags", [])).lower():
+                        score += 2
+                    extracted_text = pdf.get("extracted_text", "")
+                    if extracted_text and keyword.lower() in extracted_text.lower():
+                        score += 1
+                        
+                pdf["relevance_score"] = score
+                relevant_pdfs.append(pdf)
+                
+            # Ordenar por relevancia
+            relevant_pdfs.sort(key=lambda x: x.get("relevance_score", 0), reverse=True)
+            
+            return relevant_pdfs
+        except Exception as e:
+            logging.error(f"Error al recomendar PDFs: {str(e)}")
+            return []
+            
+    def _recommend_web_resources(self, web_service, keywords: List[str]) -> List[Dict]:
+        """
+        Recomienda recursos web según palabras clave.
+        
+        Args:
+            web_service: Servicio de búsqueda web
+            keywords: Lista de palabras clave
+            
+        Returns:
+            Lista de recursos web recomendados
+        """
+        try:
+            # Buscar recursos web que contengan las palabras clave
+            query = {
+                "$or": [
+                    {"tags": {"$in": keywords}},
+                    {"title": {"$regex": "|".join(keywords), "$options": "i"}},
+                    {"snippet": {"$regex": "|".join(keywords), "$options": "i"}}
+                ],
+                "is_saved": True
+            }
+            
+            web_resources = list(web_service.collection.find(query).limit(5))
+            
+            # Convertir a formato serializable
+            relevant_resources = []
+            for resource in web_resources:
+                resource = ensure_json_serializable(resource)
+                
+                # Añadir puntuación de relevancia
+                score = 0
+                for keyword in keywords:
+                    if keyword.lower() in resource.get("title", "").lower():
+                        score += 3
+                    if keyword.lower() in " ".join(resource.get("tags", [])).lower():
+                        score += 2
+                    if keyword.lower() in resource.get("snippet", "").lower():
+                        score += 1
+                        
+                resource["relevance_score"] = score
+                relevant_resources.append(resource)
+                
+            # Ordenar por relevancia
+            relevant_resources.sort(key=lambda x: x.get("relevance_score", 0), reverse=True)
+            
+            return relevant_resources
+        except Exception as e:
+            logging.error(f"Error al recomendar recursos web: {str(e)}")
+            return []
+            
+    def _recommend_diagrams(self, diagram_service, keywords: List[str], topic_name: str) -> List[Dict]:
+        """
+        Recomienda diagramas según palabras clave.
+        
+        Args:
+            diagram_service: Servicio de diagramas
+            keywords: Lista de palabras clave
+            topic_name: Nombre del tema
+            
+        Returns:
+            Lista de diagramas recomendados y plantillas sugeridas
+        """
+        try:
+            # Buscar diagramas existentes
+            query = {
+                "$or": [
+                    {"title": {"$regex": "|".join(keywords), "$options": "i"}},
+                    {"content": {"$regex": "|".join(keywords), "$options": "i"}}
+                ],
+                "status": "active"
+            }
+            
+            diagrams = list(diagram_service.collection.find(query).limit(3))
+            
+            # Convertir a formato serializable
+            relevant_diagrams = []
+            for diagram in diagrams:
+                diagram = ensure_json_serializable(diagram)
+                
+                # Añadir puntuación de relevancia
+                score = 0
+                for keyword in keywords:
+                    if keyword.lower() in diagram.get("title", "").lower():
+                        score += 3
+                    if keyword.lower() in diagram.get("content", "").lower():
+                        score += 1
+                        
+                diagram["relevance_score"] = score
+                relevant_diagrams.append(diagram)
+                
+            # Ordenar por relevancia
+            relevant_diagrams.sort(key=lambda x: x.get("relevance_score", 0), reverse=True)
+            
+            # Recomendar plantillas de diagramas según el tema
+            templates = diagram_service.list_templates()
+            
+            # Determinar qué tipos de diagramas serían más útiles según las palabras clave
+            # Palabras clave que sugieren diferentes tipos de diagramas
+            process_keywords = ['proceso', 'flujo', 'pasos', 'etapas', 'procedimiento', 'secuencia']
+            relation_keywords = ['relación', 'estructura', 'jerarquía', 'organización', 'sistema']
+            concept_keywords = ['concepto', 'idea', 'teoría', 'principio', 'fundamento', 'mapa']
+            
+            recommended_types = []
+            for keyword in keywords:
+                keyword = keyword.lower()
+                if any(k in keyword for k in process_keywords):
+                    recommended_types.append("flowchart")
+                if any(k in keyword for k in relation_keywords):
+                    recommended_types.append("uml")
+                if any(k in keyword for k in concept_keywords):
+                    recommended_types.append("mindmap")
+                    
+            # Si no hay tipos recomendados, sugerir mapa mental por defecto
+            if not recommended_types:
+                recommended_types = ["mindmap"]
+                
+            # Filtrar plantillas por tipos recomendados
+            suggested_templates = []
+            for template in templates:
+                if template.get("template_type") in recommended_types:
+                    template["suggestion_reason"] = f"Apropiado para explicar {topic_name}"
+                    suggested_templates.append(template)
+                    
+            return {
+                "existing_diagrams": relevant_diagrams,
+                "suggested_templates": suggested_templates[:3],
+                "recommended_types": list(set(recommended_types))
+            }
+        except Exception as e:
+            logging.error(f"Error al recomendar diagramas: {str(e)}")
+            return {
+                "existing_diagrams": [],
+                "suggested_templates": [],
+                "recommended_types": []
+            }
+
+class LearningResourceService(VerificationBaseService):
+    """
+    Servicio para gestionar recursos de aprendizaje asociados a temas.
+    """
+    def __init__(self):
+        super().__init__(collection_name="learning_resources")
+        
+    def create_resource(self, resource_data: dict) -> Tuple[bool, str]:
+        """
+        Crea un nuevo recurso de aprendizaje.
+        
+        Args:
+            resource_data: Datos del recurso a crear
+            
+        Returns:
+            Tupla con estado y mensaje/ID
+        """
+        try:
+            # Validar que existe el tema
+            topic_id = resource_data.get("topic_id")
+            topic = get_db().topics.find_one({"_id": ObjectId(topic_id)})
+            if not topic:
+                return False, "Tema no encontrado"
+                
+            # Crear el recurso
+            resource = LearningResource(**resource_data)
+            result = self.collection.insert_one(resource.to_dict())
+            
+            return True, str(result.inserted_id)
+        except Exception as e:
+            logging.error(f"Error al crear recurso: {str(e)}")
+            return False, str(e)
+            
+    def get_topic_resources(self, topic_id: str) -> List[Dict]:
+        """
+        Obtiene todos los recursos asociados a un tema.
+        
+        Args:
+            topic_id: ID del tema
+            
+        Returns:
+            Lista de recursos
+        """
+        try:
+            resources = list(self.collection.find({"topic_id": ObjectId(topic_id)}))
+            
+            # Convertir ObjectId a str para serialización
+            for resource in resources:
+                if "_id" in resource:
+                    resource["_id"] = str(resource["_id"])
+                if "topic_id" in resource:
+                    resource["topic_id"] = str(resource["topic_id"])
+                    
+            return resources
+        except Exception as e:
+            logging.error(f"Error al obtener recursos del tema: {str(e)}")
+            return []
+            
+    def get_resource(self, resource_id: str) -> Optional[Dict]:
+        """
+        Obtiene un recurso específico por su ID.
+        
+        Args:
+            resource_id: ID del recurso
+            
+        Returns:
+            Diccionario con datos del recurso o None si no existe
+        """
+        try:
+            resource = self.collection.find_one({"_id": ObjectId(resource_id)})
+            if not resource:
+                return None
+                
+            # Convertir ObjectId a str para serialización
+            if "_id" in resource:
+                resource["_id"] = str(resource["_id"])
+            if "topic_id" in resource:
+                resource["topic_id"] = str(resource["topic_id"])
+                
+            return resource
+        except Exception as e:
+            logging.error(f"Error al obtener recurso: {str(e)}")
+            return None
+            
+    def update_resource(self, resource_id: str, update_data: dict) -> Tuple[bool, str]:
+        """
+        Actualiza un recurso existente.
+        
+        Args:
+            resource_id: ID del recurso a actualizar
+            update_data: Datos a actualizar
+            
+        Returns:
+            Tupla con estado y mensaje
+        """
+        try:
+            # Verificar que el recurso existe
+            resource = self.collection.find_one({"_id": ObjectId(resource_id)})
+            if not resource:
+                return False, "Recurso no encontrado"
+                
+            # Actualizar timestamp
+            update_data["updated_at"] = datetime.now()
+            
+            # Actualizar el recurso
+            result = self.collection.update_one(
+                {"_id": ObjectId(resource_id)},
+                {"$set": update_data}
+            )
+            
+            if result.modified_count > 0:
+                return True, "Recurso actualizado exitosamente"
+            return False, "No se realizaron cambios"
+        except Exception as e:
+            logging.error(f"Error al actualizar recurso: {str(e)}")
+            return False, str(e)
+            
+    def delete_resource(self, resource_id: str) -> Tuple[bool, str]:
+        """
+        Elimina un recurso existente.
+        
+        Args:
+            resource_id: ID del recurso a eliminar
+            
+        Returns:
+            Tupla con estado y mensaje
+        """
+        try:
+            # Verificar que el recurso existe
+            resource = self.collection.find_one({"_id": ObjectId(resource_id)})
+            if not resource:
+                return False, "Recurso no encontrado"
+                
+            # Eliminar el recurso
+            result = self.collection.delete_one({"_id": ObjectId(resource_id)})
+            
+            if result.deleted_count > 0:
+                return True, "Recurso eliminado exitosamente"
+            return False, "No se pudo eliminar el recurso"
+        except Exception as e:
+            logging.error(f"Error al eliminar recurso: {str(e)}")
+            return False, str(e)
