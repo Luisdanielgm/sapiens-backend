@@ -561,7 +561,7 @@ def update_topic_theory():
         topic_id = data.get('topic_id')
         theory_content = data.get('theory_content')
         
-        success, message = topic_service.update_topic_theory_content(topic_id, theory_content)
+        success, message = topic_service.update_theory_content(topic_id, theory_content)
         
         if not success:
             return APIRoute.error(
