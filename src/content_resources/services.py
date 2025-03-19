@@ -1012,9 +1012,25 @@ class DiagramService(VerificationBaseService):
     def __init__(self):
         super().__init__(collection_name="generated_diagrams")
         self.templates_collection = get_db().diagram_templates
-        # Directorio para almacenar imágenes generadas
-        self.diagrams_dir = os.path.join(os.environ.get("UPLOAD_FOLDER", "uploads"), "diagrams")
-        os.makedirs(self.diagrams_dir, exist_ok=True)
+        
+        # Determinar si estamos en un entorno serverless
+        self.is_serverless = os.environ.get("VERCEL") == "1" or os.environ.get("SERVERLESS") == "1"
+        
+        # Si estamos en un entorno local, intentar crear el directorio
+        if not self.is_serverless:
+            # Directorio para almacenar imágenes generadas
+            self.diagrams_dir = os.path.join(os.environ.get("UPLOAD_FOLDER", "uploads"), "diagrams")
+            try:
+                os.makedirs(self.diagrams_dir, exist_ok=True)
+                logging.info(f"Directorio para diagramas creado: {self.diagrams_dir}")
+            except Exception as e:
+                logging.warning(f"No se pudo crear el directorio de diagramas: {str(e)}. Usando almacenamiento en memoria.")
+                self.is_serverless = True
+        
+        # En entornos serverless, no usamos el sistema de archivos
+        if self.is_serverless:
+            self.diagrams_dir = None
+            logging.info("DiagramService: ejecutando en modo serverless, usando almacenamiento en memoria")
         
     def list_templates(self, template_type: str = None) -> List[Dict]:
         """
@@ -1109,9 +1125,23 @@ class DiagramService(VerificationBaseService):
             if image_url:
                 diagram_data["image_url"] = image_url
             
+            # En entornos serverless, marcar para identificar
+            if self.is_serverless:
+                diagram_data["generated_in_serverless"] = True
+                diagram_data["storage_type"] = "url_only"
+            
             # Crear el diagrama en la base de datos
-            diagram = GeneratedDiagram(**diagram_data)
-            result = self.collection.insert_one(diagram.to_dict())
+            # Asegurar que los datos son serializables
+            # Convertir ObjectId a str si es necesario
+            for key in diagram_data:
+                if isinstance(diagram_data[key], ObjectId):
+                    diagram_data[key] = str(diagram_data[key])
+            
+            # Insertar como documento plano en lugar de usar la clase
+            diagram_data["created_at"] = datetime.now()
+            diagram_data["status"] = "active"
+            
+            result = self.collection.insert_one(diagram_data)
             
             return True, str(result.inserted_id)
         except Exception as e:
@@ -1161,22 +1191,34 @@ class DiagramService(VerificationBaseService):
             URL de la imagen generada o None si falla
         """
         try:
-            import graphviz
-            
             # Sanitizar título para usar como nombre de archivo
             safe_title = re.sub(r'[^a-zA-Z0-9]', '_', title)
             filename = f"{safe_title}_{datetime.now().strftime('%Y%m%d%H%M%S')}"
             
-            # Crear objeto Graphviz
-            dot = graphviz.Source(content)
-            
-            # Renderizar el diagrama
-            output_path = os.path.join(self.diagrams_dir, filename)
-            rendered_file = dot.render(output_path, format='png', cleanup=True)
-            
-            # Devolver ruta relativa para acceso web
-            rel_path = os.path.relpath(rendered_file, os.environ.get("UPLOAD_FOLDER", "uploads"))
-            return f"/uploads/{rel_path}"
+            # En entorno serverless, usamos un servicio web
+            if self.is_serverless:
+                # Codificar el contenido para enviarlo a un servicio de renderizado de Graphviz
+                encoded_dot = base64.urlsafe_b64encode(content.encode()).decode()
+                
+                # Usamos una URL que renderiza el diagrama en línea
+                image_url = f"https://quickchart.io/graphviz?format=png&graph={encoded_dot}"
+                
+                # Guardamos la URL en lugar del archivo
+                return image_url
+            else:
+                # En entorno local usamos graphviz localmente
+                import graphviz
+                
+                # Crear objeto Graphviz
+                dot = graphviz.Source(content)
+                
+                # Renderizar el diagrama
+                output_path = os.path.join(self.diagrams_dir, filename)
+                rendered_file = dot.render(output_path, format='png', cleanup=True)
+                
+                # Devolver ruta relativa para acceso web
+                rel_path = os.path.relpath(rendered_file, os.environ.get("UPLOAD_FOLDER", "uploads"))
+                return f"/uploads/{rel_path}"
         except Exception as e:
             logging.error(f"Error al generar diagrama Graphviz: {str(e)}")
             return None
@@ -1193,11 +1235,6 @@ class DiagramService(VerificationBaseService):
             URL de la imagen generada o None si falla
         """
         try:
-            # Sanitizar título para usar como nombre de archivo
-            safe_title = re.sub(r'[^a-zA-Z0-9]', '_', title)
-            filename = f"{safe_title}_{datetime.now().strftime('%Y%m%d%H%M%S')}.png"
-            output_path = os.path.join(self.diagrams_dir, filename)
-            
             # Preparar contenido PlantUML
             if not content.startswith('@startuml'):
                 content = f"@startuml\n{content}\n@enduml"
@@ -1205,6 +1242,16 @@ class DiagramService(VerificationBaseService):
             # Codificar contenido para PlantUML server
             encoded = base64.b64encode(content.encode('utf-8'))
             plantuml_url = f"http://www.plantuml.com/plantuml/png/{encoded.decode('utf-8')}"
+            
+            # En entorno serverless devolvemos directamente la URL
+            if self.is_serverless:
+                return plantuml_url
+            
+            # En entorno local descargamos la imagen
+            # Sanitizar título para usar como nombre de archivo
+            safe_title = re.sub(r'[^a-zA-Z0-9]', '_', title)
+            filename = f"{safe_title}_{datetime.now().strftime('%Y%m%d%H%M%S')}.png"
+            output_path = os.path.join(self.diagrams_dir, filename)
             
             # Descargar imagen generada
             response = requests.get(plantuml_url)
@@ -1262,16 +1309,7 @@ class DiagramService(VerificationBaseService):
             URL de la imagen generada o None si falla
         """
         try:
-            # Sanitizar título para usar como nombre de archivo
-            safe_title = re.sub(r'[^a-zA-Z0-9]', '_', title)
-            filename = f"{safe_title}_{datetime.now().strftime('%Y%m%d%H%M%S')}.png"
-            output_path = os.path.join(self.diagrams_dir, filename)
-            
-            # Usar Puppeteer para renderizar Mermaid
-            # En un entorno real, se podría usar un servicio como mermaid.ink o implementar
-            # un servicio interno con Puppeteer/Chrome headless
-            
-            # Por ahora, usaremos mermaid.ink (servicio público)
+            # Codificar para mermaid.ink
             payload = {
                 "code": content,
                 "mermaid": {"theme": "default"},
@@ -1282,6 +1320,16 @@ class DiagramService(VerificationBaseService):
             json_payload = json.dumps(payload)
             encoded_payload = base64.urlsafe_b64encode(json_payload.encode()).decode()
             mermaid_url = f"https://mermaid.ink/img/{encoded_payload}"
+            
+            # En entorno serverless devolvemos directamente la URL
+            if self.is_serverless:
+                return mermaid_url
+            
+            # En entorno local descargamos la imagen
+            # Sanitizar título para usar como nombre de archivo
+            safe_title = re.sub(r'[^a-zA-Z0-9]', '_', title)
+            filename = f"{safe_title}_{datetime.now().strftime('%Y%m%d%H%M%S')}.png"
+            output_path = os.path.join(self.diagrams_dir, filename)
             
             # Descargar imagen generada
             response = requests.get(mermaid_url)
