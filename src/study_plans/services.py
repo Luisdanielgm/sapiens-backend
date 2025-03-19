@@ -774,6 +774,32 @@ class TopicService(VerificationBaseService):
         except Exception as e:
             return None
     
+    def get_topic_theory_content(self, topic_id: str) -> Optional[str]:
+        """
+        Obtiene solo el contenido teórico de un tema.
+        
+        Args:
+            topic_id: ID del tema
+            
+        Returns:
+            Contenido teórico o None si no existe el tema
+        """
+        try:
+            # Obtener solo el contenido teórico
+            topic = self.collection.find_one(
+                {"_id": ObjectId(topic_id)},
+                {"theory_content": 1}
+            )
+            
+            if not topic:
+                return None
+            
+            # Devolver solo el texto del contenido teórico
+            return topic.get("theory_content", "")
+        except Exception as e:
+            logging.error(f"Error al obtener contenido teórico: {str(e)}")
+            return None
+    
     def delete_theory_content(self, topic_id: str) -> Tuple[bool, str]:
         try:
             # Eliminar el contenido teórico
@@ -790,6 +816,19 @@ class TopicService(VerificationBaseService):
             return False, "No se pudo eliminar el contenido teórico"
         except Exception as e:
             return False, str(e)
+            
+    def delete_topic_theory_content(self, topic_id: str) -> Tuple[bool, str]:
+        """
+        Elimina el contenido teórico de un tema.
+        
+        Args:
+            topic_id: ID del tema
+            
+        Returns:
+            Tupla con estado y mensaje
+        """
+        # Reutilizamos el método delete_theory_content
+        return self.delete_theory_content(topic_id)
 
 class EvaluationService(VerificationBaseService):
     def __init__(self):
