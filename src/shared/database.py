@@ -174,13 +174,21 @@ def setup_database_indexes():
             unique=True,
             partialFilterExpression={"email": {"$type": "string"}}
         )
-        db.institute_invitations.create_index([("token", ASCENDING)], unique=True)
+        db.institute_invitations.create_index(
+            [("token", ASCENDING)],
+            unique=True,
+            partialFilterExpression={"token": {"$type": "string"}}
+        )
         db.class_invitations.create_index(
             [("email", ASCENDING), ("class_id", ASCENDING)],
             unique=True,
             partialFilterExpression={"email": {"$type": "string"}}
         )
-        db.class_invitations.create_index([("token", ASCENDING)], unique=True)
+        db.class_invitations.create_index(
+            [("token", ASCENDING)],
+            unique=True,
+            partialFilterExpression={"token": {"$type": "string"}}
+        )
         
         # Índices de contenido individual de estudiantes
         db.student_individual_content.create_index([("student_id", ASCENDING), ("class_id", ASCENDING)])
