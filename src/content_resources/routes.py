@@ -55,13 +55,36 @@ def process_pdf():
         # Obtener el título y metadatos adicionales
         title = request.form.get('title', pdf_file.filename)
         
-        # Guardar el archivo temporalmente
-        upload_folder = os.environ.get("UPLOAD_FOLDER", "uploads")
-        os.makedirs(os.path.join(upload_folder, "pdfs"), exist_ok=True)
+        # Determinar si estamos en un entorno serverless
+        is_serverless = os.environ.get("VERCEL") == "1" or os.environ.get("SERVERLESS") == "1"
         
-        filename = secure_filename(pdf_file.filename)
-        temp_path = os.path.join(upload_folder, "pdfs", filename)
-        pdf_file.save(temp_path)
+        if is_serverless:
+            # En serverless, usamos un directorio temporal que ya existe
+            import tempfile
+            temp_dir = tempfile.gettempdir()
+            filename = secure_filename(pdf_file.filename)
+            temp_path = os.path.join(temp_dir, filename)
+            
+            logging.info(f"Guardando archivo temporal en entorno serverless: {temp_path}")
+            pdf_file.save(temp_path)
+        else:
+            # En entorno local, usamos el directorio de uploads configurado
+            upload_folder = os.environ.get("UPLOAD_FOLDER", "uploads")
+            try:
+                os.makedirs(os.path.join(upload_folder, "pdfs"), exist_ok=True)
+                
+                filename = secure_filename(pdf_file.filename)
+                temp_path = os.path.join(upload_folder, "pdfs", filename)
+                pdf_file.save(temp_path)
+                
+                logging.info(f"Archivo guardado localmente: {temp_path}")
+            except Exception as e:
+                logging.error(f"Error al guardar archivo localmente: {str(e)}")
+                return APIRoute.error(
+                    ErrorCodes.SERVER_ERROR,
+                    f"No se pudo guardar el archivo: {str(e)}",
+                    status_code=500
+                )
         
         # Procesar el PDF
         success, result = pdf_service.process_pdf(
@@ -74,13 +97,24 @@ def process_pdf():
         if not success:
             # Eliminar el archivo temporal en caso de error
             if os.path.exists(temp_path):
-                os.remove(temp_path)
+                try:
+                    os.remove(temp_path)
+                except Exception as e:
+                    logging.warning(f"No se pudo eliminar el archivo temporal: {str(e)}")
                 
             return APIRoute.error(
                 ErrorCodes.BAD_REQUEST,
                 result,
                 status_code=400
             )
+            
+        # Intentar limpiar el archivo temporal después del procesamiento
+        if is_serverless and os.path.exists(temp_path):
+            try:
+                os.remove(temp_path)
+                logging.info(f"Archivo temporal eliminado: {temp_path}")
+            except Exception as e:
+                logging.warning(f"No se pudo eliminar el archivo temporal después del procesamiento: {str(e)}")
             
         return APIRoute.success(
             {"id": result},

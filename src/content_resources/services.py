@@ -66,6 +66,14 @@ class PDFProcessingService(VerificationBaseService):
             # Verificar que el archivo existe
             if not os.path.exists(file_path):
                 return False, "El archivo no existe"
+            
+            # Verificar que el archivo sea accesible
+            try:
+                with open(file_path, 'rb') as test_file:
+                    pass
+            except Exception as e:
+                logging.error(f"Error al acceder al archivo: {str(e)}")
+                return False, f"No se puede acceder al archivo: {str(e)}"
                 
             # Obtener tamaño del archivo
             file_size = os.path.getsize(file_path)
@@ -82,22 +90,30 @@ class PDFProcessingService(VerificationBaseService):
             # Extraer metadatos
             metadata = self._extract_pdf_metadata(file_path)
             
+            # En entornos serverless, no guardamos la ruta del archivo
+            if self.is_serverless:
+                stored_file_path = None
+            else:
+                stored_file_path = file_path
+            
             # Crear objeto de PDF procesado
-            pdf = ProcessedPDF(
-                title=title,
-                file_path=file_path,
-                file_size=file_size,
-                original_filename=original_filename,
-                extracted_text=extracted_text,
-                extracted_images=extracted_images,
-                extracted_tables=extracted_tables,
-                metadata=metadata,
-                creator_id=creator_id,
-                tags=self._generate_tags_from_content(extracted_text)
-            )
+            pdf_dict = {
+                "title": title,
+                "file_path": stored_file_path,
+                "original_filename": original_filename,
+                "file_size": file_size,
+                "extracted_text": extracted_text,
+                "extracted_images": extracted_images,
+                "extracted_tables": extracted_tables,
+                "metadata": metadata,
+                "creator_id": ObjectId(creator_id) if creator_id else None,
+                "tags": self._generate_tags_from_content(extracted_text),
+                "processed_at": datetime.now(),
+                "status": "active"
+            }
             
             # Guardar en la base de datos
-            result = self.collection.insert_one(pdf.to_dict())
+            result = self.collection.insert_one(pdf_dict)
             
             return True, str(result.inserted_id)
         except Exception as e:
@@ -216,24 +232,52 @@ class PDFProcessingService(VerificationBaseService):
         """
         try:
             tables = []
-            # Convertir páginas del PDF a imágenes para procesamiento
-            pdf_pages = convert_from_path(file_path, 300)
             
-            for i, page in enumerate(pdf_pages):
-                # Método simple para detectar posibles tablas basado en patrones de texto
-                ocr_text = pytesseract.image_to_string(page)
-                lines = ocr_text.split('\n')
+            # En entornos serverless, usamos un enfoque más ligero
+            if self.is_serverless:
+                # Extraer texto usando PyPDF2 (más ligero que convertir a imágenes)
+                with open(file_path, 'rb') as file:
+                    pdf_reader = PyPDF2.PdfReader(file)
+                    
+                    # Obtener número de páginas
+                    num_pages = len(pdf_reader.pages)
+                    
+                    # Extraer tablas de cada página usando patrones de texto
+                    for page_num in range(num_pages):
+                        page = pdf_reader.pages[page_num]
+                        text = page.extract_text()
+                        lines = text.split('\n')
+                        
+                        # Buscar patrones que podrían indicar tablas
+                        table_data = self._detect_tables_from_text(lines)
+                        
+                        if table_data:
+                            tables.append({
+                                "page_number": page_num + 1,
+                                "data": table_data,
+                                "rows": len(table_data),
+                                "columns": len(table_data[0]) if table_data else 0
+                            })
+            else:
+                # Método original para entornos locales
+                # Convertir páginas del PDF a imágenes para procesamiento
+                pdf_pages = convert_from_path(file_path, 300)
                 
-                # Buscar patrones que podrían indicar tablas (múltiples líneas con delimitadores consistentes)
-                table_data = self._detect_tables_from_text(lines)
-                
-                if table_data:
-                    tables.append({
-                        "page_number": i + 1,
-                        "data": table_data,
-                        "rows": len(table_data),
-                        "columns": len(table_data[0]) if table_data else 0
-                    })
+                for i, page in enumerate(pdf_pages):
+                    # Método simple para detectar posibles tablas basado en patrones de texto
+                    ocr_text = pytesseract.image_to_string(page)
+                    lines = ocr_text.split('\n')
+                    
+                    # Buscar patrones que podrían indicar tablas (múltiples líneas con delimitadores consistentes)
+                    table_data = self._detect_tables_from_text(lines)
+                    
+                    if table_data:
+                        tables.append({
+                            "page_number": i + 1,
+                            "data": table_data,
+                            "rows": len(table_data),
+                            "columns": len(table_data[0]) if table_data else 0
+                        })
                 
             return tables
         except Exception as e:
