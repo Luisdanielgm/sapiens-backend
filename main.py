@@ -38,6 +38,7 @@ from src.profiles.routes import profiles_bp
 from src.student_individual_content.routes import student_individual_content_bp
 from src.games.routes import games_bp
 from src.simulations.routes import simulations_bp
+from src.resources.routes import resources_bp
 
 def create_app(config_object=active_config):
     """
@@ -203,6 +204,7 @@ def create_app(config_object=active_config):
     app.register_blueprint(student_individual_content_bp, url_prefix='/api/student-content')
     app.register_blueprint(games_bp, url_prefix='/api/games')
     app.register_blueprint(simulations_bp, url_prefix='/api/simulations')
+    app.register_blueprint(resources_bp, url_prefix='/api/resources')
 
     @app.route('/')
     def health_check():

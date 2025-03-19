@@ -20,6 +20,7 @@ Ejemplos de uso:
 from bson.objectid import ObjectId
 from src.shared.exceptions import AppException
 from src.shared.logging import log_error
+from src.shared.constants import RESOURCE_TYPES
 
 def is_valid_object_id(id_str: str) -> bool:
     """
@@ -156,3 +157,88 @@ def validate_email(email: str) -> bool:
     # Patrón básico para validar emails
     pattern = r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$'
     return re.match(pattern, email) is not None 
+
+# Esquemas de validación para recursos
+resource_schema = {
+    "type": "object",
+    "required": ["name", "type", "url", "created_by"],
+    "properties": {
+        "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 100
+        },
+        "type": {
+            "type": "string",
+            "enum": list(RESOURCE_TYPES.values())
+        },
+        "url": {
+            "type": "string",
+            "format": "uri",
+            "minLength": 1
+        },
+        "description": {
+            "type": "string",
+            "maxLength": 1000
+        },
+        "created_by": {
+            "type": "string",
+            "pattern": "^[0-9a-fA-F]{24}$"
+        },
+        "folder_id": {
+            "type": ["string", "null"],
+            "pattern": "^[0-9a-fA-F]{24}$"
+        },
+        "tags": {
+            "type": "array",
+            "items": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 50
+            }
+        },
+        "size": {
+            "type": ["integer", "null"],
+            "minimum": 0
+        },
+        "duration": {
+            "type": ["integer", "null"],
+            "minimum": 0
+        },
+        "thumbnail_url": {
+            "type": ["string", "null"],
+            "format": "uri"
+        },
+        "is_external": {
+            "type": "boolean"
+        },
+        "metadata": {
+            "type": "object"
+        }
+    }
+}
+
+# Esquema de validación para carpetas de recursos
+resource_folder_schema = {
+    "type": "object",
+    "required": ["name", "created_by"],
+    "properties": {
+        "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 100
+        },
+        "description": {
+            "type": ["string", "null"],
+            "maxLength": 500
+        },
+        "created_by": {
+            "type": "string",
+            "pattern": "^[0-9a-fA-F]{24}$"
+        },
+        "parent_id": {
+            "type": ["string", "null"],
+            "pattern": "^[0-9a-fA-F]{24}$"
+        }
+    }
+} 

@@ -99,38 +99,59 @@ def setup_database_indexes():
         
         # Crear índices para la base de datos principal
         
-        # Índices para usuarios
-        db.users.create_index([("email", ASCENDING)], unique=True, background=True)
-        db.users.create_index([("role", ASCENDING)], background=True)
+        # Índices de usuarios
+        db.users.create_index([("email", ASCENDING)], unique=True)
+        db.users.create_index([("role", ASCENDING)])
         
-        # Índices para institutos
-        db.institutes.create_index([("name", ASCENDING)], background=True)
-        db.institute_members.create_index([("institute_id", ASCENDING), ("user_id", ASCENDING)], background=True)
-        db.institute_members.create_index([("user_id", ASCENDING)], background=True)
+        # Índices de institutos
+        db.institutes.create_index([("email", ASCENDING)])
+        db.institutes.create_index([("status", ASCENDING)])
         
-        # Índices para clases
-        db.classes.create_index([("subject_id", ASCENDING)], background=True)
-        db.classes.create_index([("institute_id", ASCENDING)], background=True)
-        db.classes.create_index([("period_id", ASCENDING)], background=True)
-        db.class_members.create_index([("class_id", ASCENDING), ("role", ASCENDING)], background=True)
-        db.class_members.create_index([("user_id", ASCENDING)], background=True)
+        # Índices de miembros del instituto
+        db.institute_members.create_index([("institute_id", ASCENDING), ("user_id", ASCENDING)], unique=True)
+        db.institute_members.create_index([("user_id", ASCENDING)])
+        db.institute_members.create_index([("role", ASCENDING)])
         
-        # Índices para evaluaciones
-        db.evaluations.create_index([("class_id", ASCENDING)], background=True)
-        db.evaluation_results.create_index([("evaluation_id", ASCENDING), ("student_id", ASCENDING)], 
-                                         unique=True, background=True)
-        db.evaluation_results.create_index([("student_id", ASCENDING)], background=True)
+        # Índices de programas educativos
+        db.educational_programs.create_index([("institute_id", ASCENDING)])
+        db.educational_programs.create_index([("name", TEXT)]) 
         
-        # Índices para planes de estudio
-        db.study_plans_per_subject.create_index([("subject_id", ASCENDING)], background=True)
-        db.modules.create_index([("study_plan_id", ASCENDING)], background=True)
-        db.topics.create_index([("module_id", ASCENDING)], background=True)
+        # Índices académicos
+        db.academic_periods.create_index([("institute_id", ASCENDING)])
+        db.sections.create_index([("academic_period_id", ASCENDING)])
+        db.subjects.create_index([("name", TEXT)])
         
-        # Índices para invitaciones
-        db.institute_invitations.create_index([("email", ASCENDING), ("institute_id", ASCENDING)], 
-                                             background=True)
-        db.class_invitations.create_index([("email", ASCENDING), ("class_id", ASCENDING)], 
-                                         background=True)
+        # Índices de clases
+        db.classes.create_index([("teacher_id", ASCENDING)])
+        db.classes.create_index([("subject_id", ASCENDING)])
+        db.classes.create_index([("section_id", ASCENDING)])
+        db.class_members.create_index([("class_id", ASCENDING), ("student_id", ASCENDING)], unique=True)
+        db.class_members.create_index([("student_id", ASCENDING)])
+        
+        # Índices de invitaciones
+        db.institute_invitations.create_index([("email", ASCENDING), ("institute_id", ASCENDING)], unique=True)
+        db.institute_invitations.create_index([("token", ASCENDING)], unique=True)
+        db.class_invitations.create_index([("email", ASCENDING), ("class_id", ASCENDING)], unique=True)
+        db.class_invitations.create_index([("token", ASCENDING)], unique=True)
+        
+        # Índices de contenido individual de estudiantes
+        db.student_individual_content.create_index([("student_id", ASCENDING), ("class_id", ASCENDING)])
+        
+        # Índices de planes de estudio
+        db.study_plans_per_subject.create_index([("subject_id", ASCENDING)])
+        db.modules.create_index([("study_plan_id", ASCENDING)])
+        db.topics.create_index([("module_id", ASCENDING)])
+        
+        # Índices de recursos
+        db.resources.create_index([("created_by", ASCENDING)])
+        db.resources.create_index([("folder_id", ASCENDING)])
+        db.resources.create_index([("type", ASCENDING)])
+        db.resources.create_index([("name", TEXT), ("description", TEXT), ("tags", TEXT)])
+        
+        # Índices de carpetas de recursos
+        db.resource_folders.create_index([("created_by", ASCENDING)])
+        db.resource_folders.create_index([("parent_id", ASCENDING)])
+        db.resource_folders.create_index([("name", TEXT)])
         
         # Índices para la base de datos de lenguas indígenas
         
@@ -145,10 +166,10 @@ def setup_database_indexes():
         indigenous_db.verificaciones.create_index([("translation_id", ASCENDING)], background=True)
         indigenous_db.verificaciones.create_index([("verificador_id", ASCENDING)], background=True)
         
+        # Configuración exitosa
         logger.info("Índices de base de datos configurados correctamente")
         return True
-    
+        
     except Exception as e:
-        logger.error(f"Error al configurar índices de base de datos: {str(e)}")
-        # No interrumpir el inicio de la aplicación si falla la creación de índices
+        logger.error(f"Error al configurar índices de la base de datos: {str(e)}")
         return False

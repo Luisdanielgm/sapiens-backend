@@ -53,6 +53,19 @@ PERIOD_TYPES = {
     "QUARTER": "quarter"
 }
 
+# Tipos de recursos
+RESOURCE_TYPES = {
+    "PDF": "pdf",
+    "VIDEO": "video",
+    "AUDIO": "audio",
+    "IMAGE": "image",
+    "LINK": "link",
+    "DOCUMENT": "document",
+    "PRESENTATION": "presentation",
+    "SPREADSHEET": "spreadsheet",
+    "OTHER": "other"
+}
+
 # Configuración de paginación
 PAGINATION = {
     "DEFAULT_PAGE": 1,
@@ -115,5 +128,9 @@ COLLECTIONS = {
     # Analíticas
     "STUDENT_PERFORMANCE": "student_performance",
     "CLASS_STATISTICS": "class_statistics",
-    "INSTITUTE_STATISTICS": "institute_statistics"
+    "INSTITUTE_STATISTICS": "institute_statistics",
+    
+    # Recursos
+    "RESOURCES": "resources",
+    "RESOURCE_FOLDERS": "resource_folders"
 }
