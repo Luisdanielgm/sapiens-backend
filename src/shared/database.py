@@ -198,6 +198,13 @@ def setup_database_indexes():
         db.modules.create_index([("study_plan_id", ASCENDING)])
         db.topics.create_index([("module_id", ASCENDING)])
         
+        # Índices para recursos por tema
+        db.topic_resources.create_index([("topic_id", ASCENDING), ("status", ASCENDING)], background=True)
+        db.topic_resources.create_index([("resource_id", ASCENDING), ("status", ASCENDING)], background=True)
+        db.topic_resources.create_index([("recommended_for", ASCENDING)], background=True)
+        db.topic_resources.create_index([("usage_context", ASCENDING)], background=True)
+        db.topic_resources.create_index([("content_types", ASCENDING)], background=True)
+        
         # Índices de recursos
         db.resources.create_index([("created_by", ASCENDING)])
         db.resources.create_index([("folder_id", ASCENDING)])

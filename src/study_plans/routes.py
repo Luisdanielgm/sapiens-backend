@@ -1,4 +1,7 @@
 from flask import request, jsonify
+from typing import Optional
+from src.shared.standardization import APIBlueprint, APIRoute, ErrorCodes
+from src.profiles.services import ProfileService
 from .services import (
     StudyPlanService, 
     StudyPlanAssignmentService,
@@ -8,9 +11,9 @@ from .services import (
     ContentTypeService,
     LearningMethodologyService,
     TopicContentService,
-    LearningResourceService
+    LearningResourceService,
+    TopicResourceService
 )
-from src.shared.standardization import APIBlueprint, APIRoute, ErrorCodes
 import logging
 from src.shared.constants import ROLES
 from bson import ObjectId
@@ -18,6 +21,7 @@ from src.shared.utils import ensure_json_serializable
 from datetime import datetime
 from src.shared.database import get_db
 from .models import ContentTypes, LearningMethodologyTypes
+from src.shared.constants import STATUS
 
 study_plan_bp = APIBlueprint('study_plan', __name__)
 
@@ -30,6 +34,7 @@ content_type_service = ContentTypeService()
 methodology_service = LearningMethodologyService()
 topic_content_service = TopicContentService()
 resource_service = LearningResourceService()
+topic_resource_service = TopicResourceService()
 
 # Rutas para Plan de Estudio
 @study_plan_bp.route('/', methods=['POST'])
@@ -1189,256 +1194,136 @@ def update_resource(resource_id):
             status_code=500
         )
 
-@study_plan_bp.route('/topic/content/resource-link', methods=['POST'])
-@APIRoute.standard(auth_required_flag=True, roles=[ROLES["TEACHER"]], required_fields=['topic_id', 'content_id', 'resource_type', 'resource_id'])
-def link_resource_to_topic_content():
-    """Vincula un recurso de content_resources (PDF, búsqueda web, diagrama) a un contenido de tema"""
-    try:
-        data = request.get_json()
-        topic_id = data.get('topic_id')
-        content_id = data.get('content_id')
-        resource_type = data.get('resource_type')  # 'pdf', 'web_search', 'diagram'
-        resource_id = data.get('resource_id')
-        
-        # Validar que el contenido existe
-        content = topic_content_service.get_content(content_id)
-        if not content:
-            return APIRoute.error(
-                ErrorCodes.NOT_FOUND,
-                "Contenido no encontrado",
-                status_code=404
-            )
-            
-        # Validar que el tema existe
-        topic = topic_service.get_topic(topic_id)
-        if not topic:
-            return APIRoute.error(
-                ErrorCodes.NOT_FOUND,
-                "Tema no encontrado",
-                status_code=404
-            )
-            
-        # Validar que el contenido pertenece al tema
-        if content.get("topic_id") != topic_id:
-            return APIRoute.error(
-                ErrorCodes.BAD_REQUEST,
-                "El contenido no pertenece al tema especificado",
-                status_code=400
-            )
-        
-        # Verificar que el recurso existe según su tipo
-        resource_exists = False
-        resource_data = None
-        
-        if resource_type == "pdf":
-            # Importar el servicio necesario
-            from src.content_resources.services import PDFProcessingService
-            pdf_service = PDFProcessingService()
-            resource_data = pdf_service.get_processed_pdf(resource_id)
-            resource_exists = resource_data is not None
-        
-        elif resource_type == "web_search":
-            # Importar el servicio necesario
-            from src.content_resources.services import WebSearchService
-            web_service = WebSearchService()
-            # Buscar el resultado específico
-            resource_data = web_service.collection.find_one({"_id": ObjectId(resource_id)})
-            resource_exists = resource_data is not None
-            
-            # Convertir a formato serializable
-            if resource_data:
-                resource_data = ensure_json_serializable(resource_data)
-        
-        elif resource_type == "diagram":
-            # Importar el servicio necesario
-            from src.content_resources.services import DiagramService
-            diagram_service = DiagramService()
-            resource_data = diagram_service.get_diagram(resource_id)
-            resource_exists = resource_data is not None
-        
-        else:
-            return APIRoute.error(
-                ErrorCodes.BAD_REQUEST,
-                f"Tipo de recurso no válido: {resource_type}",
-                status_code=400
-            )
-            
-        if not resource_exists:
-            return APIRoute.error(
-                ErrorCodes.NOT_FOUND,
-                f"Recurso de tipo {resource_type} con ID {resource_id} no encontrado",
-                status_code=404
-            )
-            
-        # Añadir el recurso al contenido
-        web_resources = content.get("web_resources", [])
-        
-        # Verificar si ya existe un recurso con el mismo ID y tipo
-        for i, res in enumerate(web_resources):
-            if res.get("resource_id") == resource_id and res.get("resource_type") == resource_type:
-                # Actualizar el recurso existente
-                web_resources[i] = {
-                    "resource_id": resource_id,
-                    "resource_type": resource_type,
-                    "title": resource_data.get("title", ""),
-                    "added_at": datetime.now(),
-                    "data": resource_data
-                }
-                
-                # Actualizar el contenido
-                success, message = topic_content_service.update_content(
-                    content_id, 
-                    {"web_resources": web_resources}
-                )
-                
-                if not success:
-                    return APIRoute.error(
-                        ErrorCodes.BAD_REQUEST,
-                        message,
-                        status_code=400
-                    )
-                    
-                return APIRoute.success(
-                    message="Recurso actualizado exitosamente"
-                )
-        
-        # Si no existe, añadir el nuevo recurso
-        web_resources.append({
-            "resource_id": resource_id,
-            "resource_type": resource_type,
-            "title": resource_data.get("title", ""),
-            "added_at": datetime.now(),
-            "data": resource_data
-        })
-        
-        # Actualizar el contenido
-        success, message = topic_content_service.update_content(
-            content_id, 
-            {"web_resources": web_resources}
-        )
-        
-        if not success:
-            return APIRoute.error(
-                ErrorCodes.BAD_REQUEST,
-                message,
-                status_code=400
-            )
-            
-        return APIRoute.success(
-            message="Recurso vinculado exitosamente",
-            status_code=201
-        )
-    except Exception as e:
-        logging.error(f"Error al vincular recurso a contenido: {str(e)}")
-        return APIRoute.error(
-            ErrorCodes.SERVER_ERROR,
-            str(e),
-            status_code=500
+@study_plan_bp.route('/topic-resources/<topic_id>/<resource_id>', methods=['POST'])
+@APIRoute.standard(auth_required_flag=True, roles=[ROLES["TEACHER"]], required_fields=['relevance_score', 'recommended_for', 'usage_context', 'content_types'])
+def link_resource_to_topic(topic_id, resource_id):
+    """
+    Vincula un recurso específico a un tema.
+    
+    Args:
+        topic_id: ID del tema
+        resource_id: ID del recurso a vincular
+    
+    Returns:
+        Respuesta con el estado de la operación
+    """
+    data = request.get_json()
+    current_user = request.user
+    
+    relevance_score = data.get("relevance_score", 0.5)
+    recommended_for = data.get("recommended_for", [])
+    usage_context = data.get("usage_context", "supplementary")
+    content_types = data.get("content_types", [])
+    
+    success, result = topic_resource_service.link_resource_to_topic(
+        topic_id=topic_id,
+        resource_id=resource_id,
+        relevance_score=relevance_score,
+        recommended_for=recommended_for,
+        usage_context=usage_context,
+        content_types=content_types,
+        created_by=str(current_user["_id"])
+    )
+    
+    if success:
+        return {
+            "success": True,
+            "message": "Recurso vinculado correctamente al tema",
+            "data": {"id": result}
+        }
+    else:
+        raise APIRoute.error(
+            ErrorCodes.BAD_REQUEST,
+            result,
+            status_code=400
         )
 
-@study_plan_bp.route('/topic/content/<content_id>/resource/<resource_type>/<resource_id>', methods=['DELETE'])
+@study_plan_bp.route('/topic-resources/<topic_id>/<resource_id>', methods=['DELETE'])
 @APIRoute.standard(auth_required_flag=True, roles=[ROLES["TEACHER"]])
-def unlink_resource_from_topic_content(content_id, resource_type, resource_id):
-    """Desvincula un recurso de content_resources de un contenido de tema"""
-    try:
-        # Validar que el contenido existe
-        content = topic_content_service.get_content(content_id)
-        if not content:
-            return APIRoute.error(
-                ErrorCodes.NOT_FOUND,
-                "Contenido no encontrado",
-                status_code=404
-            )
-            
-        # Obtener los recursos actuales
-        web_resources = content.get("web_resources", [])
-        
-        # Filtrar el recurso a eliminar
-        new_resources = [res for res in web_resources if not (res.get("resource_id") == resource_id and res.get("resource_type") == resource_type)]
-        
-        # Verificar si se eliminó algún recurso
-        if len(new_resources) == len(web_resources):
-            return APIRoute.error(
-                ErrorCodes.NOT_FOUND,
-                f"Recurso de tipo {resource_type} con ID {resource_id} no encontrado en el contenido",
-                status_code=404
-            )
-            
-        # Actualizar el contenido
-        success, message = topic_content_service.update_content(
-            content_id, 
-            {"web_resources": new_resources}
-        )
-        
-        if not success:
-            return APIRoute.error(
-                ErrorCodes.BAD_REQUEST,
-                message,
-                status_code=400
-            )
-            
-        return APIRoute.success(
-            message="Recurso desvinculado exitosamente"
-        )
-    except Exception as e:
-        logging.error(f"Error al desvincular recurso de contenido: {str(e)}")
-        return APIRoute.error(
-            ErrorCodes.SERVER_ERROR,
-            str(e),
-            status_code=500
+def unlink_resource_from_topic(topic_id, resource_id):
+    """
+    Desvincula un recurso de un tema.
+    
+    Args:
+        topic_id: ID del tema
+        resource_id: ID del recurso
+    
+    Returns:
+        Respuesta con el estado de la operación
+    """
+    current_user = request.user
+    
+    success, message = topic_resource_service.unlink_resource_from_topic(topic_id, resource_id)
+    
+    if success:
+        return {
+            "success": True,
+            "message": message,
+            "data": None
+        }
+    else:
+        raise APIRoute.error(
+            ErrorCodes.NOT_FOUND,
+            message,
+            status_code=404
         )
 
-@study_plan_bp.route('/topic/<topic_id>/recommendations', methods=['GET'])
+@study_plan_bp.route('/topic-resources/<topic_id>', methods=['GET'])
 @APIRoute.standard(auth_required_flag=True)
-def get_topic_content_recommendations(topic_id):
-    """Obtiene recomendaciones de contenido para un tema"""
-    try:
-        # Inicializar el servicio de recomendaciones
-        from src.study_plans.services import ContentRecommendationService
-        recommendation_service = ContentRecommendationService()
-        
-        # Obtener recomendaciones
-        recommendations = recommendation_service.get_content_recommendations(topic_id)
-        
-        if "error" in recommendations and not "recommendations" in recommendations:
-            return APIRoute.error(
-                ErrorCodes.NOT_FOUND,
-                recommendations["error"],
-                status_code=404
-            )
-            
-        return APIRoute.success(data=recommendations)
-    except Exception as e:
-        logging.error(f"Error al obtener recomendaciones de contenido: {str(e)}")
-        return APIRoute.error(
-            ErrorCodes.SERVER_ERROR,
-            str(e),
-            status_code=500
-        )
+def get_topic_resources(topic_id):
+    """
+    Obtiene todos los recursos asociados a un tema específico.
+    
+    Args:
+        topic_id: ID del tema
+    
+    Returns:
+        Lista de recursos asociados al tema
+    """
+    current_user = request.user
+    content_type = request.args.get('content_type')
+    usage_context = request.args.get('usage_context')
+    personalized = request.args.get('personalized', 'false').lower() == 'true'
+    
+    # Obtener perfil cognitivo si es necesario para personalización
+    cognitive_profile = None
+    if personalized:
+        profile_service = ProfileService()
+        profile = profile_service.get_user_profile(str(current_user["_id"]))
+        if profile:
+            cognitive_profile = profile.get("cognitive_profile", {})
+    
+    resources = topic_resource_service.get_topic_resources(
+        topic_id=topic_id,
+        cognitive_profile=cognitive_profile,
+        content_type=content_type,
+        usage_context=usage_context
+    )
+    
+    return {
+        "success": True,
+        "message": f"Se encontraron {len(resources)} recursos para el tema",
+        "data": resources
+    }
 
-@study_plan_bp.route('/topic/content/<content_id>/adapt', methods=['POST'])
-@APIRoute.standard(auth_required_flag=True, roles=[ROLES["TEACHER"]], required_fields=['methodology_code'])
-def adapt_topic_content(content_id):
-    """Adapta un contenido según una metodología de aprendizaje específica"""
-    try:
-        data = request.get_json()
-        methodology_code = data.get('methodology_code')
-        
-        # Adaptar contenido según metodología
-        success, result = topic_content_service.adapt_content_to_methodology(content_id, methodology_code)
-        
-        if not success:
-            return APIRoute.error(
-                ErrorCodes.BAD_REQUEST,
-                result.get("error", "Error al adaptar contenido"),
-                status_code=400
-            )
-            
-        return APIRoute.success(data=result)
-    except Exception as e:
-        logging.error(f"Error al adaptar contenido: {str(e)}")
-        return APIRoute.error(
-            ErrorCodes.SERVER_ERROR,
-            str(e),
-            status_code=500
-        )
+@study_plan_bp.route('/resource-topics/<resource_id>', methods=['GET'])
+@APIRoute.standard(auth_required_flag=True)
+def get_resource_topics(resource_id):
+    """
+    Obtiene todos los temas asociados a un recurso específico.
+    
+    Args:
+        resource_id: ID del recurso
+    
+    Returns:
+        Lista de temas asociados al recurso
+    """
+    current_user = request.user
+    
+    topics = topic_resource_service.get_resource_topics(resource_id)
+    
+    return {
+        "success": True,
+        "message": f"Se encontraron {len(topics)} temas para el recurso",
+        "data": topics
+    }
