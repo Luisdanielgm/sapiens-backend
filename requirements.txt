@@ -13,3 +13,11 @@ numpy==2.2.4
 pandas==2.2.3
 pdf2image==1.17.0
 requests==2.31.0
+beautifulsoup4==4.12.2
+lxml==4.9.3
+urllib3==2.2.1
+certifi==2024.2.2
+chardet==5.2.0
+charset-normalizer==3.3.2
+idna==3.6
+soupsieve==2.5

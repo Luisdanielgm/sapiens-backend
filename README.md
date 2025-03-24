@@ -87,3 +87,11 @@ El proyecto está organizado de forma modular:
   - `classes/`: Gestión de clases y secciones
   - `study_plans/`: Planes de estudio y contenido educativo
   - Otros módulos para funcionalidades específicas 
+
+## Características principales
+
+- Procesamiento de documentos PDF
+- Extracción de texto e imágenes
+- Búsqueda web mediante SearXNG (ver [documentación](docs/SEARXNG.md))
+- Generación de diagramas
+- Almacenamiento de recursos 
