@@ -21,21 +21,17 @@ provider_service = SearchProviderService()
 @content_resources_bp.route('/web-search', methods=['POST'])
 @APIRoute.standard(auth_required_flag=True, required_fields=['query'])
 def search_web():
-    """Realiza una búsqueda en la web utilizando SearXNG"""
+    """Realiza una búsqueda en la web utilizando ValueSerp API"""
     try:
         data = request.get_json()
         query = data.get('query')
-        result_type = data.get('result_type')
         max_results = data.get('max_results', 10)
-        topic_id = data.get('topic_id')
         
         log_info(f"Realizando búsqueda web: {query}", "content_resources.routes")
         
         results = web_search_service.search_web(
             query=query,
-            result_type=result_type,
-            max_results=max_results,
-            topic_id=topic_id
+            max_results=max_results
         )
         
         return APIRoute.success(data=results)

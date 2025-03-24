@@ -4,55 +4,56 @@ from typing import Dict, List, Optional
 
 class WebSearchResult:
     """
-    Representa un resultado de búsqueda web.
+    Representa un resultado de búsqueda web de ValueSerp.
     """
     def __init__(self,
                  title: str,
                  url: str,
                  snippet: str,
-                 result_type: str,  # webpage, image, video, pdf, audio
-                 topic_id: str = None,
+                 position: int = None,
+                 domain: str = None,
                  metadata: Dict = None,
-                 tags: List[str] = None,
-                 relevance_score: float = 0.0):
+                 knowledge_graph: Dict = None,
+                 videos: List[Dict] = None,
+                 related_searches: List[Dict] = None):
         self.title = title
         self.url = url
         self.snippet = snippet
-        self.result_type = result_type
-        self.topic_id = ObjectId(topic_id) if topic_id else None
+        self.position = position
+        self.domain = domain
         self.metadata = metadata or {}
-        self.tags = tags or []
-        self.relevance_score = relevance_score
+        self.knowledge_graph = knowledge_graph
+        self.videos = videos
+        self.related_searches = related_searches
         self.created_at = datetime.now()
-        self.is_saved = False
         
     def to_dict(self) -> dict:
         return {
             "title": self.title,
             "url": self.url,
             "snippet": self.snippet,
-            "result_type": self.result_type,
-            "topic_id": self.topic_id,
+            "position": self.position,
+            "domain": self.domain,
             "metadata": self.metadata,
-            "tags": self.tags,
-            "relevance_score": self.relevance_score,
-            "created_at": self.created_at,
-            "is_saved": self.is_saved
+            "knowledge_graph": self.knowledge_graph,
+            "videos": self.videos,
+            "related_searches": self.related_searches,
+            "created_at": self.created_at
         }
 
 class SearchProvider:
     """
-    Configuración de un proveedor de búsqueda SearXNG.
+    Configuración de un proveedor de búsqueda.
     """
     def __init__(self,
                  name: str,
-                 provider_type: str = "searxng",
-                 instances: List[str] = None,
+                 provider_type: str = "valueserp",
+                 api_key: str = None,
                  config: Dict = None,
                  status: str = "active"):
         self.name = name
         self.provider_type = provider_type
-        self.instances = instances or []  # Lista de instancias para SearXNG
+        self.api_key = api_key
         self.config = config or {}
         self.status = status
         self.created_at = datetime.now()
@@ -64,7 +65,7 @@ class SearchProvider:
         return {
             "name": self.name,
             "provider_type": self.provider_type,
-            "instances": self.instances,
+            "api_key": self.api_key,
             "config": self.config,
             "status": self.status,
             "created_at": self.created_at,
