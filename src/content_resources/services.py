@@ -39,6 +39,79 @@ class SearchProviderService:
         
         return providers
 
+    def add_searxng_instance(self, provider_id: str, instance_url: str) -> Tuple[bool, str]:
+        """Añade una nueva instancia SearXNG a un proveedor existente
+        
+        Args:
+            provider_id: ID del proveedor
+            instance_url: URL de la instancia a añadir
+            
+        Returns:
+            Tupla (éxito, mensaje)
+        """
+        try:
+            # Validar la URL
+            if not instance_url.startswith(("http://", "https://")):
+                return False, "La URL debe comenzar con http:// o https://"
+                
+            # Comprobar si la instancia está accesible
+            headers = {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+            }
+            
+            try:
+                response = requests.get(f"{instance_url}/search?q=test", headers=headers, timeout=10)
+                if response.status_code != 200:
+                    return False, f"La instancia no está respondiendo correctamente: {response.status_code}"
+            except Exception as e:
+                return False, f"Error al conectar con la instancia: {str(e)}"
+                
+            # Obtener el proveedor
+            provider = self.collection.find_one({"_id": ObjectId(provider_id)})
+            if not provider:
+                return False, f"No se encontró proveedor con ID {provider_id}"
+                
+            # Comprobar si la instancia ya existe
+            instances = provider.get("instances", [])
+            if instance_url in instances:
+                return False, "La instancia ya está registrada en este proveedor"
+                
+            # Añadir la instancia
+            instances.append(instance_url)
+            
+            self.collection.update_one(
+                {"_id": ObjectId(provider_id)},
+                {"$set": {
+                    "instances": instances,
+                    "updated_at": datetime.now()
+                }}
+            )
+            
+            # Añadir a la lista de instancias verificadas si no existe
+            verified_instances_path = os.path.join(
+                os.path.dirname(os.path.abspath(__file__)),
+                "verified_searxng_instances.json"
+            )
+            
+            if os.path.exists(verified_instances_path):
+                try:
+                    with open(verified_instances_path, "r") as f:
+                        verified_instances = json.load(f)
+                        
+                    if instance_url not in verified_instances:
+                        verified_instances.append(instance_url)
+                        
+                        with open(verified_instances_path, "w") as f:
+                            json.dump(verified_instances, f, indent=2)
+                except Exception as e:
+                    logger.warning(f"No se pudo actualizar la lista de instancias verificadas: {str(e)}")
+            
+            return True, "Instancia añadida correctamente"
+            
+        except Exception as e:
+            logger.error(f"Error al añadir instancia: {str(e)}")
+            return False, str(e)
+
     def create_provider(self, provider_data: Dict) -> Tuple[bool, str]:
         """Crea un nuevo proveedor de búsqueda SearXNG
         
@@ -232,6 +305,9 @@ class WebSearchService:
         self.provider_service = SearchProviderService()
         self.cache_duration = 3600  # 1 hora en segundos
         self.USER_AGENT = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+        # Añadir contador de reintentos por instancia
+        self.instance_failures = {}
+        self.max_failures = 5  # Número máximo de fallos antes de marcar la instancia como inactiva
         
     def search_web(self, query: str, result_type: str = None, max_results: int = 10, topic_id: str = None) -> List[Dict]:
         """Realiza una búsqueda web con SearXNG
@@ -268,11 +344,25 @@ class WebSearchService:
                         with open(verified_instances_path, "r") as f:
                             verified_instances = json.load(f)
                         
+                        # Verificar que hay instancias válidas
+                        if not verified_instances:
+                            logger.error("No hay instancias verificadas disponibles")
+                            return []
+                            
+                        # Filtrar instancias con demasiados fallos
+                        filtered_instances = self._filter_working_instances(verified_instances)
+                        
+                        if not filtered_instances:
+                            # Si todas están fallando, reiniciar contadores y probar con todas
+                            logger.warning("Todas las instancias tienen problemas, reiniciando contadores de fallos")
+                            self.instance_failures = {}
+                            filtered_instances = verified_instances
+                        
                         # Crear proveedor predeterminado
                         default_provider = {
                             "name": "SearXNG Default",
                             "provider_type": "searxng",
-                            "instances": verified_instances
+                            "instances": filtered_instances
                         }
                         
                         success, provider_id = self.provider_service.create_provider(default_provider)
@@ -297,6 +387,21 @@ class WebSearchService:
             # Realizar búsqueda con el primer proveedor disponible
             provider = searxng_providers[0]
             
+            # Actualizar las instancias del proveedor para evitar instancias problemáticas
+            if "instances" in provider:
+                provider["instances"] = self._filter_working_instances(provider["instances"])
+                if not provider["instances"]:
+                    # Si no hay instancias buenas, cargar todas de nuevo y reiniciar contadores
+                    logger.warning("Todas las instancias tienen problemas, reiniciando contadores")
+                    self.instance_failures = {}
+                    verified_instances_path = os.path.join(
+                        os.path.dirname(os.path.abspath(__file__)),
+                        "verified_searxng_instances.json"
+                    )
+                    if os.path.exists(verified_instances_path):
+                        with open(verified_instances_path, "r") as f:
+                            provider["instances"] = json.load(f)
+                
             # Buscar con SearXNG
             search_results = self._search_with_searxng(provider, query, result_type, max_results, topic_id)
             
@@ -351,6 +456,20 @@ class WebSearchService:
             logger.error(f"Error al obtener resultados de caché: {e}")
             return []
     
+    def _filter_working_instances(self, instances: List[str]) -> List[str]:
+        """Filtra instancias basándose en su historial de fallos
+        
+        Args:
+            instances: Lista de instancias a filtrar
+            
+        Returns:
+            Lista de instancias que no tienen demasiados fallos
+        """
+        return [
+            instance for instance in instances 
+            if self.instance_failures.get(instance, 0) < self.max_failures
+        ]
+    
     def _search_with_searxng(self, provider: dict, query: str, result_type: Optional[str] = None, 
                         max_results: int = 10, topic_id: Optional[str] = None) -> List[dict]:
         """Realiza una búsqueda utilizando instancias de SearXNG
@@ -370,6 +489,9 @@ class WebSearchService:
             logger.error("No hay instancias SearXNG configuradas")
             return []
             
+        # Aleatorizar el orden de las instancias para distribuir la carga
+        random.shuffle(instances)
+            
         search_params = {
             "q": query,
             "format": "html"  # Usar HTML en lugar de JSON debido a restricciones de algunas instancias
@@ -381,23 +503,39 @@ class WebSearchService:
         elif result_type == "video":
             search_params["categories"] = "videos"
         
+        # Lista de agentes de usuario para rotación
+        user_agents = [
+            'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
+            'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/92.0.4515.107 Safari/537.36',
+            'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:90.0) Gecko/20100101 Firefox/90.0',
+            'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/14.1.1 Safari/605.1.15'
+        ]
+        
         # Preparar variables para recopilar resultados
         all_results = []
         all_results_by_url = {}
         errors = []
         unique_urls = set()
+        success_count = 0
         
-        # Intentar con cada instancia hasta obtener resultados
+        # Intentar con cada instancia hasta obtener resultados o agotar instancias
         for instance in instances:
+            # Si ya tenemos suficientes resultados, salir del bucle
+            if len(all_results_by_url) >= max_results * 2:
+                break
+                
             try:
                 # Construir URL de búsqueda
                 search_url = f"{instance}/search"
+                
+                # Seleccionar un agente de usuario aleatorio
+                current_user_agent = random.choice(user_agents)
                 
                 # Realizar solicitud
                 response = requests.get(
                     search_url, 
                     params=search_params,
-                    headers={"User-Agent": self.USER_AGENT},
+                    headers={"User-Agent": current_user_agent},
                     timeout=10
                 )
                 
@@ -409,6 +547,10 @@ class WebSearchService:
                     result_elements = soup.select('.result')
                     
                     if result_elements:
+                        success_count += 1
+                        # Reiniciar contador de fallos para esta instancia
+                        self.instance_failures[instance] = 0
+                        
                         for i, result_div in enumerate(result_elements):
                             # Extraer título y URL
                             title_el = None
@@ -481,15 +623,28 @@ class WebSearchService:
                                 unique_urls.add(url)
                     else:
                         logger.warning(f"No se encontraron resultados en {instance}")
+                        # Incrementar conteo de fallos pero no mucho
+                        self.instance_failures[instance] = self.instance_failures.get(instance, 0) + 1
                 elif response.status_code == 429:
                     logger.warning(f"Límite de tasa excedido para {instance}")
                     errors.append(f"Límite de tasa excedido para {instance}")
+                    # Incrementar el conteo de fallos
+                    self.instance_failures[instance] = self.instance_failures.get(instance, 0) + 1
                 else:
                     logger.warning(f"Error al consultar {instance}: {response.status_code}")
                     errors.append(f"Error al consultar {instance}: {response.status_code}")
+                    # Incrementar el conteo de fallos
+                    self.instance_failures[instance] = self.instance_failures.get(instance, 0) + 1
             except requests.exceptions.RequestException as e:
                 logger.error(f"Error de conexión con {instance}: {str(e)}")
                 errors.append(f"Error de conexión con {instance}: {str(e)}")
+                # Incrementar el conteo de fallos
+                self.instance_failures[instance] = self.instance_failures.get(instance, 0) + 2  # Penalizar más los errores de conexión
+                
+            # Pausa corta entre instancias para evitar sobrecarga
+            if len(instances) > 1:
+                import time
+                time.sleep(0.5)  # 500ms de pausa
         
         # Convertir el diccionario de resultados a lista
         for url, result in all_results_by_url.items():
@@ -497,6 +652,11 @@ class WebSearchService:
             result["relevance_score"] = min(1.0, result["relevance_score"] + (result["metadata"]["score"] * 0.05))
             all_results.append(result)
         
+        # Registrar estado de la búsqueda
+        logger.info(f"Búsqueda completada. Se encontraron {len(all_results)} resultados únicos")
+        if len(errors) > 0:
+            logger.warning(f"Se encontraron {len(errors)} errores durante la búsqueda")
+            
         # Ordenar resultados por relevancia
         all_results.sort(key=lambda x: x.get("relevance_score", 0), reverse=True)
         
@@ -504,8 +664,6 @@ class WebSearchService:
         if max_results > 0 and len(all_results) > max_results:
             all_results = all_results[:max_results]
         
-        logger.info(f"Búsqueda completada. Se encontraron {len(all_results)} resultados únicos")
-            
         return all_results
     
     def save_search_result(self, result_id: str) -> Tuple[bool, str]:

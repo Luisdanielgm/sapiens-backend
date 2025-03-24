@@ -3,6 +3,7 @@ import logging
 import os
 from datetime import datetime
 import json
+import requests
 
 from src.shared.standardization import APIBlueprint, APIRoute, ErrorCodes
 from src.shared.constants import ROLES
@@ -248,19 +249,17 @@ def setup_searxng_provider():
                 status_code=400
             )
             
-        # Crear los datos del proveedor
+        # Crear un nuevo proveedor SearXNG con instancias verificadas
         provider_data = {
-            "name": "SearXNG Instancias Verificadas",
+            "name": "SearXNG Provider",
             "provider_type": "searxng",
             "instances": verified_instances,
             "config": {
-                "language": "all",
-                "safesearch": 0,
-                "max_instances_per_query": 5
+                "max_results": 20,
+                "timeout": 10
             }
         }
         
-        # Crear el proveedor
         success, result = provider_service.create_provider(provider_data)
         
         if not success:
@@ -271,15 +270,127 @@ def setup_searxng_provider():
             )
             
         return APIRoute.success(
-            {
-                "provider_id": result,
-                "instances_count": len(verified_instances)
-            },
+            {"id": result},
             message="Proveedor SearXNG configurado exitosamente",
             status_code=201
         )
     except Exception as e:
         log_error(f"Error al configurar proveedor SearXNG: {str(e)}", e, "content_resources.routes")
+        return APIRoute.error(
+            ErrorCodes.SERVER_ERROR,
+            str(e),
+            status_code=500
+        )
+
+@content_resources_bp.route('/search-providers/<provider_id>/add-instance', methods=['POST'])
+@APIRoute.standard(auth_required_flag=True, roles=[ROLES["INSTITUTE_ADMIN"]], required_fields=['instance_url'])
+def add_searxng_instance(provider_id):
+    """Añade una nueva instancia SearXNG a un proveedor existente"""
+    try:
+        data = request.get_json()
+        instance_url = data.get('instance_url')
+        
+        log_info(f"Añadiendo instancia {instance_url} al proveedor {provider_id}", "content_resources.routes")
+        
+        success, message = provider_service.add_searxng_instance(provider_id, instance_url)
+        
+        if not success:
+            return APIRoute.error(
+                ErrorCodes.BAD_REQUEST,
+                message,
+                status_code=400
+            )
+            
+        return APIRoute.success(
+            message="Instancia SearXNG añadida exitosamente"
+        )
+    except Exception as e:
+        log_error(f"Error al añadir instancia SearXNG: {str(e)}", e, "content_resources.routes")
+        return APIRoute.error(
+            ErrorCodes.SERVER_ERROR,
+            str(e),
+            status_code=500
+        )
+
+@content_resources_bp.route('/search-providers/refresh-instances', methods=['POST'])
+@APIRoute.standard(auth_required_flag=True, roles=[ROLES["INSTITUTE_ADMIN"]])
+def refresh_searxng_instances():
+    """Actualiza la lista de instancias SearXNG verificadas"""
+    try:
+        log_info("Actualizando lista de instancias SearXNG verificadas", "content_resources.routes")
+        
+        # Obtener todos los proveedores
+        providers = provider_service.list_providers(active_only=False)
+        searxng_providers = [p for p in providers if p.get("provider_type") == "searxng"]
+        
+        if not searxng_providers:
+            return APIRoute.error(
+                ErrorCodes.BAD_REQUEST,
+                "No hay proveedores SearXNG configurados",
+                status_code=400
+            )
+            
+        # Recopilar todas las instancias únicas
+        unique_instances = set()
+        for provider in searxng_providers:
+            instances = provider.get("instances", [])
+            for instance in instances:
+                unique_instances.add(instance)
+                
+        if not unique_instances:
+            return APIRoute.error(
+                ErrorCodes.BAD_REQUEST,
+                "No hay instancias SearXNG configuradas",
+                status_code=400
+            )
+            
+        # Probar cada instancia
+        working_instances = []
+        failed_instances = []
+        
+        for instance in unique_instances:
+            try:
+                headers = {
+                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+                }
+                
+                response = requests.get(f"{instance}/search?q=test", headers=headers, timeout=10)
+                
+                if response.status_code == 200:
+                    working_instances.append(instance)
+                else:
+                    failed_instances.append({
+                        "instance": instance,
+                        "status_code": response.status_code
+                    })
+            except Exception as e:
+                failed_instances.append({
+                    "instance": instance,
+                    "error": str(e)
+                })
+                
+        if not working_instances:
+            return APIRoute.error(
+                ErrorCodes.BAD_REQUEST,
+                "Ninguna instancia SearXNG está funcionando",
+                status_code=400
+            )
+            
+        # Actualizar archivo de instancias verificadas
+        instances_file = os.path.join(os.path.dirname(__file__), 'verified_searxng_instances.json')
+        
+        with open(instances_file, 'w') as f:
+            json.dump(working_instances, f, indent=2)
+            
+        return APIRoute.success(
+            {
+                "working_instances": working_instances,
+                "failed_instances": failed_instances
+            },
+            message=f"Se verificaron {len(working_instances)} instancias SearXNG"
+        )
+    except Exception as e:
+        log_error(f"Error al actualizar instancias SearXNG: {str(e)}", e, "content_resources.routes")
         return APIRoute.error(
             ErrorCodes.SERVER_ERROR,
             str(e),
