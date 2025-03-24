@@ -231,6 +231,7 @@ class WebSearchService:
         self.collection = get_db().web_search_results
         self.provider_service = SearchProviderService()
         self.cache_duration = 3600  # 1 hora en segundos
+        self.USER_AGENT = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
         
     def search_web(self, query: str, result_type: str = None, max_results: int = 10, topic_id: str = None) -> List[Dict]:
         """Realiza una búsqueda web con SearXNG
@@ -396,7 +397,7 @@ class WebSearchService:
                 response = requests.get(
                     search_url, 
                     params=search_params,
-                    headers={"User-Agent": USER_AGENT},
+                    headers={"User-Agent": self.USER_AGENT},
                     timeout=10
                 )
                 
