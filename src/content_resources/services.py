@@ -539,15 +539,44 @@ class WebSearchService:
         
         # Último recurso: respuesta genérica
         logger.info("Usando respuesta genérica de fallback")
+        
+        # Intentar obtener una instancia SearXNG funcional para crear una URL válida
+        instance_url = None
+        verified_instances_path = os.path.join(
+            os.path.dirname(os.path.abspath(__file__)),
+            "verified_searxng_instances.json"
+        )
+        
+        if os.path.exists(verified_instances_path):
+            try:
+                with open(verified_instances_path, "r") as f:
+                    instances = json.load(f)
+                if instances:
+                    instance_url = instances[0]  # Usar la primera instancia disponible
+            except Exception as e:
+                logger.error(f"Error al cargar instancias verificadas para fallback: {str(e)}")
+        
+        # Si no se pudo obtener una instancia, usar las instancias predeterminadas
+        if not instance_url:
+            default_instances = [
+                "https://searx.tiekoetter.com",
+                "https://search.hbubli.cc",
+                "https://searxng.world"
+            ]
+            instance_url = random.choice(default_instances)
+        
+        # Crear URL de búsqueda con instancia real
+        search_url = f"{instance_url}/search?q={quote_plus(query)}"
+        
         fallback_result = {
             "title": f"Búsqueda de: {query}",
-            "url": f"https://ejemplo.com/search?q={quote_plus(query)}",
+            "url": search_url,
             "snippet": "Lo sentimos, no pudimos encontrar resultados reales para esta consulta. Este es un resultado de respaldo generado automáticamente.",
             "result_type": "webpage",
             "metadata": {
                 "engine": "fallback",
                 "source": "fallback_generator",
-                "source_instance": "local",
+                "source_instance": instance_url,
                 "score": 0.5
             },
             "relevance_score": 0.5,
@@ -960,83 +989,66 @@ class WebSearchService:
         Returns:
             Lista de resultados estáticos
         """
-        static_results = [
-            {
-                "title": "Inteligencia Artificial en la Educación: Transformando el Aprendizaje",
-                "url": "https://www.ejemplo.edu/ia-educacion",
-                "snippet": "La inteligencia artificial está transformando la educación al permitir experiencias de aprendizaje personalizadas y adaptativas que se ajustan a las necesidades individuales de cada estudiante.",
+        # Obtener una instancia SearXNG funcional
+        instance_url = None
+        verified_instances_path = os.path.join(
+            os.path.dirname(os.path.abspath(__file__)),
+            "verified_searxng_instances.json"
+        )
+        
+        if os.path.exists(verified_instances_path):
+            try:
+                with open(verified_instances_path, "r") as f:
+                    instances = json.load(f)
+                if instances:
+                    instance_url = instances[0]  # Usar la primera instancia disponible
+            except Exception as e:
+                logger.error(f"Error al cargar instancias verificadas para resultados estáticos: {str(e)}")
+        
+        # Si no se pudo obtener una instancia, usar las instancias predeterminadas
+        if not instance_url:
+            default_instances = [
+                "https://searx.tiekoetter.com",
+                "https://search.hbubli.cc",
+                "https://searxng.world"
+            ]
+            instance_url = random.choice(default_instances)
+            
+        # Crear URLs de búsqueda para los temas usando la instancia
+        topics = [
+            {"query": "inteligencia+artificial+educacion", "title": "Inteligencia Artificial en la Educación: Transformando el Aprendizaje"},
+            {"query": "aplicaciones+ia+entornos+educativos", "title": "Aplicaciones de la IA en entornos educativos"},
+            {"query": "desafios+eticos+ia+educacion", "title": "Desafíos éticos de la IA en la educación"},
+            {"query": "ia+personalizacion+aprendizaje", "title": "IA y personalización del aprendizaje"},
+            {"query": "sistemas+tutoriales+inteligentes+educacion", "title": "Sistemas tutoriales inteligentes: el futuro de la educación"}
+        ]
+            
+        static_results = []
+        
+        for i, topic in enumerate(topics):
+            result = {
+                "title": topic["title"],
+                "url": f"{instance_url}/search?q={topic['query']}",
+                "snippet": "Este es un resultado generado automáticamente sobre inteligencia artificial en educación.",
                 "result_type": "webpage",
                 "metadata": {
                     "engine": "static_fallback",
                     "source": "fallback_results",
-                    "source_instance": "local",
-                    "score": 1
+                    "source_instance": instance_url,
+                    "score": 1.0 - (i * 0.05)
                 },
-                "relevance_score": 1.0,
-                "created_at": datetime.now().isoformat(),
-                "is_saved": False
-            },
-            {
-                "title": "Aplicaciones de la IA en entornos educativos",
-                "url": "https://educacion.tech/aplicaciones-ia",
-                "snippet": "Desde tutores virtuales hasta sistemas de evaluación automatizada, la IA ofrece numerosas herramientas para mejorar la calidad y eficiencia de la educación.",
-                "result_type": "webpage",
-                "metadata": {
-                    "engine": "static_fallback",
-                    "source": "fallback_results",
-                    "source_instance": "local",
-                    "score": 0.95
-                },
-                "relevance_score": 0.95,
-                "created_at": datetime.now().isoformat(),
-                "is_saved": False
-            },
-            {
-                "title": "Desafíos éticos de la IA en la educación",
-                "url": "https://revista-educacion.org/etica-ia",
-                "snippet": "El uso de la inteligencia artificial en la educación plantea importantes cuestiones éticas relacionadas con la privacidad, la equidad y el acceso a las tecnologías educativas.",
-                "result_type": "webpage",
-                "metadata": {
-                    "engine": "static_fallback",
-                    "source": "fallback_results",
-                    "source_instance": "local",
-                    "score": 0.9
-                },
-                "relevance_score": 0.9,
-                "created_at": datetime.now().isoformat(),
-                "is_saved": False
-            },
-            {
-                "title": "IA y personalización del aprendizaje",
-                "url": "https://personalizacion-educativa.org/inteligencia-artificial",
-                "snippet": "Los algoritmos de IA pueden analizar el comportamiento y rendimiento del estudiante para ofrecer contenidos y actividades adaptados a su nivel, estilo de aprendizaje y necesidades específicas.",
-                "result_type": "webpage",
-                "metadata": {
-                    "engine": "static_fallback",
-                    "source": "fallback_results",
-                    "source_instance": "local",
-                    "score": 0.85
-                },
-                "relevance_score": 0.85,
-                "created_at": datetime.now().isoformat(),
-                "is_saved": False
-            },
-            {
-                "title": "Sistemas tutoriales inteligentes: el futuro de la educación",
-                "url": "https://tutores-ia.edu/innovacion",
-                "snippet": "Los sistemas tutoriales inteligentes utilizan IA para proporcionar retroalimentación inmediata y personalizada, identificando áreas de mejora y ajustando el material educativo dinámicamente.",
-                "result_type": "webpage",
-                "metadata": {
-                    "engine": "static_fallback",
-                    "source": "fallback_results",
-                    "source_instance": "local",
-                    "score": 0.8
-                },
-                "relevance_score": 0.8,
+                "relevance_score": 1.0 - (i * 0.05),
                 "created_at": datetime.now().isoformat(),
                 "is_saved": False
             }
-        ]
+            static_results.append(result)
+        
+        # Personalizar los snippets para que sean más informativos
+        static_results[0]["snippet"] = "La inteligencia artificial está transformando la educación al permitir experiencias de aprendizaje personalizadas y adaptativas que se ajustan a las necesidades individuales de cada estudiante."
+        static_results[1]["snippet"] = "Desde tutores virtuales hasta sistemas de evaluación automatizada, la IA ofrece numerosas herramientas para mejorar la calidad y eficiencia de la educación."
+        static_results[2]["snippet"] = "El uso de la inteligencia artificial en la educación plantea importantes cuestiones éticas relacionadas con la privacidad, la equidad y el acceso a las tecnologías educativas."
+        static_results[3]["snippet"] = "Los algoritmos de IA pueden analizar el comportamiento y rendimiento del estudiante para ofrecer contenidos y actividades adaptados a su nivel, estilo de aprendizaje y necesidades específicas."
+        static_results[4]["snippet"] = "Los sistemas tutoriales inteligentes utilizan IA para proporcionar retroalimentación inmediata y personalizada, identificando áreas de mejora y ajustando el material educativo dinámicamente."
         
         # Añadir topic_id si está disponible
         if topic_id:
