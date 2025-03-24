@@ -437,33 +437,41 @@ class WebSearchService:
                 print("-"*30)
         
         # Knowledge Graph
-        if 'knowledge_graph' in response_json:
+        if 'knowledge_graph' in response_json and response_json['knowledge_graph']:
             print("\n🧠 KNOWLEDGE GRAPH:")
             kg = response_json['knowledge_graph']
-            print(f"📚 Título: {kg['title']}")
-            print(f"🏷️ Tipo: {kg['type']}")
-            if 'known_attributes' in kg:
+            if 'title' in kg:
+                print(f"📚 Título: {kg['title']}")
+            if 'type' in kg:
+                print(f"🏷️ Tipo: {kg['type']}")
+            if 'known_attributes' in kg and kg['known_attributes']:
                 print("\n📋 Atributos:")
                 for attr in kg['known_attributes']:
-                    print(f"• {attr['name']}: {attr['value']}")
+                    if 'name' in attr and 'value' in attr:
+                        print(f"• {attr['name']}: {attr['value']}")
             print("-"*30)
         
         # Videos
-        if 'inline_videos' in response_json:
+        if 'inline_videos' in response_json and response_json['inline_videos']:
             print("\n🎥 VÍDEOS RELACIONADOS:")
             for i, video in enumerate(response_json['inline_videos'], 1):
                 print(f"\n🎬 Video #{i}")
-                print(f"📺 Título: {video['title']}")
-                print(f"⏱️ Duración: {video['length']}")
-                print(f"📡 Fuente: {video['source']}")
-                print(f"🔗 URL: {video['link']}")
+                if 'title' in video:
+                    print(f"📺 Título: {video['title']}")
+                if 'length' in video:
+                    print(f"⏱️ Duración: {video['length']}")
+                if 'source' in video:
+                    print(f"📡 Fuente: {video['source']}")
+                if 'link' in video:
+                    print(f"🔗 URL: {video['link']}")
                 print("-"*30)
         
         # Búsquedas relacionadas
-        if 'related_searches' in response_json:
+        if 'related_searches' in response_json and response_json['related_searches']:
             print("\n🔍 BÚSQUEDAS RELACIONADAS:")
             for i, related in enumerate(response_json['related_searches'], 1):
-                print(f"• {related['query']}")
+                if 'query' in related:
+                    print(f"• {related['query']}")
         
         print("\n" + "="*50)
         print("FIN DE LOS RESULTADOS")
