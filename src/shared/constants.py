@@ -8,6 +8,10 @@ STATUS = {
     "RETIRED": "retired"
 }
 
+# Configuración de la aplicación
+APP_NAME = "sapiens-backend"
+APP_PREFIX = "/api"
+
 # Roles de usuario
 ROLES = {
     "ADMIN": "ADMIN",               # Administrador de toda la plataforma

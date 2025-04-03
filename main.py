@@ -6,6 +6,8 @@ from config import active_config, validate_env_vars
 import logging
 import os
 import sys
+import datetime
+from src.shared.constants import APP_PREFIX, APP_NAME
 
 # Configuración de logging
 logging_level = logging.DEBUG if active_config.DEBUG else logging.INFO
@@ -39,13 +41,13 @@ from src.student_individual_content.routes import student_individual_content_bp
 from src.games.routes import games_bp
 from src.simulations.routes import simulations_bp
 from src.resources.routes import resources_bp
-from src.content_resources.routes import content_resources_bp
+from src.deep_research.routes import deep_research_bp
 
 def create_app(config_object=active_config):
     """
     Crea y configura la aplicación Flask
     """
-    app = Flask(__name__)
+    app = Flask(APP_NAME)
     
     # Aplicar configuración
     app.config.from_object(config_object)
@@ -206,7 +208,7 @@ def create_app(config_object=active_config):
     app.register_blueprint(games_bp, url_prefix='/api/games')
     app.register_blueprint(simulations_bp, url_prefix='/api/simulations')
     app.register_blueprint(resources_bp, url_prefix='/api/resources')
-    app.register_blueprint(content_resources_bp, url_prefix='/api/content-resources')
+    app.register_blueprint(deep_research_bp, url_prefix='/api/deep-research')
 
     @app.route('/')
     def health_check():
