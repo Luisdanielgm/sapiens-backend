@@ -57,8 +57,6 @@ def create_class():
         success, result = class_service.create_class(class_data)
         
         if success:
-            # Agregar al creador como miembro con rol de profesor
-            membership_service.add_member(result, user_id, 'TEACHER')
             return APIRoute.success({"id": result}, message="Clase creada exitosamente", status_code=201)
         else:
             return APIRoute.error(ErrorCodes.CREATION_ERROR, result)
