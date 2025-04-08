@@ -1,0 +1,178 @@
+# DASHBOARDS DE TEACHER E INSTITUTE
+
+## 1. DASHBOARD DE TEACHER
+
+### Modelos:
+1. ClassStatistics:
+   - class_id
+   - period_id
+   - metrics (asistencia promedio, tasa de aprobación)
+   - distribution (distribución de calificaciones)
+   - trends (tendencias semanales)
+
+2. StudentPerformance:
+   - student_id
+   - class_id
+   - period_id
+   - metrics (asistencia, calificaciones promedio)
+   - details (detalles por evaluación)
+
+3. EvaluationAnalytics:
+   - evaluation_id
+   - class_id
+   - metrics (puntuación promedio, tasa de finalización)
+   - question_stats (estadísticas por pregunta)
+   - time_stats (tiempo de finalización)
+
+### Rutas:
+1. /teacher/dashboard:
+   - Métricas generales del profesor
+   - Lista de clases asignadas
+   - Rendimiento general de estudiantes
+
+2. /class/<class_id>/statistics:
+   - Estadísticas detalladas de una clase específica
+   - Distribución de calificaciones
+   - Tasa de asistencia
+
+3. /class/<class_id>/comprehensive:
+   - Reporte completo de la clase
+   - Análisis detallado de evaluaciones
+   - Tendencias de rendimiento
+
+4. /evaluation/<evaluation_id>/analytics:
+   - Análisis detallado de una evaluación
+   - Estadísticas por pregunta
+   - Tiempos de finalización
+
+### Servicios:
+1. ClassAnalyticsService:
+   - Calcular estadísticas de clase
+   - Generar reportes de rendimiento
+   - Analizar tendencias
+
+2. EvaluationAnalyticsService:
+   - Analizar resultados de evaluaciones
+   - Calcular métricas de preguntas
+   - Generar reportes de evaluación
+
+### Métricas Clave del Dashboard de Teacher:
+1. Métricas de Clase:
+   - Asistencia promedio
+   - Tasa de aprobación
+   - Distribución de calificaciones
+   - Participación en actividades
+
+2. Métricas de Estudiantes:
+   - Rendimiento individual
+   - Progreso en evaluaciones
+   - Tendencias de aprendizaje
+   - Áreas de mejora
+
+3. Métricas de Evaluaciones:
+   - Resultados por evaluación
+   - Dificultad de preguntas
+   - Tiempos de finalización
+   - Áreas de conocimiento
+
+## 2. DASHBOARD DE INSTITUTE
+
+### Modelos:
+1. InstituteDashboard:
+   - institute_id
+   - overview_metrics (totales generales)
+   - programs_stats (estadísticas de programas)
+   - levels_stats (estadísticas de niveles)
+   - sections_stats (estadísticas de secciones)
+   - subjects_stats (estadísticas de materias)
+   - periods_stats (estadísticas de períodos)
+   - classes_stats (estadísticas de clases)
+   - teachers_stats (estadísticas de profesores)
+   - students_stats (estadísticas de estudiantes)
+
+2. TeacherAnalytics:
+   - teacher_id
+   - period_id
+   - class_metrics (métricas por clase)
+   - overall_metrics (métricas generales)
+   - feedback_stats (estadísticas de retroalimentación)
+
+3. ClassStatistics:
+   - class_id
+   - period_id
+   - metrics (métricas generales)
+   - distribution (distribuciones)
+   - trends (tendencias)
+
+### Rutas:
+1. /institute/<institute_id>/dashboard:
+   - Vista general del instituto
+   - Métricas clave
+   - Tendencias principales
+
+2. /institute/<institute_id>/complete-dashboard:
+   - Dashboard completo con todas las métricas
+   - Análisis detallado por área
+   - Reportes comparativos
+
+3. /institute/<institute_id>/statistics:
+   - Estadísticas generales del instituto
+   - Métricas por programa
+   - Rendimiento por nivel
+
+4. /institute/<institute_id>/statistics/history:
+   - Histórico de estadísticas
+   - Tendencias temporales
+   - Comparativas históricas
+
+5. /institute/statistics/compare:
+   - Comparación entre institutos
+   - Benchmarking
+   - Análisis competitivo
+
+### Servicios:
+1. InstituteAnalyticsService:
+   - Calcular métricas institucionales
+   - Generar reportes comparativos
+   - Analizar tendencias institucionales
+
+2. InstituteDashboardService:
+   - Generar dashboards institucionales
+   - Procesar datos para visualización
+   - Integrar métricas de diferentes fuentes
+
+3. TeacherAnalyticsService:
+   - Analizar rendimiento de profesores
+   - Calcular métricas de enseñanza
+   - Generar reportes de efectividad docente
+
+### Métricas Clave del Dashboard de Institute:
+1. Métricas Generales:
+   - Total de estudiantes
+   - Total de profesores
+   - Total de clases
+   - Tasa de retención
+
+2. Métricas por Programa:
+   - Rendimiento por programa
+   - Tasa de graduación
+   - Satisfacción estudiantil
+   - Efectividad docente
+
+3. Métricas de Profesores:
+   - Efectividad docente
+   - Satisfacción estudiantil
+   - Tasa de asistencia
+   - Resultados de evaluaciones
+
+4. Métricas de Clases:
+   - Rendimiento por clase
+   - Tasa de aprobación
+   - Asistencia promedio
+   - Satisfacción estudiantil
+
+5. Métricas de Estudiantes:
+   - Rendimiento general
+   - Tasa de retención
+   - Progreso académico
+   - Participación en actividades 
