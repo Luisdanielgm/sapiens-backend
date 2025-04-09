@@ -11,6 +11,7 @@ from src.shared.exceptions import AppException
 from src.shared.database import get_db
 from src.classes.services import ClassService
 from src.study_plans.models import StudyPlanPerSubject, Module, Topic, Evaluation, TopicResource
+from src.resources.services import ResourceService, ResourceFolderService
 
 class StudyPlanService(VerificationBaseService):
     def __init__(self):
@@ -653,12 +654,14 @@ class TopicService(VerificationBaseService):
             if not module:
                 return False, "Módulo no encontrado"
             
+            # Extraer recursos externos si existen
+            external_resources = topic_data.pop('resources', [])
+            
             # Crear una copia con los datos necesarios para el constructor
             topic_dict = {
                 "module_id": ObjectId(module_id),
                 "name": topic_data.get("name"),
                 "difficulty": topic_data.get("difficulty"),
-                "multimedia_resources": topic_data.get("multimedia_resources", []),
                 "theory_content": topic_data.get("theory_content", "")
             }
             
@@ -671,9 +674,85 @@ class TopicService(VerificationBaseService):
             topic_to_insert['updated_at'] = datetime.now()
             
             result = self.collection.insert_one(topic_to_insert)
+            topic_id = str(result.inserted_id)
             
-            return True, str(result.inserted_id)
+            # Procesar recursos externos si existen
+            if external_resources and len(external_resources) > 0:
+                # Verificar si existe la carpeta "Recursos de Clases" para el creador del topic
+                # Primero necesitamos obtener el ID del creador (profesor) del plan de estudios
+                # El módulo pertenece a un plan de estudios
+                study_plan = get_db().study_plans_per_subject.find_one({"_id": module.get("study_plan_id")})
+                if study_plan:
+                    creator_id = study_plan.get("author_id")
+                    if creator_id:
+                        # Buscar carpeta "Recursos de Clases" del profesor
+                        folder_service = ResourceFolderService()
+                        class_resources_folder = None
+                        
+                        folders = get_db().resource_folders.find({
+                            "created_by": creator_id,
+                            "name": "Recursos de Clases"
+                        })
+                        
+                        if folders:
+                            folders_list = list(folders)
+                            if folders_list:
+                                class_resources_folder = folders_list[0]
+                        
+                        # Si no existe la carpeta, crearla
+                        if not class_resources_folder:
+                            folder_data = {
+                                "name": "Recursos de Clases",
+                                "created_by": str(creator_id),
+                                "description": "Recursos utilizados en clases y temas"
+                            }
+                            success, folder_id = folder_service.create_folder(folder_data)
+                            if success:
+                                class_resources_folder_id = folder_id
+                            else:
+                                logging.error(f"Error al crear carpeta de recursos: {folder_id}")
+                                class_resources_folder_id = None
+                        else:
+                            class_resources_folder_id = str(class_resources_folder["_id"])
+                        
+                        # Crear recursos y vincularlos al tema
+                        resource_service = ResourceService()
+                        topic_resource_service = TopicResourceService()
+                        
+                        for resource_data in external_resources:
+                            # Preparar datos del recurso
+                            resource_to_create = {
+                                "name": resource_data.get("title", "Recurso sin título"),
+                                "type": resource_data.get("resource_type", "link"),
+                                "url": resource_data.get("url", ""),
+                                "description": resource_data.get("description", ""),
+                                "tags": resource_data.get("tags", []),
+                                "created_by": str(creator_id)
+                            }
+                            
+                            # Añadir la carpeta si existe
+                            if class_resources_folder_id:
+                                resource_to_create["folder_id"] = class_resources_folder_id
+                            
+                            # Crear el recurso
+                            success, resource_id = resource_service.create_resource(resource_to_create)
+                            if success:
+                                # Vincular recurso al tema
+                                link_success, _ = topic_resource_service.link_resource_to_topic(
+                                    topic_id=topic_id,
+                                    resource_id=resource_id,
+                                    relevance_score=resource_data.get("relevance_score", 0.7),
+                                    recommended_for=resource_data.get("recommended_for", []),
+                                    usage_context=resource_data.get("usage_context", "primary"),
+                                    content_types=resource_data.get("content_types", ["multimedia"]),
+                                    created_by=str(creator_id)
+                                )
+                                if not link_success:
+                                    logging.error(f"Error al vincular recurso {resource_id} al tema {topic_id}")
+            
+            return True, topic_id
         except Exception as e:
+            logging.error(f"Error al crear topic: {str(e)}")
             return False, str(e)
     
     def update_topic(self, topic_id: str, update_data: dict) -> Tuple[bool, str]:
@@ -1902,12 +1981,17 @@ class LearningResourceService(VerificationBaseService):
         """
         Crea un nuevo recurso de aprendizaje.
         
+        ADVERTENCIA: Este método está obsoleto y se eliminará en futuras versiones.
+        Utilice ResourceService.create_resource() y TopicResourceService.link_resource_to_topic() en su lugar.
+        
         Args:
             resource_data: Datos del recurso a crear
             
         Returns:
             Tupla con estado y mensaje/ID
         """
+        logging.warning("MÉTODO OBSOLETO: LearningResourceService.create_resource() está obsoleto. " +
+                      "Utilice ResourceService.create_resource() y TopicResourceService.link_resource_to_topic() en su lugar.")
         try:
             # Validar que existe el tema
             topic_id = resource_data.get("topic_id")

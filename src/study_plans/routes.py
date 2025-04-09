@@ -1114,17 +1114,30 @@ def list_resources():
         )
 
 @study_plan_bp.route('/resources', methods=['POST'])
-@APIRoute.standard(auth_required_flag=True, roles=[ROLES["TEACHER"]], required_fields=['title', 'resource_type'])
+@APIRoute.standard(auth_required_flag=True, roles=[ROLES["TEACHER"]], required_fields=['title', 'resource_type', 'url'])
 def create_resource():
     """Crea un nuevo recurso educativo"""
     try:
         data = request.get_json()
         
-        # Añadir ID del creador
-        if request.user_id:
-            data['creator_id'] = request.user_id
+        # Preparar los datos para el ResourceService
+        resource_data = {
+            "name": data.get('title'),
+            "type": data.get('resource_type'),
+            "url": data.get('url'),
+            "description": data.get('description', ''),
+            "tags": data.get('tags', []),
+            "created_by": request.user_id
+        }
+        
+        # Si se especifica un folder_id, incluirlo
+        if 'folder_id' in data:
+            resource_data['folder_id'] = data['folder_id']
             
-        success, result = resource_service.create_resource(data)
+        # Crear el recurso usando ResourceService
+        from src.resources.services import ResourceService
+        resource_service_new = ResourceService()
+        success, result = resource_service_new.create_resource(resource_data)
         
         if not success:
             return APIRoute.error(
@@ -1132,6 +1145,26 @@ def create_resource():
                 result,
                 status_code=400
             )
+        
+        # Si se especifica un topic_id, vincular el recurso al tema
+        if 'topic_id' in data:
+            topic_id = data['topic_id']
+            try:
+                # Vincular el recurso al tema
+                link_success, link_result = topic_resource_service.link_resource_to_topic(
+                    topic_id=topic_id,
+                    resource_id=result,
+                    relevance_score=data.get('relevance_score', 0.5),
+                    recommended_for=data.get('recommended_for', []),
+                    usage_context=data.get('usage_context', 'supplementary'),
+                    content_types=data.get('content_types', []),
+                    created_by=request.user_id
+                )
+                
+                if not link_success:
+                    logging.warning(f"No se pudo vincular el recurso {result} al tema {topic_id}: {link_result}")
+            except Exception as e:
+                logging.error(f"Error al vincular recurso al tema: {str(e)}")
             
         return APIRoute.success(
             {"id": result},

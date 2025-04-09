@@ -82,10 +82,12 @@ class Topic:
                  module_id: str,
                  name: str,
                  difficulty: str,
+                 resources: List[Dict] = None,
                  theory_content: str = ""):
         self.module_id = ObjectId(module_id)
         self.name = name
         self.difficulty = difficulty
+        self.resources = resources or []
         self.theory_content = theory_content
         self.created_at = datetime.now()
 
@@ -94,6 +96,7 @@ class Topic:
             "module_id": self.module_id,
             "name": self.name,
             "difficulty": self.difficulty,
+            "resources": self.resources,
             "theory_content": self.theory_content,
             "created_at": self.created_at
         }
