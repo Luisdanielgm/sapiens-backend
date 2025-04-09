@@ -57,7 +57,8 @@ def create_study_plan():
 def list_study_plans():
     """Lista todos los planes de estudio"""
     try:
-        study_plans = study_plan_service.list_study_plans()
+        email = request.args.get('email')
+        study_plans = study_plan_service.list_study_plans(email)
         return APIRoute.success(data=study_plans)
     except Exception as e:
         return APIRoute.error(

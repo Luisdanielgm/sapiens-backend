@@ -138,9 +138,16 @@ class StudyPlanService(VerificationBaseService):
         except Exception as e:
             raise AppException(f"Error al eliminar plan de estudios: {str(e)}", AppException.BAD_REQUEST)
 
-    def list_study_plans(self) -> List[Dict]:
+    def list_study_plans(self, email: str = None) -> List[Dict]:
         try:
-            plans = list(self.collection.find())
+            query = {}
+            if email:
+                # Buscar el ID del usuario por su email
+                user = get_db().users.find_one({"email": email})
+                if user:
+                    query["author_id"] = ObjectId(user["_id"])
+            
+            plans = list(self.collection.find(query))
             # Convertir ObjectId a string
             for plan in plans:
                 plan["_id"] = str(plan["_id"])
