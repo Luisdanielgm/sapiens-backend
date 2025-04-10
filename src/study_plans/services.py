@@ -678,77 +678,127 @@ class TopicService(VerificationBaseService):
             
             # Procesar recursos externos si existen
             if external_resources and len(external_resources) > 0:
-                # Verificar si existe la carpeta "Recursos de Clases" para el creador del topic
                 # Primero necesitamos obtener el ID del creador (profesor) del plan de estudios
                 # El módulo pertenece a un plan de estudios
                 study_plan = get_db().study_plans_per_subject.find_one({"_id": module.get("study_plan_id")})
                 if study_plan:
                     creator_id = study_plan.get("author_id")
                     if creator_id:
-                        # Buscar carpeta "Recursos de Clases" del profesor
-                        folder_service = ResourceFolderService()
-                        class_resources_folder = None
-                        
-                        folders = get_db().resource_folders.find({
-                            "created_by": creator_id,
-                            "name": "Recursos de Clases"
-                        })
-                        
-                        if folders:
+                        # Buscar el email del creador para obtener su nombre de usuario
+                        creator = get_db().users.find_one({"_id": ObjectId(creator_id)})
+                        if creator and "email" in creator:
+                            # Extraer el nombre de usuario del email (parte antes del @)
+                            email = creator.get("email")
+                            user_name = email.split('@')[0] if email else 'user'
+                            
+                            # Inicializar servicios
+                            folder_service = ResourceFolderService()
+                            
+                            # 1. Verificar si existe una carpeta raíz con el nombre del usuario
+                            root_folder = None
+                            folders = get_db().resource_folders.find({
+                                "created_by": ObjectId(creator_id),
+                                "name": user_name,
+                                "parent_id": None
+                            })
+                            
                             folders_list = list(folders)
                             if folders_list:
-                                class_resources_folder = folders_list[0]
-                        
-                        # Si no existe la carpeta, crearla
-                        if not class_resources_folder:
-                            folder_data = {
-                                "name": "Recursos de Clases",
-                                "created_by": str(creator_id),
-                                "description": "Recursos utilizados en clases y temas"
-                            }
-                            success, folder_id = folder_service.create_folder(folder_data)
-                            if success:
-                                class_resources_folder_id = folder_id
+                                root_folder = folders_list[0]
+                            
+                            # Si no existe la carpeta raíz, crearla
+                            if not root_folder:
+                                root_folder_data = {
+                                    "name": user_name,
+                                    "created_by": str(creator_id),
+                                    "description": "Carpeta personal del usuario"
+                                }
+                                success, root_folder_id = folder_service.create_folder(root_folder_data)
+                                if not success:
+                                    logging.error(f"Error al crear carpeta raíz del usuario: {root_folder_id}")
+                                    root_folder_id = None
                             else:
-                                logging.error(f"Error al crear carpeta de recursos: {folder_id}")
-                                class_resources_folder_id = None
-                        else:
-                            class_resources_folder_id = str(class_resources_folder["_id"])
-                        
-                        # Crear recursos y vincularlos al tema
-                        resource_service = ResourceService()
-                        topic_resource_service = TopicResourceService()
-                        
-                        for resource_data in external_resources:
-                            # Preparar datos del recurso
-                            resource_to_create = {
-                                "name": resource_data.get("title", "Recurso sin título"),
-                                "type": resource_data.get("resource_type", "link"),
-                                "url": resource_data.get("url", ""),
-                                "description": resource_data.get("description", ""),
-                                "tags": resource_data.get("tags", []),
-                                "created_by": str(creator_id)
-                            }
+                                root_folder_id = str(root_folder["_id"])
                             
-                            # Añadir la carpeta si existe
-                            if class_resources_folder_id:
-                                resource_to_create["folder_id"] = class_resources_folder_id
+                            # 2. Ahora buscar/crear la subcarpeta "Recursos de Clases"
+                            class_resources_folder = None
                             
-                            # Crear el recurso
-                            success, resource_id = resource_service.create_resource(resource_to_create)
-                            if success:
-                                # Vincular recurso al tema
-                                link_success, _ = topic_resource_service.link_resource_to_topic(
-                                    topic_id=topic_id,
-                                    resource_id=resource_id,
-                                    relevance_score=resource_data.get("relevance_score", 0.7),
-                                    recommended_for=resource_data.get("recommended_for", []),
-                                    usage_context=resource_data.get("usage_context", "primary"),
-                                    content_types=resource_data.get("content_types", ["multimedia"]),
-                                    created_by=str(creator_id)
-                                )
-                                if not link_success:
-                                    logging.error(f"Error al vincular recurso {resource_id} al tema {topic_id}")
+                            if root_folder_id:
+                                # Buscar subcarpeta "Recursos de Clases" dentro de la carpeta raíz
+                                folders = get_db().resource_folders.find({
+                                    "created_by": ObjectId(creator_id),
+                                    "name": "Recursos de Clases",
+                                    "parent_id": ObjectId(root_folder_id)
+                                })
+                                
+                                folders_list = list(folders)
+                                if folders_list:
+                                    class_resources_folder = folders_list[0]
+                            
+                            # Si no existe la carpeta de recursos, crearla como subcarpeta
+                            if not class_resources_folder and root_folder_id:
+                                folder_data = {
+                                    "name": "Recursos de Clases",
+                                    "created_by": str(creator_id),
+                                    "description": "Recursos utilizados en clases y temas",
+                                    "parent_id": root_folder_id
+                                }
+                                success, folder_id = folder_service.create_folder(folder_data)
+                                if success:
+                                    class_resources_folder_id = folder_id
+                                else:
+                                    logging.error(f"Error al crear carpeta de recursos: {folder_id}")
+                                    class_resources_folder_id = None
+                            elif class_resources_folder:
+                                class_resources_folder_id = str(class_resources_folder["_id"])
+                            else:
+                                # Si no hay carpeta raíz, crear la carpeta de recursos directamente
+                                folder_data = {
+                                    "name": "Recursos de Clases",
+                                    "created_by": str(creator_id),
+                                    "description": "Recursos utilizados en clases y temas"
+                                }
+                                success, folder_id = folder_service.create_folder(folder_data)
+                                if success:
+                                    class_resources_folder_id = folder_id
+                                else:
+                                    logging.error(f"Error al crear carpeta de recursos: {folder_id}")
+                                    class_resources_folder_id = None
+                            
+                            # Crear recursos y vincularlos al tema
+                            resource_service = ResourceService()
+                            topic_resource_service = TopicResourceService()
+                            
+                            for resource_data in external_resources:
+                                # Preparar datos del recurso
+                                resource_to_create = {
+                                    "name": resource_data.get("title", "Recurso sin título"),
+                                    "type": resource_data.get("resource_type", "link"),
+                                    "url": resource_data.get("url", ""),
+                                    "description": resource_data.get("description", ""),
+                                    "tags": resource_data.get("tags", []),
+                                    "created_by": str(creator_id)
+                                }
+                                
+                                # Añadir la carpeta si existe
+                                if class_resources_folder_id:
+                                    resource_to_create["folder_id"] = class_resources_folder_id
+                                
+                                # Crear el recurso
+                                success, resource_id = resource_service.create_resource(resource_to_create)
+                                if success:
+                                    # Vincular recurso al tema
+                                    link_success, _ = topic_resource_service.link_resource_to_topic(
+                                        topic_id=topic_id,
+                                        resource_id=resource_id,
+                                        relevance_score=resource_data.get("relevance_score", 0.7),
+                                        recommended_for=resource_data.get("recommended_for", []),
+                                        usage_context=resource_data.get("usage_context", "primary"),
+                                        content_types=resource_data.get("content_types", ["multimedia"]),
+                                        created_by=str(creator_id)
+                                    )
+                                    if not link_success:
+                                        logging.error(f"Error al vincular recurso {resource_id} al tema {topic_id}")
             
             return True, topic_id
         except Exception as e:
