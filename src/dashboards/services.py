@@ -145,7 +145,12 @@ class TeacherDashboardService(BaseService):
                 return TeacherDashboard(
                     teacher_id=teacher_id,
                     classes=[],
-                    overall_metrics={}
+                    overall_metrics={
+                        "total_classes": 0,
+                        "total_students": 0,
+                        "average_attendance": 0,
+                        "average_evaluation_score": 0
+                    }
                 ).to_dict()
             
             # Extraer IDs de clases donde el profesor es miembro
@@ -161,53 +166,82 @@ class TeacherDashboardService(BaseService):
                 
             # Métricas por clase
             class_metrics = []
+            
+            # Procesar cada clase
             for cls in classes:
                 class_id = str(cls["_id"])
-                logger.info(f"Procesando clase con ID: {class_id}, nombre: {cls.get('name', 'Sin nombre')}")
+                class_name = cls.get("name", "Sin nombre")
+                logger.info(f"Procesando clase con ID: {class_id}, nombre: {class_name}")
                 
-                stats = self.class_analytics_service.get_class_analytics(class_id)
-                logger.info(f"Estadísticas obtenidas para la clase {class_id}: {stats is not None}")
-                
-                if stats:
-                    class_data = {
-                        "class_id": class_id,
-                        "class_name": cls.get("name", "Sin nombre"),
-                        "metrics": stats
+                # Siempre añadir la clase al dashboard con información básica
+                class_data = {
+                    "class_id": class_id,
+                    "class_name": class_name,
+                    "metrics": {
+                        "student_count": 0,
+                        "attendance_stats": {"average_rate": 0},
+                        "evaluation_stats": {"average_score": 0}
                     }
-                    class_metrics.append(class_data)
-                    logger.info(f"Añadida clase al dashboard: {class_data['class_name']}")
-                else:
-                    logger.warning(f"No se pudieron obtener estadísticas para la clase {class_id}")
-                    # Añadir clase con métricas mínimas si no hay estadísticas disponibles
-                    class_metrics.append({
-                        "class_id": class_id,
-                        "class_name": cls.get("name", "Sin nombre"),
-                        "metrics": {
-                            "attendance_rate": 0,
-                            "avg_score": 0,
-                            "student_count": 0
-                        }
-                    })
-                    logger.info(f"Añadida clase con métricas mínimas: {cls.get('name', 'Sin nombre')}")
+                }
+                
+                # Intentar obtener estadísticas más detalladas
+                try:
+                    stats = self.class_analytics_service.get_class_analytics(class_id)
+                    if stats and isinstance(stats, dict):
+                        logger.info(f"Estadísticas obtenidas para la clase {class_id}")
+                        class_data["metrics"] = stats
+                    else:
+                        logger.warning(f"No se pudieron obtener estadísticas completas para la clase {class_id}")
+                except Exception as e:
+                    logger.error(f"Error obteniendo estadísticas para la clase {class_id}: {str(e)}")
+                
+                # Añadir la clase al dashboard
+                class_metrics.append(class_data)
+                logger.info(f"Añadida clase al dashboard: {class_name}")
             
             logger.info(f"Total de clases procesadas para el dashboard: {len(class_metrics)}")
             
             # Métricas generales
-            total_metrics_classes = len(class_metrics)
+            total_students = 0
             average_attendance = 0
             average_score = 0
             
-            if total_metrics_classes > 0:
-                attendance_sum = sum(m.get("metrics", {}).get("attendance_stats", {}).get("average_rate", 0) 
-                                    for m in class_metrics)
-                score_sum = sum(m.get("metrics", {}).get("evaluation_stats", {}).get("average_score", 0) 
-                               for m in class_metrics)
-                average_attendance = round(attendance_sum / total_metrics_classes, 2)
-                average_score = round(score_sum / total_metrics_classes, 2)
+            if class_metrics:
+                try:
+                    # Contar estudiantes totales
+                    for m in class_metrics:
+                        students_count = m.get("metrics", {}).get("student_count", 0)
+                        total_students += students_count
+                    
+                    # Calcular promedios
+                    attendance_values = []
+                    score_values = []
+                    
+                    for m in class_metrics:
+                        metrics = m.get("metrics", {})
+                        
+                        # Obtener tasa de asistencia
+                        attendance_rate = metrics.get("attendance_stats", {}).get("average_rate", 0)
+                        if attendance_rate > 0:
+                            attendance_values.append(attendance_rate)
+                        
+                        # Obtener puntaje promedio
+                        avg_score = metrics.get("evaluation_stats", {}).get("average_score", 0)
+                        if avg_score > 0:
+                            score_values.append(avg_score)
+                    
+                    # Calcular promedio general
+                    if attendance_values:
+                        average_attendance = round(sum(attendance_values) / len(attendance_values), 2)
+                    
+                    if score_values:
+                        average_score = round(sum(score_values) / len(score_values), 2)
+                except Exception as e:
+                    logger.error(f"Error calculando métricas generales: {str(e)}")
             
             overall_metrics = {
                 "total_classes": len(classes),
-                "total_students": sum(m.get("metrics", {}).get("student_count", 0) for m in class_metrics),
+                "total_students": total_students,
                 "average_attendance": average_attendance,
                 "average_evaluation_score": average_score
             }
@@ -222,6 +256,13 @@ class TeacherDashboardService(BaseService):
             
             # Guardar dashboard para historial/referencia
             dashboard_dict = dashboard.to_dict()
+            
+            # Verificación final para asegurar que las clases estén incluidas
+            if len(dashboard_dict.get("classes", [])) != len(class_metrics):
+                logger.warning(f"Discrepancia en el número de clases. Esperadas: {len(class_metrics)}, Obtenidas: {len(dashboard_dict.get('classes', []))}")
+                # Forzar la inclusión si hay discrepancia
+                dashboard_dict["classes"] = class_metrics
+            
             self.collection.insert_one(dashboard_dict)
             
             logger.info(f"Dashboard generado con {len(dashboard_dict.get('classes', []))} clases")
@@ -230,7 +271,18 @@ class TeacherDashboardService(BaseService):
         except Exception as e:
             logger = logging.getLogger(__name__)
             logger.error(f"Error generando dashboard de profesor: {str(e)}", exc_info=True)
-            return None
+            # Devolver un dashboard mínimo para evitar errores
+            return {
+                "teacher_id": str(teacher_id),
+                "classes": [],
+                "overall_metrics": {
+                    "total_classes": 0,
+                    "total_students": 0,
+                    "average_attendance": 0,
+                    "average_evaluation_score": 0
+                },
+                "created_at": datetime.now()
+            }
 
 
 class StudentDashboardService(BaseService):

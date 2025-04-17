@@ -1,6 +1,7 @@
 from typing import Tuple, List, Dict, Optional
 from bson import ObjectId
 from datetime import datetime, timedelta
+import logging
 
 from src.shared.database import get_db
 from src.shared.constants import COLLECTIONS, ROLES
@@ -107,10 +108,37 @@ class ClassAnalyticsService(BaseService):
 
     def get_class_analytics(self, class_id: str) -> Optional[Dict]:
         try:
+            logger = logging.getLogger(__name__)
+            logger.info(f"Solicitando analytics para clase: {class_id}")
+            
+            # Verificar formato del ID
+            if not ObjectId.is_valid(class_id):
+                logger.error(f"ID de clase inválido: {class_id}")
+                return {
+                    "student_count": 0,
+                    "attendance_stats": {"average_rate": 0},
+                    "evaluation_stats": {"average_score": 0},
+                    "participation_stats": {},
+                    "time_trends": {},
+                    "improvement_areas": [],
+                    "strength_areas": []
+                }
+            
             # Verificar si existe la clase
             class_data = self.db.classes.find_one({"_id": ObjectId(class_id)})
             if not class_data:
-                return None
+                logger.error(f"No se encontró la clase con ID: {class_id}")
+                return {
+                    "student_count": 0,
+                    "attendance_stats": {"average_rate": 0},
+                    "evaluation_stats": {"average_score": 0},
+                    "participation_stats": {},
+                    "time_trends": {},
+                    "improvement_areas": [],
+                    "strength_areas": []
+                }
+            
+            logger.info(f"Clase encontrada: {class_data.get('name')}")
 
             # Obtener todos los estudiantes de la clase
             students = list(self.db.class_members.find({
@@ -118,33 +146,39 @@ class ClassAnalyticsService(BaseService):
                 "role": "STUDENT"
             }))
             student_ids = [s["user_id"] for s in students]
+            logger.info(f"Encontrados {len(student_ids)} estudiantes en la clase")
 
-            # Si no hay estudiantes, retornar estadísticas vacías
+            # Si no hay estudiantes, retornar estadísticas básicas
             if not student_ids:
-                return ClassStatistics(
-                    class_id=class_id,
-                    student_count=0,
-                    attendance_stats={},
-                    evaluation_stats={},
-                    participation_stats={},
-                    time_trends={},
-                    improvement_areas=[],
-                    strength_areas=[],
-                    timestamp=datetime.now()
-                ).to_dict()
+                logger.warning(f"No hay estudiantes en la clase {class_id}")
+                return {
+                    "student_count": 0,
+                    "attendance_stats": {"average_rate": 0},
+                    "evaluation_stats": {"average_score": 0},
+                    "participation_stats": {},
+                    "time_trends": {},
+                    "improvement_areas": [],
+                    "strength_areas": []
+                }
 
             # Obtener todas las evaluaciones
             evaluations = list(self.db.evaluations.find({"class_id": ObjectId(class_id)}))
             evaluation_ids = [e["_id"] for e in evaluations]
+            logger.info(f"Encontradas {len(evaluation_ids)} evaluaciones para la clase")
 
             # Obtener resultados de evaluaciones
             evaluation_results = list(self.db.evaluation_results.find({
                 "evaluation_id": {"$in": evaluation_ids}
             }))
+            logger.info(f"Encontrados {len(evaluation_results)} resultados de evaluaciones")
 
             # Calcular estadísticas
             attendance_stats = self._calculate_attendance_stats(class_id, student_ids)
+            logger.info(f"Estadísticas de asistencia calculadas: {attendance_stats}")
+            
             evaluation_stats = self._calculate_evaluation_stats(evaluation_results, evaluations)
+            logger.info(f"Estadísticas de evaluaciones calculadas: {evaluation_stats}")
+            
             participation_stats = self._calculate_participation_stats(class_id, student_ids)
             time_trends = self._calculate_time_trends(class_id, student_ids)
 
@@ -153,30 +187,40 @@ class ClassAnalyticsService(BaseService):
                 evaluation_stats, attendance_stats, participation_stats
             )
 
-            # Crear y almacenar las estadísticas
-            stats = ClassStatistics(
-                class_id=class_id,
-                student_count=len(student_ids),
-                attendance_stats=attendance_stats,
-                evaluation_stats=evaluation_stats,
-                participation_stats=participation_stats,
-                time_trends=time_trends,
-                improvement_areas=improvement_areas,
-                strength_areas=strength_areas,
-                timestamp=datetime.now()
-            )
-
+            # Crear y retornar las estadísticas
+            stats = {
+                "student_count": len(student_ids),
+                "attendance_stats": attendance_stats,
+                "evaluation_stats": evaluation_stats,
+                "participation_stats": participation_stats,
+                "time_trends": time_trends,
+                "improvement_areas": improvement_areas,
+                "strength_areas": strength_areas
+            }
+            
+            logger.info(f"Estadísticas completas generadas para clase {class_id}")
+            
             # Actualizar o insertar en la base de datos
             self.collection.update_one(
                 {"class_id": ObjectId(class_id)},
-                {"$set": stats.to_dict()},
+                {"$set": stats},
                 upsert=True
             )
 
-            return stats.to_dict()
+            return stats
         except Exception as e:
-            print(f"Error al calcular analíticas de clase: {str(e)}")
-            return None
+            logger = logging.getLogger(__name__)
+            logger.error(f"Error al calcular analíticas de clase {class_id}: {str(e)}", exc_info=True)
+            # Retornar un conjunto mínimo de estadísticas para evitar errores en cascada
+            return {
+                "student_count": 0,
+                "attendance_stats": {"average_rate": 0},
+                "evaluation_stats": {"average_score": 0},
+                "participation_stats": {},
+                "time_trends": {},
+                "improvement_areas": [],
+                "strength_areas": []
+            }
 
     def _calculate_attendance_stats(self, class_id: str, student_ids: List[ObjectId]) -> Dict:
         """
