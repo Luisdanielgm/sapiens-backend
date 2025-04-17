@@ -56,12 +56,23 @@ class AdminDashboardService(BaseService):
                     "foreignField": "_id",
                     "as": "institute_info"
                 }},
+                {"$unwind": "$institute_info"},  # Desestructurar el array para acceder a sus elementos directamente
                 {"$project": {
                     "institute_id": "$_id",
-                    "name": {"$arrayElemAt": ["$institute_info.name", 0]},
+                    "name": "$institute_info.name",  # Ahora podemos acceder directamente al nombre
                     "classes_count": "$count"
                 }}
             ]))
+            
+            # Si por alguna razón hay menos de 5 institutos con clases, completar información
+            if len(top_institutes) > 0:
+                # Verificar que todos los institutos tengan nombre
+                for institute in top_institutes:
+                    if "name" not in institute or not institute["name"]:
+                        # Buscar el nombre del instituto en la colección
+                        institute_info = self.db.institutes.find_one({"_id": institute["institute_id"]})
+                        if institute_info:
+                            institute["name"] = institute_info.get("name", "Sin nombre")
             
             # Métricas de rendimiento promedio por instituto
             institutes_performance = list(self.db.institutes.aggregate([
