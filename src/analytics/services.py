@@ -304,33 +304,215 @@ class ClassAnalyticsService(BaseService):
             Dict: Estadísticas de participación
         """
         try:
-            # Aquí se implementaría la lógica para calcular la participación
-            # basada en interacciones, comentarios, entregas, etc.
+            logger = logging.getLogger(__name__)
+            logger.info(f"Calculando estadísticas de participación para clase {class_id}")
             
-            # Ejemplo simplificado:
-            participation_data = {
-                "average_rate": 65.5,  # Porcentaje promedio de participación
-                "distribution": {
-                    "Alta": 40,  # 40% de estudiantes con alta participación
-                    "Media": 35,  # 35% de estudiantes con participación media
-                    "Baja": 25    # 25% de estudiantes con baja participación
-                },
-                "per_activity_type": {
-                    "Comentarios": 72.3,
-                    "Entregas": 85.1,
-                    "Preguntas": 45.8,
-                    "Trabajo colaborativo": 58.7
+            if not student_ids:
+                return {
+                    "average_rate": 0,
+                    "distribution": {},
+                    "per_activity_type": {}
                 }
+            
+            # Obtener datos de participación de la base de datos
+            # Busca comentarios, entregas, preguntas, etc.
+            comments = list(self.db.comments.find({
+                "class_id": ObjectId(class_id),
+                "user_id": {"$in": student_ids}
+            }))
+            
+            submissions = list(self.db.submissions.find({
+                "class_id": ObjectId(class_id),
+                "student_id": {"$in": student_ids}
+            }))
+            
+            questions = list(self.db.questions.find({
+                "class_id": ObjectId(class_id),
+                "user_id": {"$in": student_ids}
+            }))
+            
+            # Contar participaciones por estudiante
+            participation_counts = {}
+            for student_id in student_ids:
+                student_comments = sum(1 for c in comments if c.get("user_id") == student_id)
+                student_submissions = sum(1 for s in submissions if s.get("student_id") == student_id)
+                student_questions = sum(1 for q in questions if q.get("user_id") == student_id)
+                
+                participation_counts[str(student_id)] = {
+                    "comments": student_comments,
+                    "submissions": student_submissions,
+                    "questions": student_questions,
+                    "total": student_comments + student_submissions + student_questions
+                }
+            
+            # Si no hay datos de participación, devolver valores en cero
+            if not comments and not submissions and not questions:
+                return {
+                    "average_rate": 0,
+                    "distribution": {},
+                    "per_activity_type": {}
+                }
+            
+            # Calcular promedio de participación
+            total_participation = sum(counts["total"] for counts in participation_counts.values())
+            average_participation = total_participation / len(student_ids) if student_ids else 0
+            
+            # Calcular tasa promedio (normalizar a un valor entre 0-100)
+            # Asumiendo que un valor "bueno" sería 5 interacciones por estudiante
+            max_expected = 5 * len(student_ids)
+            average_rate = min(100, (total_participation / max_expected * 100)) if max_expected > 0 else 0
+            
+            # Calcular distribución
+            participation_levels = {
+                "Alta": 0,
+                "Media": 0,
+                "Baja": 0
             }
             
-            return participation_data
+            for counts in participation_counts.values():
+                if counts["total"] >= 5:
+                    participation_levels["Alta"] += 1
+                elif counts["total"] >= 2:
+                    participation_levels["Media"] += 1
+                else:
+                    participation_levels["Baja"] += 1
+            
+            # Convertir a porcentajes
+            total_students = len(student_ids)
+            distribution = {}
+            if total_students > 0:
+                for level, count in participation_levels.items():
+                    distribution[level] = round((count / total_students) * 100, 1)
+            
+            # Calcular participación por tipo de actividad
+            total_comments = len(comments)
+            total_submissions = len(submissions)
+            total_questions = len(questions)
+            total_activities = total_comments + total_submissions + total_questions
+            
+            per_activity_type = {}
+            if total_activities > 0:
+                per_activity_type = {
+                    "Comentarios": round((total_comments / total_activities) * 100, 1),
+                    "Entregas": round((total_submissions / total_activities) * 100, 1),
+                    "Preguntas": round((total_questions / total_activities) * 100, 1)
+                }
+            
+            return {
+                "average_rate": round(average_rate, 1),
+                "distribution": distribution,
+                "per_activity_type": per_activity_type
+            }
             
         except Exception as e:
-            print(f"Error al calcular estadísticas de participación: {str(e)}")
+            logger = logging.getLogger(__name__)
+            logger.error(f"Error al calcular estadísticas de participación: {str(e)}", exc_info=True)
             return {
                 "average_rate": 0,
                 "distribution": {},
                 "per_activity_type": {}
+            }
+            
+    def _calculate_time_trends(self, class_id: str, student_ids: List[ObjectId]) -> Dict:
+        """
+        Calcula tendencias temporales para la clase.
+        
+        Args:
+            class_id: ID de la clase
+            student_ids: Lista de IDs de estudiantes
+            
+        Returns:
+            Dict: Tendencias temporales
+        """
+        try:
+            logger = logging.getLogger(__name__)
+            logger.info(f"Calculando tendencias temporales para clase {class_id}")
+            
+            if not student_ids:
+                return {
+                    "weekly_engagement": [],
+                    "monthly_performance": []
+                }
+            
+            # Obtener datos reales para calcular tendencias temporales
+            
+            # 1. Obtener datos de engagement (asistencia, participación, etc.)
+            # de las últimas semanas
+            engagement_data = []
+            
+            # Buscar asistencia por semana
+            now = datetime.now()
+            four_weeks_ago = now - timedelta(weeks=4)
+            
+            # Agrupar registros de asistencia por semana
+            attendance_records = list(self.db.attendance.find({
+                "class_id": ObjectId(class_id),
+                "date": {"$gte": four_weeks_ago}
+            }).sort("date", 1))
+            
+            # Organizar por semana (usando el número ISO de la semana)
+            weekly_attendance = {}
+            for record in attendance_records:
+                date = record.get("date", now)
+                week_key = date.strftime("%Y-W%W")
+                present_count = len(record.get("present_students", []))
+                attendance_rate = (present_count / len(student_ids)) * 100 if student_ids else 0
+                
+                if week_key not in weekly_attendance:
+                    weekly_attendance[week_key] = []
+                weekly_attendance[week_key].append(attendance_rate)
+            
+            # Calcular promedio por semana
+            weekly_engagement = []
+            for week, rates in weekly_attendance.items():
+                avg_rate = sum(rates) / len(rates) if rates else 0
+                weekly_engagement.append({
+                    "week": week,
+                    "value": round(avg_rate, 1)
+                })
+            
+            # 2. Obtener datos de rendimiento mensual (evaluaciones)
+            monthly_performance = []
+            
+            # Buscar evaluaciones por mes en los últimos 3 meses
+            three_months_ago = now - timedelta(days=90)
+            
+            evaluation_results = list(self.db.evaluation_results.find({
+                "class_id": ObjectId(class_id),
+                "student_id": {"$in": student_ids},
+                "date": {"$gte": three_months_ago}
+            }).sort("date", 1))
+            
+            # Organizar por mes
+            monthly_scores = {}
+            for result in evaluation_results:
+                date = result.get("date", now)
+                month_key = date.strftime("%Y-%m")
+                score = result.get("score", 0)
+                
+                if month_key not in monthly_scores:
+                    monthly_scores[month_key] = []
+                monthly_scores[month_key].append(score)
+            
+            # Calcular promedio por mes
+            for month, scores in monthly_scores.items():
+                avg_score = sum(scores) / len(scores) if scores else 0
+                monthly_performance.append({
+                    "month": month,
+                    "value": round(avg_score, 1)
+                })
+            
+            return {
+                "weekly_engagement": weekly_engagement,
+                "monthly_performance": monthly_performance
+            }
+            
+        except Exception as e:
+            logger = logging.getLogger(__name__)
+            logger.error(f"Error al calcular tendencias temporales: {str(e)}", exc_info=True)
+            return {
+                "weekly_engagement": [],
+                "monthly_performance": []
             }
             
     def _calculate_evaluation_stats(self, evaluation_results: List[Dict], evaluations: List[Dict]) -> Dict:
@@ -405,45 +587,6 @@ class ClassAnalyticsService(BaseService):
                 "distribution": {},
                 "per_evaluation": [],
                 "passing_rate": 0
-            }
-            
-    def _calculate_time_trends(self, class_id: str, student_ids: List[ObjectId]) -> Dict:
-        """
-        Calcula tendencias temporales para la clase.
-        
-        Args:
-            class_id: ID de la clase
-            student_ids: Lista de IDs de estudiantes
-            
-        Returns:
-            Dict: Tendencias temporales
-        """
-        try:
-            # Aquí se implementaría la lógica para calcular tendencias temporales
-            # basadas en diferentes métricas a lo largo del tiempo
-            
-            # Ejemplo simplificado:
-            time_trends = {
-                "weekly_engagement": [
-                    {"week": "2023-W01", "value": 72.5},
-                    {"week": "2023-W02", "value": 68.3},
-                    {"week": "2023-W03", "value": 75.1},
-                    {"week": "2023-W04", "value": 79.4}
-                ],
-                "monthly_performance": [
-                    {"month": "2023-01", "value": 70.2},
-                    {"month": "2023-02", "value": 72.8},
-                    {"month": "2023-03", "value": 74.5}
-                ]
-            }
-            
-            return time_trends
-            
-        except Exception as e:
-            print(f"Error al calcular tendencias temporales: {str(e)}")
-            return {
-                "weekly_engagement": [],
-                "monthly_performance": []
             }
             
     def _identify_areas(self, evaluation_stats: Dict, attendance_stats: Dict, participation_stats: Dict) -> Tuple[List[Dict], List[Dict]]:
@@ -912,23 +1055,75 @@ class StudentSubjectsAnalyticsService(BaseService):
             Dict: Métricas de progreso
         """
         try:
-            # Aquí se implementaría la lógica para calcular el progreso del estudiante
-            # basado en tópicos cubiertos, evaluaciones completadas, etc.
+            logger = logging.getLogger(__name__)
+            logger.info(f"Calculando métricas de progreso para estudiante {student_id} en clase {class_id}")
             
-            # Ejemplo simplificado:
-            total_topics = 10
-            covered_topics = 7
+            # Convertir a ObjectId si es una cadena
+            student_oid = ObjectId(student_id) if isinstance(student_id, str) else student_id
+            
+            # Obtener tópicos o unidades del curso
+            topics = list(self.db.topics.find({
+                "class_id": class_id
+            }))
+            
+            total_topics = len(topics)
+            if total_topics == 0:
+                return {
+                    "completion_percentage": 0,
+                    "completed_topics": 0,
+                    "total_topics": 0,
+                    "pending_evaluations": 0,
+                    "overall_progress": 0
+                }
+            
+            # Determinar tópicos completados basados en progress_tracking
+            progress_records = list(self.db.progress_tracking.find({
+                "class_id": class_id,
+                "student_id": student_oid
+            }))
+            
+            # Contar tópicos completados
+            completed_topic_ids = set()
+            for record in progress_records:
+                if record.get("status") == "completed":
+                    completed_topic_ids.add(record.get("topic_id"))
+            
+            completed_topics = len(completed_topic_ids)
+            
+            # Calcular evaluaciones pendientes
+            total_evaluations = len(evaluations)
+            completed_evaluations = len(list(self.db.evaluation_results.find({
+                "class_id": class_id,
+                "student_id": student_oid,
+                "status": "completed"
+            })))
+            
+            pending_evaluations = total_evaluations - completed_evaluations
+            
+            # Calcular porcentaje de completitud
+            completion_percentage = (completed_topics / total_topics) * 100 if total_topics > 0 else 0
+            
+            # Calcular progreso general
+            # Podemos usar una fórmula que combine completitud de tópicos y evaluaciones
+            eval_weight = 0.4
+            topic_weight = 0.6
+            
+            eval_progress = (completed_evaluations / total_evaluations) * 100 if total_evaluations > 0 else 0
+            topic_progress = completion_percentage
+            
+            overall_progress = (eval_progress * eval_weight) + (topic_progress * topic_weight)
             
             return {
-                "completion_percentage": (covered_topics / total_topics) * 100 if total_topics > 0 else 0,
-                "completed_topics": covered_topics,
+                "completion_percentage": round(completion_percentage, 1),
+                "completed_topics": completed_topics,
                 "total_topics": total_topics,
-                "pending_evaluations": 2,
-                "overall_progress": 70.5  # Porcentaje general de progreso
+                "pending_evaluations": pending_evaluations,
+                "overall_progress": round(overall_progress, 1)
             }
             
         except Exception as e:
-            print(f"Error al calcular métricas de progreso: {str(e)}")
+            logger = logging.getLogger(__name__)
+            logger.error(f"Error al calcular métricas de progreso: {str(e)}", exc_info=True)
             return {
                 "completion_percentage": 0,
                 "completed_topics": 0,
@@ -986,19 +1181,89 @@ class StudentSubjectsAnalyticsService(BaseService):
             Dict: Comparativa con el promedio de la clase
         """
         try:
-            # Aquí se implementaría la lógica para comparar el rendimiento
-            # del estudiante con el promedio de la clase
+            logger = logging.getLogger(__name__)
+            logger.info(f"Comparando rendimiento de estudiante {student_id} con promedio de clase {class_id}")
             
-            # Ejemplo simplificado:
+            # Convertir a ObjectId si es una cadena
+            student_oid = ObjectId(student_id) if isinstance(student_id, str) else student_id
+            
+            # 1. Obtener miembros de la clase (estudiantes)
+            class_members = list(self.db.class_members.find({
+                "class_id": class_id,
+                "role": "STUDENT"
+            }))
+            
+            student_ids = [m["user_id"] for m in class_members]
+            
+            if not student_ids or student_oid not in student_ids:
+                return {
+                    "performance_difference": 0,
+                    "attendance_difference": 0,
+                    "overall_difference": 0,
+                    "percentile": 0
+                }
+            
+            # 2. Calcular rendimiento promedio de la clase (evaluaciones)
+            evaluation_results = list(self.db.evaluation_results.find({
+                "class_id": class_id,
+                "student_id": {"$in": student_ids}
+            }))
+            
+            # Rendimiento del estudiante
+            student_results = [r for r in evaluation_results if r.get("student_id") == student_oid]
+            student_scores = [r.get("score", 0) for r in student_results]
+            student_performance = sum(student_scores) / len(student_scores) if student_scores else 0
+            
+            # Rendimiento de la clase
+            all_scores = [r.get("score", 0) for r in evaluation_results]
+            class_performance = sum(all_scores) / len(all_scores) if all_scores else 0
+            
+            # 3. Calcular asistencia promedio
+            attendance_records = list(self.db.attendance.find({
+                "class_id": class_id
+            }))
+            
+            # Asistencia del estudiante
+            student_attendance_count = sum(1 for record in attendance_records if student_oid in record.get("present_students", []))
+            student_attendance_rate = (student_attendance_count / len(attendance_records)) * 100 if attendance_records else 0
+            
+            # Asistencia de la clase
+            total_attendance = sum(len(record.get("present_students", [])) for record in attendance_records)
+            class_attendance_rate = (total_attendance / (len(attendance_records) * len(student_ids))) * 100 if attendance_records and student_ids else 0
+            
+            # 4. Calcular diferencias
+            performance_difference = student_performance - class_performance
+            attendance_difference = student_attendance_rate - class_attendance_rate
+            
+            # Diferencia general (ponderada)
+            overall_difference = (performance_difference * 0.7) + (attendance_difference * 0.3)
+            
+            # 5. Calcular percentil
+            if student_scores and all_scores:
+                # Ordenar todas las puntuaciones
+                all_scores.sort()
+                
+                # Calcular promedio del estudiante
+                student_avg = sum(student_scores) / len(student_scores)
+                
+                # Contar cuántas puntuaciones son menores que la del estudiante
+                below_count = sum(1 for score in all_scores if score < student_avg)
+                
+                # Calcular percentil
+                percentile = (below_count / len(all_scores)) * 100
+            else:
+                percentile = 0
+            
             return {
-                "performance_difference": 5.2,  # Puntos porcentuales por encima del promedio
-                "attendance_difference": -2.1,  # Puntos porcentuales por debajo del promedio
-                "overall_difference": 3.5,      # Diferencia general
-                "percentile": 75                # Percentil del estudiante en la clase
+                "performance_difference": round(performance_difference, 1),
+                "attendance_difference": round(attendance_difference, 1),
+                "overall_difference": round(overall_difference, 1),
+                "percentile": round(percentile, 0)
             }
             
         except Exception as e:
-            print(f"Error al comparar con el promedio de la clase: {str(e)}")
+            logger = logging.getLogger(__name__)
+            logger.error(f"Error al comparar con el promedio de la clase: {str(e)}", exc_info=True)
             return {
                 "performance_difference": 0,
                 "attendance_difference": 0,
