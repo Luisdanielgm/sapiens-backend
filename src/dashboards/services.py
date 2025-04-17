@@ -339,16 +339,34 @@ class StudentDashboardService(BaseService):
             for class_id in class_ids:
                 cls_info = self.db.classes.find_one({"_id": ObjectId(class_id)})
                 if cls_info:
-                    # No requerir period_id para obtener el performance, hacerlo opcional
+                    # Crear estructura básica para la clase que siempre se añadirá
+                    class_data = {
+                        "class_id": class_id,
+                        "class_name": cls_info.get("name", "Sin nombre"),
+                        "performance": {
+                            "metrics": {
+                                "attendance_rate": 0,
+                                "avg_score": 0,
+                                "completion_rate": 0
+                            },
+                            "details": {
+                                "evaluations": [],
+                                "attendance": []
+                            }
+                        }
+                    }
+                    
+                    # Intentar obtener datos de rendimiento detallados
                     performance = self.student_analytics_service.calculate_student_performance(
                         student_id, class_id, period_id
                     )
+                    
+                    # Si hay datos de rendimiento, actualizar la estructura básica
                     if performance:
-                        class_performances.append({
-                            "class_id": class_id,
-                            "class_name": cls_info.get("name", "Sin nombre"),
-                            "performance": performance
-                        })
+                        class_data["performance"] = performance
+                        
+                    # Añadir la clase al array, con o sin datos de rendimiento
+                    class_performances.append(class_data)
                 
             # Obtener análisis por materias
             subjects_analytics = self.student_subjects_analytics_service.get_student_subjects_analytics(
