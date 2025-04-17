@@ -19,7 +19,7 @@ class StudentAnalyticsService(BaseService):
         super().__init__(collection_name="analytics_student_performance")
         self.db = get_db()
 
-    def calculate_student_performance(self, student_id: str, class_id: str, period_id: str) -> Optional[Dict]:
+    def calculate_student_performance(self, student_id: str, class_id: str, period_id: Optional[str] = None) -> Optional[Dict]:
         try:
             # Obtener todas las evaluaciones del estudiante
             evaluations = list(self.db.evaluation_results.find({
@@ -56,12 +56,18 @@ class StudentAnalyticsService(BaseService):
             )
 
             # Guardar los resultados para referencia futura
+            # Construir el filtro adecuadamente cuando period_id es None
+            filter_query = {
+                "student_id": ObjectId(student_id),
+                "class_id": ObjectId(class_id)
+            }
+            
+            # Añadir period_id al filtro solo si está presente
+            if period_id and ObjectId.is_valid(period_id):
+                filter_query["period_id"] = ObjectId(period_id)
+            
             self.collection.update_one(
-                {
-                    "student_id": ObjectId(student_id),
-                    "class_id": ObjectId(class_id),
-                    "period_id": ObjectId(period_id)
-                },
+                filter_query,
                 {"$set": performance.to_dict()},
                 upsert=True
             )

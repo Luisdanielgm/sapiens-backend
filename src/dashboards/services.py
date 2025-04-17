@@ -327,7 +327,8 @@ class StudentDashboardService(BaseService):
             
             for class_id in class_ids:
                 cls_info = self.db.classes.find_one({"_id": ObjectId(class_id)})
-                if cls_info and period_id:
+                if cls_info:
+                    # No requerir period_id para obtener el performance, hacerlo opcional
                     performance = self.student_analytics_service.calculate_student_performance(
                         student_id, class_id, period_id
                     )
