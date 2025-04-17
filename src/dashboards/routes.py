@@ -81,7 +81,7 @@ def get_teacher_dashboard():
                 "Error al generar el dashboard de profesor",
                 status_code=500
             )
-            
+        logging.info(f"Dashboard generado: {dashboard}")
         return APIRoute.success(data={"dashboard": dashboard})
     except Exception as e:
         import traceback
