@@ -157,25 +157,62 @@ class TeacherDashboardService(BaseService):
             }))
             
             logger.info(f"Encontradas {len(classes)} clases para el profesor")
+            logger.info(f"IDs de las clases encontradas: {[str(cls['_id']) for cls in classes]}")
                 
             # Métricas por clase
             class_metrics = []
             for cls in classes:
-                stats = self.class_analytics_service.get_class_analytics(str(cls["_id"]))
+                class_id = str(cls["_id"])
+                logger.info(f"Procesando clase con ID: {class_id}, nombre: {cls.get('name', 'Sin nombre')}")
+                
+                stats = self.class_analytics_service.get_class_analytics(class_id)
+                logger.info(f"Estadísticas obtenidas para la clase {class_id}: {stats is not None}")
+                
                 if stats:
-                    class_metrics.append({
-                        "class_id": str(cls["_id"]),
+                    class_data = {
+                        "class_id": class_id,
                         "class_name": cls.get("name", "Sin nombre"),
                         "metrics": stats
+                    }
+                    class_metrics.append(class_data)
+                    logger.info(f"Añadida clase al dashboard: {class_data['class_name']}")
+                else:
+                    logger.warning(f"No se pudieron obtener estadísticas para la clase {class_id}")
+                    # Añadir clase con métricas mínimas si no hay estadísticas disponibles
+                    class_metrics.append({
+                        "class_id": class_id,
+                        "class_name": cls.get("name", "Sin nombre"),
+                        "metrics": {
+                            "attendance_rate": 0,
+                            "avg_score": 0,
+                            "student_count": 0
+                        }
                     })
-                    
+                    logger.info(f"Añadida clase con métricas mínimas: {cls.get('name', 'Sin nombre')}")
+            
+            logger.info(f"Total de clases procesadas para el dashboard: {len(class_metrics)}")
+            
             # Métricas generales
+            total_metrics_classes = len(class_metrics)
+            average_attendance = 0
+            average_score = 0
+            
+            if total_metrics_classes > 0:
+                attendance_sum = sum(m.get("metrics", {}).get("attendance_stats", {}).get("average_rate", 0) 
+                                    for m in class_metrics)
+                score_sum = sum(m.get("metrics", {}).get("evaluation_stats", {}).get("average_score", 0) 
+                               for m in class_metrics)
+                average_attendance = round(attendance_sum / total_metrics_classes, 2)
+                average_score = round(score_sum / total_metrics_classes, 2)
+            
             overall_metrics = {
                 "total_classes": len(classes),
-                "total_students": len(class_metrics),
-                "average_attendance": sum(m.get("metrics", {}).get("attendance_rate", 0) for m in class_metrics) / len(class_metrics) if class_metrics else 0,
-                "average_evaluation_score": sum(m.get("metrics", {}).get("avg_score", 0) for m in class_metrics) / len(class_metrics) if class_metrics else 0
+                "total_students": sum(m.get("metrics", {}).get("student_count", 0) for m in class_metrics),
+                "average_attendance": average_attendance,
+                "average_evaluation_score": average_score
             }
+            
+            logger.info(f"Métricas generales calculadas: {overall_metrics}")
                 
             dashboard = TeacherDashboard(
                 teacher_id=teacher_id,
@@ -184,11 +221,15 @@ class TeacherDashboardService(BaseService):
             )
             
             # Guardar dashboard para historial/referencia
-            self.collection.insert_one(dashboard.to_dict())
+            dashboard_dict = dashboard.to_dict()
+            self.collection.insert_one(dashboard_dict)
+            
+            logger.info(f"Dashboard generado con {len(dashboard_dict.get('classes', []))} clases")
                 
-            return dashboard.to_dict()
+            return dashboard_dict
         except Exception as e:
-            logging.getLogger(__name__).error(f"Error generando dashboard de profesor: {str(e)}")
+            logger = logging.getLogger(__name__)
+            logger.error(f"Error generando dashboard de profesor: {str(e)}", exc_info=True)
             return None
 
 
