@@ -133,18 +133,30 @@ class TeacherDashboardService(BaseService):
         try:
             logger = logging.getLogger(__name__)
             
-            # Obtener clases del profesor
-            classes = list(self.db.classes.find({
-                "teacher_id": ObjectId(teacher_id)
+            # Obtener clases del profesor a través de class_members
+            memberships = list(self.db.class_members.find({
+                "user_id": ObjectId(teacher_id),
+                "role": "TEACHER"
             }))
-            logger.info(f"Encontradas {len(classes)} clases para el profesor")
             
-            if not classes:
+            logger.info(f"Encontradas {len(memberships)} membresías para el profesor")
+            
+            if not memberships:
                 return TeacherDashboard(
                     teacher_id=teacher_id,
                     classes=[],
                     overall_metrics={}
                 ).to_dict()
+            
+            # Extraer IDs de clases donde el profesor es miembro
+            class_ids = [m["class_id"] for m in memberships]
+            
+            # Obtener información de las clases
+            classes = list(self.db.classes.find({
+                "_id": {"$in": class_ids}
+            }))
+            
+            logger.info(f"Encontradas {len(classes)} clases para el profesor")
                 
             # Métricas por clase
             class_metrics = []
