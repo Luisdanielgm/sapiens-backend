@@ -102,46 +102,4 @@ class TeacherAnalytics:
             "feedback_stats": self.feedback_stats,
             "created_at": self.created_at,
             "updated_at": self.updated_at
-        }
-
-class InstituteDashboard:
-    def __init__(self,
-                 institute_id: str,
-                 overview_metrics: Dict[str, int],
-                 programs_stats: List[Dict],
-                 levels_stats: List[Dict],
-                 sections_stats: Dict[str, any],
-                 subjects_stats: Dict[str, any],
-                 periods_stats: Dict[str, any],
-                 classes_stats: Dict[str, any],
-                 teachers_stats: Dict[str, any],
-                 students_stats: Dict[str, any],
-                 timestamp: datetime = None):
-        self.institute_id = ObjectId(institute_id)
-        self.overview_metrics = overview_metrics  # Métricas generales como totales
-        self.programs_stats = programs_stats  # Estadísticas de programas educativos
-        self.levels_stats = levels_stats  # Estadísticas de niveles educativos
-        self.sections_stats = sections_stats  # Estadísticas de secciones
-        self.subjects_stats = subjects_stats  # Estadísticas de materias
-        self.periods_stats = periods_stats  # Estadísticas de períodos académicos
-        self.classes_stats = classes_stats  # Estadísticas de clases
-        self.teachers_stats = teachers_stats  # Estadísticas de profesores
-        self.students_stats = students_stats  # Estadísticas de estudiantes
-        self.timestamp = timestamp or datetime.now()
-        self.created_at = datetime.now()
-
-    def to_dict(self) -> dict:
-        return {
-            "institute_id": str(self.institute_id),
-            "overview_metrics": self.overview_metrics,
-            "programs_stats": self.programs_stats,
-            "levels_stats": self.levels_stats,
-            "sections_stats": self.sections_stats,
-            "subjects_stats": self.subjects_stats,
-            "periods_stats": self.periods_stats,
-            "classes_stats": self.classes_stats,
-            "teachers_stats": self.teachers_stats,
-            "students_stats": self.students_stats,
-            "timestamp": self.timestamp,
-            "created_at": self.created_at
         } 

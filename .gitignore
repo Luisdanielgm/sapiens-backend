@@ -1,6 +1,7 @@
 # Entornos virtuales
 venv/
 .venv/
+docs/
 
 # Archivos de configuración sensibles
 .env

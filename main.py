@@ -35,6 +35,7 @@ from src.virtual.routes import virtual_bp
 from src.invitations.routes import invitations_bp
 from src.members.routes import members_bp
 from src.analytics.routes import analytics_bp
+from src.dashboards.routes import dashboards_bp
 from src.indigenous_languages.routes import indigenous_languages_bp
 from src.profiles.routes import profiles_bp
 from src.student_individual_content.routes import student_individual_content_bp
@@ -202,6 +203,7 @@ def create_app(config_object=active_config):
     app.register_blueprint(invitations_bp, url_prefix='/api/invitations')
     app.register_blueprint(members_bp, url_prefix='/api/members')
     app.register_blueprint(analytics_bp, url_prefix='/api/analytics')
+    app.register_blueprint(dashboards_bp, url_prefix='/api/dashboards')
     app.register_blueprint(indigenous_languages_bp, url_prefix='/api/translations')
     app.register_blueprint(profiles_bp, url_prefix='/api/profiles')
     app.register_blueprint(student_individual_content_bp, url_prefix='/api/student-content')

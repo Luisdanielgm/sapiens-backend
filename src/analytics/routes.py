@@ -8,8 +8,7 @@ from .services import (
     ClassAnalyticsService, 
     EvaluationAnalyticsService, 
     InstituteAnalyticsService, 
-    StudentSubjectsAnalyticsService, 
-    InstituteDashboardService
+    StudentSubjectsAnalyticsService
 )
 from src.shared.standardization import APIBlueprint, APIRoute, ErrorCodes
 from src.shared.decorators import auth_required, role_required, handle_errors, validate_json
@@ -24,14 +23,10 @@ class_analytics_service = ClassAnalyticsService()
 evaluation_analytics_service = EvaluationAnalyticsService()
 institute_analytics_service = InstituteAnalyticsService()
 student_subjects_analytics_service = StudentSubjectsAnalyticsService()
-institute_dashboard_service = InstituteDashboardService()
 
 # Rutas para Análisis de Estudiantes
 @analytics_bp.route('/student/<student_id>/performance', methods=['GET'])
-@APIRoute.standard(
-    auth_required_flag=True,
-    roles=[ROLES["TEACHER"], ROLES["INSTITUTE_ADMIN"]]
-)
+@APIRoute.standard(auth_required_flag=True, roles=[ROLES["TEACHER"], ROLES["INSTITUTE_ADMIN"]])
 def get_student_performance(student_id):
     """Obtiene el rendimiento de un estudiante en una clase específica"""
     class_id = request.args.get('class_id')
@@ -58,10 +53,7 @@ def get_student_performance(student_id):
 
 # Rutas para Análisis de Clases
 @analytics_bp.route('/class/<class_id>/statistics', methods=['GET'])
-@APIRoute.standard(
-    auth_required_flag=True,
-    roles=[ROLES["TEACHER"], ROLES["INSTITUTE_ADMIN"]]
-)
+@APIRoute.standard(auth_required_flag=True, roles=[ROLES["TEACHER"], ROLES["INSTITUTE_ADMIN"]])
 def get_class_statistics(class_id):
     """Obtiene estadísticas generales de una clase"""
     period_id = request.args.get('period_id')
@@ -83,10 +75,7 @@ def get_class_statistics(class_id):
     )
 
 @analytics_bp.route('/evaluation/<evaluation_id>/analytics', methods=['GET'])
-@APIRoute.standard(
-    auth_required_flag=True,
-    roles=[ROLES["TEACHER"]]
-)
+@APIRoute.standard(auth_required_flag=True, roles=[ROLES["TEACHER"]])
 def get_evaluation_analytics(evaluation_id):
     """Obtiene análisis detallado de una evaluación específica"""
     analytics = evaluation_analytics_service.analyze_evaluation(evaluation_id)
@@ -100,10 +89,7 @@ def get_evaluation_analytics(evaluation_id):
     )
 
 @analytics_bp.route('/institute/<institute_id>/statistics', methods=['GET'])
-@APIRoute.standard(
-    auth_required_flag=True,
-    roles=[ROLES["ADMIN"], ROLES["INSTITUTE_ADMIN"]]
-)
+@APIRoute.standard(auth_required_flag=True, roles=[ROLES["ADMIN"], ROLES["INSTITUTE_ADMIN"]])
 def get_institute_statistics(institute_id):
     """Obtiene estadísticas generales de un instituto"""
     statistics = institute_analytics_service.get_institute_statistics(institute_id)
@@ -117,10 +103,7 @@ def get_institute_statistics(institute_id):
     )
 
 @analytics_bp.route('/institute/<institute_id>/statistics/history', methods=['GET'])
-@APIRoute.standard(
-    auth_required_flag=True,
-    roles=[ROLES["ADMIN"], ROLES["INSTITUTE_ADMIN"]]
-)
+@APIRoute.standard(auth_required_flag=True,roles=[ROLES["ADMIN"], ROLES["INSTITUTE_ADMIN"]])
 def get_institute_statistics_history(institute_id):
     """Obtiene histórico de estadísticas de un instituto"""
     days = int(request.args.get('days', 30))
@@ -129,10 +112,7 @@ def get_institute_statistics_history(institute_id):
     return APIRoute.success(data={"history": statistics})
 
 @analytics_bp.route('/institute/statistics/compare', methods=['GET'])
-@APIRoute.standard(
-    auth_required_flag=True,
-    roles=[ROLES["ADMIN"]]
-)
+@APIRoute.standard(auth_required_flag=True, roles=[ROLES["ADMIN"]])
 def compare_institute_statistics():
     """Compara estadísticas entre múltiples institutos"""
     institute_ids = request.args.getlist('institute_ids')
@@ -149,10 +129,7 @@ def compare_institute_statistics():
     return APIRoute.success(data={"comparison": statistics})
 
 @analytics_bp.route('/class/<class_id>/comprehensive', methods=['GET'])
-@APIRoute.standard(
-    auth_required_flag=True,
-    roles=[ROLES["TEACHER"], ROLES["INSTITUTE_ADMIN"]]
-)
+@APIRoute.standard(auth_required_flag=True, roles=[ROLES["TEACHER"], ROLES["INSTITUTE_ADMIN"]])
 def get_comprehensive_report(class_id):
     """Obtiene un reporte completo y detallado de una clase"""
     # Obtener estadísticas básicas de la clase
@@ -174,195 +151,6 @@ def get_comprehensive_report(class_id):
     }
     
     return APIRoute.success(data={"report": report})
-
-@analytics_bp.route('/institute/<institute_id>/dashboard', methods=['GET'])
-@APIRoute.standard(
-    auth_required_flag=True,
-    roles=[ROLES["INSTITUTE_ADMIN"]]
-)
-def get_institute_dashboard(institute_id):
-    """Obtiene el dashboard completo para un instituto educativo"""
-    dashboard = institute_dashboard_service.generate_institute_dashboard(institute_id)
-    
-    if dashboard:
-        return APIRoute.success(data={"dashboard": dashboard})
-    return APIRoute.error(
-        ErrorCodes.NOT_FOUND,
-        "No se encontraron datos para generar el dashboard",
-        status_code=404
-    )
-
-@analytics_bp.route('/teacher/dashboard', methods=['GET'])
-@APIRoute.standard(auth_required_flag=True, roles=[ROLES["TEACHER"]])
-def get_teacher_dashboard():
-    """Obtiene el dashboard para un profesor con métricas relevantes"""
-    try:
-        logger = logging.getLogger(__name__)
-        
-        # Usar el ID del usuario autenticado por defecto
-        teacher_id = request.user_id
-        logger.info(f"Usuario autenticado con ID: {teacher_id}")
-        
-        # Opcionalmente permitir sobrescribir para propósitos administrativos
-        # (esto solo funcionaría si el usuario tiene permisos de admin pero aún está protegido por roles)
-        override_id = request.args.get('teacher_id')
-        if override_id:
-            logger.info(f"Solicitando override con ID: {override_id}")
-            # Verificar si el usuario autenticado es administrador
-            db = get_db()
-            user = db.users.find_one({"_id": ObjectId(teacher_id)})
-            logger.info(f"Información del usuario: {user}")
-            is_admin = user and user.get("role") in [ROLES["ADMIN"], ROLES["INSTITUTE_ADMIN"]]
-            logger.info(f"¿Es admin? {is_admin}")
-            
-            if is_admin:
-                teacher_id = override_id
-                logger.info(f"Override aceptado, usando ID: {teacher_id}")
-        
-        # Obtener clases del profesor
-        classes = list(ClassAnalyticsService().db.classes.find({
-            "teacher_id": ObjectId(teacher_id)
-        }))
-        logger.info(f"Encontradas {len(classes)} clases para el profesor")
-        
-        if not classes:
-            return APIRoute.success(
-                data={"dashboard": {"classes": [], "overall_metrics": {}}},
-                message="No hay clases asignadas a este profesor"
-            )
-            
-        # Métricas por clase
-        class_metrics = []
-        for cls in classes:
-            stats = class_analytics_service.get_class_analytics(str(cls["_id"]))
-            if stats:
-                class_metrics.append({
-                    "class_id": str(cls["_id"]),
-                    "class_name": cls.get("name", "Sin nombre"),
-                    "metrics": stats
-                })
-                
-        # Métricas generales
-        overall_metrics = {
-            "total_classes": len(classes),
-            "total_students": len(class_metrics),
-            "average_attendance": sum(m.get("metrics", {}).get("attendance_rate", 0) for m in class_metrics) / len(class_metrics) if class_metrics else 0,
-            "average_evaluation_score": sum(m.get("metrics", {}).get("avg_score", 0) for m in class_metrics) / len(class_metrics) if class_metrics else 0
-        }
-            
-        dashboard = {
-            "teacher_id": teacher_id,
-            "classes": class_metrics,
-            "overall_metrics": overall_metrics
-        }
-            
-        return APIRoute.success(data={"dashboard": dashboard})
-    except Exception as e:
-        import traceback
-        logging.getLogger(__name__).error(f"Error en get_teacher_dashboard: {str(e)}\n{traceback.format_exc()}")
-        return APIRoute.error(
-            ErrorCodes.SERVER_ERROR,
-            str(e),
-            status_code=500
-        )
-
-@analytics_bp.route('/student/<student_id>/dashboard', methods=['GET'])
-@APIRoute.standard(auth_required_flag=True)
-def get_student_dashboard(student_id):
-    """Obtiene el dashboard para un estudiante con su progreso académico"""
-    try:
-        # Obtener clases del estudiante
-        memberships = list(ClassAnalyticsService().db.class_members.find({
-            "user_id": ObjectId(student_id),
-            "role": "STUDENT"
-        }))
-        
-        if not memberships:
-            return APIRoute.success(
-                data={"dashboard": {"classes": [], "overall_metrics": {}}},
-                message="No hay clases asignadas a este estudiante"
-            )
-            
-        class_ids = [str(m["class_id"]) for m in memberships]
-        
-        # Obtener rendimiento por clase
-        class_performances = []
-        period_id = request.args.get('period_id')  # Opcional
-        
-        for class_id in class_ids:
-            cls_info = ClassAnalyticsService().db.classes.find_one({"_id": ObjectId(class_id)})
-            if cls_info and period_id:
-                performance = student_analytics_service.calculate_student_performance(
-                    student_id, class_id, period_id
-                )
-                if performance:
-                    class_performances.append({
-                        "class_id": class_id,
-                        "class_name": cls_info.get("name", "Sin nombre"),
-                        "performance": performance
-                    })
-            
-        # Obtener análisis por materias
-        subjects_analytics = student_subjects_analytics_service.get_student_subjects_analytics(
-            student_id, period_id
-        )
-            
-        dashboard = {
-            "student_id": student_id,
-            "classes": class_performances,
-            "subjects": subjects_analytics
-        }
-            
-        return APIRoute.success(data={"dashboard": dashboard})
-    except Exception as e:
-        return APIRoute.error(
-            ErrorCodes.SERVER_ERROR,
-            str(e),
-            status_code=500
-        )
-
-@analytics_bp.route('/class/<class_id>/dashboard', methods=['GET'])
-@APIRoute.standard(
-    auth_required_flag=True,
-    roles=[ROLES["TEACHER"], ROLES["INSTITUTE_ADMIN"]]
-)
-def get_class_dashboard(class_id):
-    """Obtiene un dashboard completo para una clase específica"""
-    try:
-        # Obtener estadísticas generales de la clase
-        statistics = class_analytics_service.get_class_analytics(class_id)
-        if not statistics:
-            return APIRoute.error(
-                ErrorCodes.NOT_FOUND,
-                "No se encontraron estadísticas para esta clase",
-                status_code=404
-            )
-            
-        # Obtener información adicional para el dashboard
-        cls_info = ClassAnalyticsService().db.classes.find_one({"_id": ObjectId(class_id)})
-        
-        if not cls_info:
-            return APIRoute.error(
-                ErrorCodes.NOT_FOUND,
-                "Clase no encontrada",
-                status_code=404
-            )
-        
-        dashboard = {
-            "class_id": class_id,
-            "class_name": cls_info.get("name", "Sin nombre"),
-            "subject": cls_info.get("subject", "Sin asignatura"),
-            "statistics": statistics,
-            "last_updated": datetime.now().isoformat()
-        }
-        
-        return APIRoute.success(data={"dashboard": dashboard})
-    except Exception as e:
-        return APIRoute.error(
-            ErrorCodes.SERVER_ERROR,
-            str(e),
-            status_code=500
-        )
 
 @analytics_bp.route('/student/<student_id>/subjects', methods=['GET'])
 @APIRoute.standard(auth_required_flag=True)
@@ -406,40 +194,42 @@ def get_student_subjects_dashboard(student_id):
             status_code=500
         )
 
-@analytics_bp.route('/institute/<institute_id>/complete-dashboard', methods=['GET'])
-@APIRoute.standard(
-    auth_required_flag=True,
-    roles=[ROLES["INSTITUTE_ADMIN"]]
-)
-def get_institute_complete_dashboard(institute_id):
-    """Obtiene un dashboard completo y detallado del instituto"""
+@analytics_bp.route('/class/<class_id>/dashboard', methods=['GET'])
+@APIRoute.standard(auth_required_flag=True, roles=[ROLES["TEACHER"], ROLES["INSTITUTE_ADMIN"]])
+def get_class_dashboard(class_id):
+    """Obtiene un dashboard completo para una clase específica"""
     try:
-        # Obtener dashboard general
-        dashboard = institute_dashboard_service.generate_institute_dashboard(institute_id)
-        if not dashboard:
+        # Obtener estadísticas generales de la clase
+        statistics = class_analytics_service.get_class_analytics(class_id)
+        if not statistics:
             return APIRoute.error(
                 ErrorCodes.NOT_FOUND,
-                "No se encontraron datos para generar el dashboard",
+                "No se encontraron estadísticas para esta clase",
                 status_code=404
             )
             
-        # Obtener estadísticas detalladas
-        statistics = institute_analytics_service.get_institute_statistics(institute_id)
+        # Obtener información adicional para el dashboard
+        cls_info = ClassAnalyticsService().db.classes.find_one({"_id": ObjectId(class_id)})
         
-        # Obtener historial (últimos 30 días)
-        history = institute_analytics_service.get_institute_statistics_history(institute_id, 30)
+        if not cls_info:
+            return APIRoute.error(
+                ErrorCodes.NOT_FOUND,
+                "Clase no encontrada",
+                status_code=404
+            )
         
-        complete_dashboard = {
-            "dashboard": dashboard,
+        dashboard = {
+            "class_id": class_id,
+            "class_name": cls_info.get("name", "Sin nombre"),
+            "subject": cls_info.get("subject", "Sin asignatura"),
             "statistics": statistics,
-            "history": history,
-            "generated_at": datetime.now().isoformat()
+            "last_updated": datetime.now().isoformat()
         }
         
-        return APIRoute.success(data={"complete_dashboard": complete_dashboard})
+        return APIRoute.success(data={"dashboard": dashboard})
     except Exception as e:
         return APIRoute.error(
             ErrorCodes.SERVER_ERROR,
             str(e),
             status_code=500
-        ) 
+        )
