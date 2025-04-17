@@ -167,6 +167,9 @@ class TeacherDashboardService(BaseService):
             # Métricas por clase
             class_metrics = []
             
+            # Conjunto para almacenar IDs únicos de estudiantes en todas las clases
+            unique_student_ids = set()
+            
             # Procesar cada clase
             for cls in classes:
                 class_id = str(cls["_id"])
@@ -198,21 +201,28 @@ class TeacherDashboardService(BaseService):
                 # Añadir la clase al dashboard
                 class_metrics.append(class_data)
                 logger.info(f"Añadida clase al dashboard: {class_name}")
+                
+                # Recopilar IDs de estudiantes en esta clase para conteo preciso
+                try:
+                    class_members = list(self.db.class_members.find({
+                        "class_id": ObjectId(class_id),
+                        "role": "STUDENT"
+                    }))
+                    class_student_ids = {str(member["user_id"]) for member in class_members}
+                    unique_student_ids.update(class_student_ids)
+                    logger.info(f"Clase {class_name} tiene {len(class_student_ids)} estudiantes")
+                except Exception as e:
+                    logger.error(f"Error obteniendo estudiantes para clase {class_id}: {str(e)}")
             
             logger.info(f"Total de clases procesadas para el dashboard: {len(class_metrics)}")
+            logger.info(f"Total de estudiantes únicos encontrados: {len(unique_student_ids)}")
             
             # Métricas generales
-            total_students = 0
             average_attendance = 0
             average_score = 0
             
             if class_metrics:
                 try:
-                    # Contar estudiantes totales
-                    for m in class_metrics:
-                        students_count = m.get("metrics", {}).get("student_count", 0)
-                        total_students += students_count
-                    
                     # Calcular promedios
                     attendance_values = []
                     score_values = []
@@ -241,7 +251,7 @@ class TeacherDashboardService(BaseService):
             
             overall_metrics = {
                 "total_classes": len(classes),
-                "total_students": total_students,
+                "total_students": len(unique_student_ids),  # Ahora usamos el conteo de estudiantes únicos
                 "average_attendance": average_attendance,
                 "average_evaluation_score": average_score
             }
