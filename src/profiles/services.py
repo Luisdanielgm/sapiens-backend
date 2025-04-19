@@ -695,6 +695,15 @@ class ProfileService(VerificationBaseService):
             # Verificar si ya existe un perfil
             existing_profile = self.db.cognitive_profiles.find_one({"user_id": user_id})
             
+            # Mapeo entre camelCase y snake_case para las claves del perfil cognitivo
+            field_mapping = {
+                "learningStyle": "learning_style",
+                "cognitiveStrengths": "cognitive_strengths",
+                "cognitiveDifficulties": "cognitive_difficulties",
+                "personalContext": "personal_context",
+                "recommendedStrategies": "recommended_strategies"
+            }
+            
             if existing_profile:
                 # Actualizar perfil existente
                 update_data = {
@@ -702,21 +711,47 @@ class ProfileService(VerificationBaseService):
                     "profile": json.dumps(profile_dict_serializable)
                 }
                 
-                # Añadir campos individuales si existen en profile_dict
+                # Actualizar campos individuales desde el perfil_dict
+                for camel_case_field, snake_case_field in field_mapping.items():
+                    if camel_case_field in profile_dict:
+                        update_data[snake_case_field] = profile_dict[camel_case_field]
+                    
+                # También manejar campos que ya están en snake_case
                 for field in ["learning_style", "diagnosis", "cognitive_strengths", 
                               "cognitive_difficulties", "personal_context", "recommended_strategies"]:
                     if field in profile_dict:
                         update_data[field] = profile_dict[field]
+                
+                # Asegurar que diagnosis se actualice correctamente
+                if "diagnosis" in profile_dict:
+                    update_data["diagnosis"] = profile_dict["diagnosis"]
                 
                 result = self.db.cognitive_profiles.update_one(
                     {"user_id": user_id},
                     {"$set": update_data}
                 )
                 
-                return result.modified_count > 0
+                return result.acknowledged
             else:
                 # Crear un nuevo perfil cognitivo
-                return self.create_cognitive_profile(user_id_or_email, profile_dict)[0]
+                # Convertir campos de camelCase a snake_case para el nuevo perfil
+                new_profile_data = {}
+                
+                for camel_case_field, snake_case_field in field_mapping.items():
+                    if camel_case_field in profile_dict:
+                        new_profile_data[snake_case_field] = profile_dict[camel_case_field]
+                
+                # También incluir campos que ya están en snake_case
+                for field in ["learning_style", "diagnosis", "cognitive_strengths", 
+                              "cognitive_difficulties", "personal_context", "recommended_strategies"]:
+                    if field in profile_dict:
+                        new_profile_data[field] = profile_dict[field]
+                
+                # Asegurar que diagnosis se incluya correctamente
+                if "diagnosis" in profile_dict:
+                    new_profile_data["diagnosis"] = profile_dict["diagnosis"]
+                
+                return self.create_cognitive_profile(user_id_or_email, new_profile_data)[0]
                 
         except Exception as e:
             log_error(f"Error al actualizar perfil cognitivo: {str(e)}", e, "profiles.services")
