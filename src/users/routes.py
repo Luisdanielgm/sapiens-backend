@@ -3,6 +3,7 @@ from flask_jwt_extended import create_access_token, jwt_required, get_jwt_identi
 from bson.objectid import ObjectId
 import json
 import logging
+from typing import Dict, List
 
 from .services import UserService, CognitiveProfileService
 from src.shared.standardization import APIBlueprint, APIRoute, ErrorCodes
@@ -10,62 +11,70 @@ from src.shared.utils import ensure_json_serializable
 from src.shared.constants import ROLES
 from src.shared.exceptions import AppException
 from src.shared.database import get_db
-from src.shared.logging import log_error, log_info
+from src.shared.logging import log_error, log_info, log_warning
+from src.profiles.services import ProfileService
 
 users_bp = APIBlueprint('users', __name__)
 user_service = UserService()
 cognitive_profile_service = CognitiveProfileService()
+profile_service = ProfileService()
 
 @users_bp.route('/register', methods=['POST'])
 @APIRoute.standard(required_fields=['email', 'name', 'role'])
 def register_user():
-    """Registra un nuevo usuario"""
-    try:
-        data = request.get_json()
-        institute_name = data.pop('institute_name', None)
-        
-        success, result = user_service.register_user(data, institute_name)
-        
-        if success:
-            return APIRoute.success(
-                data={"user_id": result},
-                message="Usuario registrado exitosamente",
-                status_code=201
-            )
+    """
+    Registra un nuevo usuario en el sistema.
+    
+    Body:
+        email: Email del usuario
+        name: Nombre del usuario
+        role: Rol del usuario (STUDENT, TEACHER, ADMIN, INSTITUTE_ADMIN)
+        picture: URL de la imagen de perfil (opcional)
+        institute_name: Nombre del instituto (requerido para INSTITUTE_ADMIN)
+    """
+    data = request.get_json()
+    
+    # Validar campos
+    if data.get('role') == 'INSTITUTE_ADMIN' and not data.get('institute_name'):
         return APIRoute.error(
-            ErrorCodes.REGISTRATION_ERROR,
-            result
+            ErrorCodes.MISSING_FIELDS, 
+            "Se requiere el nombre del instituto para el rol INSTITUTE_ADMIN",
+            status_code=400
         )
-    except Exception as e:
+        
+    success, result = user_service.register_user(data, data.get('institute_name'))
+    
+    if success:
+        return APIRoute.success(
+            data={"id": result},
+            message="Usuario registrado correctamente",
+            status_code=201
+        )
+    else:
         return APIRoute.error(
-            ErrorCodes.REGISTRATION_ERROR,
-            str(e),
-            status_code=500
+            ErrorCodes.BAD_REQUEST,
+            result,
+            status_code=400
         )
 
 @users_bp.route('/profile/<email>', methods=['GET'])
 @APIRoute.standard(auth_required_flag=True)
 def get_user_profile(email):
     """
-    Obtiene el perfil completo de un usuario
+    Obtiene el perfil completo de un usuario.
     
     Args:
-        email (str): Email del usuario
+        email: Email del usuario
     """
-    try:
-        profile = user_service.get_user_profile(email)
-        if profile:
-            return APIRoute.success(data=profile)
+    profile = profile_service.get_user_profile(email)
+    
+    if profile:
+        return APIRoute.success(data={"profile": profile})
+    else:
         return APIRoute.error(
-            ErrorCodes.USER_NOT_FOUND,
-            f"No se encontró el perfil para el email: {email}",
+            ErrorCodes.RESOURCE_NOT_FOUND,
+            "Perfil de usuario no encontrado",
             status_code=404
-        )
-    except Exception as e:
-        return APIRoute.error(
-            ErrorCodes.SERVER_ERROR,
-            str(e),
-            status_code=500
         )
 
 @users_bp.route('/check', methods=['POST'])
@@ -95,200 +104,137 @@ def verify_user():
 @users_bp.route('/search', methods=['GET'])
 @APIRoute.standard(auth_required_flag=True)
 def search_users():
-    """Busca usuarios por email parcial"""
-    try:
-        partial_email = request.args.get('email')
-        if not partial_email or '@' not in partial_email:
-            return APIRoute.error(
-                ErrorCodes.EMAIL_INVALID,
-                "Email inválido",
-                status_code=400
-            )
-            
-        suggestions = user_service.search_users_by_email(partial_email)
-        return APIRoute.success(data={"suggestions": suggestions})
-    except Exception as e:
+    """
+    Busca usuarios por email parcial.
+    
+    Query params:
+        email: Email parcial para buscar
+    """
+    email = request.args.get('email', '')
+    
+    if not email or len(email) < 3:
         return APIRoute.error(
-            ErrorCodes.SERVER_ERROR,
-            str(e),
-            status_code=500
+            ErrorCodes.BAD_REQUEST,
+            "Se requiere al menos 3 caracteres para buscar",
+            status_code=400
         )
+        
+    results = user_service.search_users_by_email(email)
+    
+    return APIRoute.success(
+        data={"users": results},
+        message=f"Se encontraron {len(results)} usuarios"
+    )
 
-@users_bp.route('/info', methods=['GET'])
+@users_bp.route('/user-info/<email>', methods=['GET'])
 @APIRoute.standard(auth_required_flag=True)
-def get_user_info():
-    """Obtiene información básica de un usuario"""
-    try:
-        email = request.args.get('email')
-        if not email:
-            return APIRoute.error(
-                ErrorCodes.EMAIL_REQUIRED,
-                "Se requiere el email del usuario",
-                status_code=400
-            )
-
-        user = user_service.get_user_info(email)
-        if user:
-            return APIRoute.success(data={"user": user})
+def get_user_info(email):
+    """
+    Obtiene información básica de un usuario.
+    
+    Args:
+        email: Email del usuario
+    """
+    user_info = user_service.get_user_info(email)
+    
+    if user_info:
+        return APIRoute.success(data={"user": user_info})
+    else:
         return APIRoute.error(
-            ErrorCodes.USER_NOT_FOUND,
+            ErrorCodes.RESOURCE_NOT_FOUND,
             "Usuario no encontrado",
             status_code=404
         )
-    except Exception as e:
-        return APIRoute.error(
-            ErrorCodes.SERVER_ERROR,
-            str(e),
-            status_code=500
-        )
 
 @users_bp.route('/student/<email>', methods=['DELETE'])
-@APIRoute.standard(auth_required_flag=True)
+@APIRoute.standard(auth_required_flag=True, roles=[ROLES["ADMIN"], ROLES["INSTITUTE_ADMIN"]])
 def delete_student(email):
-    """Elimina un estudiante y todos sus datos asociados"""
-    try:
-        success, message = user_service.delete_student(email)
-        if success:
-            return APIRoute.success(message=message)
+    """
+    Elimina un estudiante y todos sus datos asociados.
+    
+    Args:
+        email: Email del estudiante a eliminar
+    """
+    success, message = user_service.delete_student(email)
+    
+    if success:
+        return APIRoute.success(message=message)
+    else:
         return APIRoute.error(
-            ErrorCodes.DELETE_ERROR,
+            ErrorCodes.BAD_REQUEST,
             message,
             status_code=400
         )
-    except Exception as e:
-        return APIRoute.error(
-            ErrorCodes.DELETE_ERROR,
-            str(e),
-            status_code=500
-        )
 
-@users_bp.route('/profile/cognitive', methods=['GET'])
+@users_bp.route('/cognitive-profile', methods=['GET'])
 @APIRoute.standard(auth_required_flag=True)
 def get_cognitive_profile():
     """
-    Obtiene el perfil cognitivo de un usuario
+    Obtiene el perfil cognitivo de un estudiante.
+    Este endpoint está obsoleto y será eliminado en futuras versiones.
+    Use /profiles/cognitive/<user_id_or_email> en su lugar.
     
-    Args:
-        email (query parameter): Email del usuario
-        
-    Returns:
-        200 OK: Perfil cognitivo del usuario
-        404 Not Found: Usuario o perfil no encontrado
-        500 Internal Server Error: Error en el servidor
+    Query params:
+        email: Email del estudiante
     """
-    try:
-        email = request.args.get('email')
-        if not email:
-            return APIRoute.error(
-                ErrorCodes.MISSING_FIELDS,
-                "Se requiere especificar un email",
-                status_code=400
-            )
-            
-        log_info(f"Solicitando perfil cognitivo para: {email}", "users.routes")
-        profile = cognitive_profile_service.get_cognitive_profile(email)
-        
-        if profile:
-            return APIRoute.success(data={"profile": profile})
-        
-        # Verificar si el usuario existe pero no tiene perfil
-        user_exists = user_service.verify_user_exists(email)
-        if user_exists:
-            return APIRoute.error(
-                ErrorCodes.NOT_FOUND,
-                "El usuario existe pero no tiene perfil cognitivo configurado",
-                status_code=404
-            )
-        
+    email = request.args.get('email')
+    if not email:
         return APIRoute.error(
-            ErrorCodes.USER_NOT_FOUND,
-            "Perfil no encontrado",
+            ErrorCodes.MISSING_FIELDS,
+            "Se requiere el parámetro 'email'",
+            status_code=400
+        )
+        
+    log_warning(
+        "Se está utilizando un endpoint obsoleto (GET /users/cognitive-profile). " +
+        "Utilice GET /profiles/cognitive/<user_id_or_email> en su lugar.",
+        "users.routes"
+    )
+        
+    # Redireccionar al nuevo servicio centralizado de perfiles
+    profile = profile_service.get_cognitive_profile(email)
+    
+    if profile:
+        return APIRoute.success(data={"profile": profile})
+    else:
+        return APIRoute.error(
+            ErrorCodes.RESOURCE_NOT_FOUND,
+            "Perfil cognitivo no encontrado",
             status_code=404
         )
-    except Exception as e:
-        log_error(f"Error al obtener perfil cognitivo: {str(e)}", e, "users.routes")
-        return APIRoute.error(
-            ErrorCodes.SERVER_ERROR,
-            str(e),
-            status_code=500
-        )
 
-@users_bp.route('/profile/cognitive', methods=['PUT'])
-@APIRoute.standard(auth_required_flag=True)
-@APIRoute.standard(required_fields=['email', 'profile'])
+@users_bp.route('/cognitive-profile', methods=['PUT'])
+@APIRoute.standard(auth_required_flag=True, required_fields=['email', 'profile_data'])
 def update_cognitive_profile():
     """
-    Actualiza el perfil cognitivo de un usuario por email
+    Actualiza el perfil cognitivo de un estudiante.
+    Este endpoint está obsoleto y será eliminado en futuras versiones.
+    Use PUT /profiles/cognitive en su lugar.
     
     Body:
-        email: Email del usuario
-        profile: Datos del perfil cognitivo (objeto JSON)
-        
-    Returns:
-        200 OK: Perfil actualizado correctamente
-        400 Bad Request: Error en la solicitud
-        404 Not Found: Usuario no encontrado
-        500 Internal Server Error: Error en el servidor
+        email: Email del estudiante
+        profile_data: Datos del perfil cognitivo
     """
-    try:
-        data = request.get_json()
-        email = data.get('email')
-        profile_data = data.get('profile')
-        
-        # Verificar si el usuario existe
-        if not user_service.verify_user_exists(email):
-            return APIRoute.error(
-                ErrorCodes.USER_NOT_FOUND,
-                f"No se encontró usuario con el email: {email}",
-                status_code=404
-            )
-        
-        # Verificar formato del perfil
-        if not profile_data:
-            return APIRoute.error(
-                ErrorCodes.INVALID_DATA,
-                "Los datos del perfil no pueden estar vacíos",
-                status_code=400
-            )
-        
-        # Asegurarse de que el profile_data esté en formato adecuado
-        if isinstance(profile_data, dict):
-            # Si es un diccionario, lo dejaremos para que el servicio lo maneje
-            pass
-        elif isinstance(profile_data, str):
-            # Si es string, verificar que sea JSON válido
-            try:
-                json.loads(profile_data)
-            except json.JSONDecodeError:
-                return APIRoute.error(
-                    ErrorCodes.INVALID_DATA,
-                    "El perfil debe ser un objeto JSON válido",
-                    status_code=400
-                )
-        else:
-            return APIRoute.error(
-                ErrorCodes.INVALID_DATA,
-                "Formato de perfil inválido",
-                status_code=400
-            )
-        
-        log_info(f"Actualizando perfil cognitivo para usuario: {email}", "users.routes")
-        success = cognitive_profile_service.update_cognitive_profile(email, profile_data)
-        
-        if success:
-            return APIRoute.success(message="Perfil cognitivo actualizado exitosamente")
-        
+    data = request.get_json()
+    email = data.get('email')
+    profile_data = data.get('profile_data')
+    
+    log_warning(
+        "Se está utilizando un endpoint obsoleto (PUT /users/cognitive-profile). " +
+        "Utilice PUT /profiles/cognitive en su lugar.",
+        "users.routes"
+    )
+    
+    # Redireccionar al nuevo servicio centralizado de perfiles
+    success = profile_service.update_cognitive_profile(email, profile_data)
+    
+    if success:
+        return APIRoute.success(message="Perfil cognitivo actualizado correctamente")
+    else:
         return APIRoute.error(
-            ErrorCodes.UPDATE_ERROR,
-            "Error al actualizar perfil cognitivo",
-            status_code=500
-        )
-    except Exception as e:
-        log_error(f"Error al actualizar perfil cognitivo para {email}", e, "users.routes")
-        return APIRoute.error(
-            ErrorCodes.SERVER_ERROR,
-            str(e),
-            status_code=500
+            ErrorCodes.BAD_REQUEST,
+            "Error actualizando perfil cognitivo",
+            status_code=400
         )
 
 @users_bp.route('/<user_id>', methods=['GET'])
@@ -334,21 +280,21 @@ def get_user_by_email(email):
 @users_bp.route('/profile/<user_id>', methods=['GET'])
 @APIRoute.standard(auth_required_flag=True)
 def get_user_profile_by_id(user_id):
-    """Obtiene el perfil completo de un usuario por ID"""
-    try:
-        profile = user_service.get_user_profile(user_id)
-        if profile:
-            return APIRoute.success(data=profile)
+    """
+    Obtiene el perfil completo de un usuario por su ID.
+    
+    Args:
+        user_id: ID del usuario
+    """
+    profile = profile_service.get_user_profile(user_id)
+    
+    if profile:
+        return APIRoute.success(data={"profile": profile})
+    else:
         return APIRoute.error(
-            ErrorCodes.USER_NOT_FOUND,
-            "Perfil no encontrado",
+            ErrorCodes.RESOURCE_NOT_FOUND,
+            "Perfil de usuario no encontrado",
             status_code=404
-        )
-    except Exception as e:
-        return APIRoute.error(
-            ErrorCodes.SERVER_ERROR,
-            str(e),
-            status_code=500
         )
 
 @users_bp.route('/login', methods=['POST'])

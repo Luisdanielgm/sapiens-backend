@@ -7,10 +7,8 @@ from src.shared.database import get_db
 from src.shared.standardization import VerificationBaseService, ErrorCodes
 import logging
 from src.shared.exceptions import AppException
-from .models import User, CognitiveProfile
-
-# Añadir esta importación para poder crear perfiles de estudiante
-from src.profiles.models import StudentProfile
+from .models import User
+from src.profiles.services import ProfileService
 
 # Función auxiliar para hacer objetos serializables
 def make_json_serializable(obj):
@@ -27,6 +25,7 @@ def make_json_serializable(obj):
 class UserService(VerificationBaseService):
     def __init__(self):
         super().__init__(collection_name="users")
+        self.profile_service = ProfileService()
 
     def register_user(self, user_data: dict, institute_name: Optional[str] = None) -> Tuple[bool, str]:
         try:
@@ -52,50 +51,17 @@ class UserService(VerificationBaseService):
                     'joined_at': datetime.now()
                 })
 
-            # Crear perfiles para estudiantes
-            if user.role == 'STUDENT':
-                db = get_db()
-                
-                # 1. Crear perfil cognitivo
-                cognitive_profile = CognitiveProfile(str(user_id))
-                profile_dict = cognitive_profile.to_dict()
-                
-                # Convertir a versión serializable (ObjectId y datetime a string)
-                profile_dict_serializable = make_json_serializable(profile_dict)
-                
-                # Guardar el perfil cognitivo en el formato correcto
-                db.cognitive_profiles.insert_one({
-                    "user_id": profile_dict["user_id"],  # Mantener como ObjectId para la BD
-                    "learning_style": profile_dict["learning_style"],
-                    "diagnosis": profile_dict["diagnosis"],
-                    "cognitive_strengths": profile_dict["cognitive_strengths"],
-                    "cognitive_difficulties": profile_dict["cognitive_difficulties"],
-                    "personal_context": profile_dict["personal_context"],
-                    "recommended_strategies": profile_dict["recommended_strategies"],
-                    "created_at": profile_dict["created_at"],
-                    "profile": json.dumps(profile_dict_serializable)  # Versión serializable
-                })
-                
-                # 2. Crear perfil de estudiante
-                try:
-                    # Determinar estilo de aprendizaje preferido basado en el valor más alto
-                    # (iniciamos con 'visual' por defecto, ya que todos los valores son 0)
-                    preferred_style = "visual"
-                    
-                    # Crear perfil de estudiante con valores iniciales
-                    student_profile = StudentProfile(
-                        user_id=str(user_id),
-                        educational_background="",
-                        interests=[],
-                        preferred_learning_style=preferred_style
-                    )
-                    
-                    # Guardar en la colección student_profiles
-                    db.student_profiles.insert_one(student_profile.to_dict())
-                    logging.info(f"Perfil de estudiante creado para: {user.email}")
-                except Exception as e:
-                    logging.error(f"Error al crear perfil de estudiante: {str(e)}")
-                    # No fallamos todo el registro si solo falla este perfil
+            # Crear perfiles para el usuario según su rol
+            try:
+                # Usar el servicio de perfiles para crear el perfil adecuado
+                success, message = self.profile_service.create_profile_for_user(str(user_id), user.role)
+                if not success:
+                    logging.warning(f"No se pudo crear el perfil para el usuario: {message}")
+                else:
+                    logging.info(f"Perfil creado exitosamente para usuario {user.email}: {message}")
+            except Exception as e:
+                logging.error(f"Error al crear perfil para el usuario: {str(e)}")
+                # No fallamos todo el registro si solo falla el perfil
 
             return True, str(user_id)
 
@@ -106,37 +72,19 @@ class UserService(VerificationBaseService):
             logging.error(f"Error en register_user: {str(e)}")
             return False, str(e)
 
-    def get_user_profile(self, email: str) -> Optional[Dict]:
+    def get_user_profile(self, email_or_id: str) -> Optional[Dict]:
+        """
+        Obtiene el perfil completo de un usuario utilizando el servicio de perfiles.
+        
+        Args:
+            email_or_id: Email o ID del usuario
+            
+        Returns:
+            Dict: Perfil completo del usuario
+        """
         try:
-            user = self.collection.find_one({"email": email})
-            if not user:
-                return None
-
-            profile_data = {
-                "user_info": user,
-                "institutes": [],
-                "cognitive_profile": None
-            }
-
-            # Obtener institutos asociados
-            memberships = self.collection.find({"user_id": user["_id"]})
-            for membership in memberships:
-                institute = get_db().institutes.find_one({"_id": membership["institute_id"]})
-                if institute:
-                    profile_data["institutes"].append({
-                        "id": str(institute["_id"]),
-                        "name": institute["name"],
-                        "role": membership["role"]
-                    })
-
-            # Obtener perfil cognitivo si es estudiante
-            if user["role"] == "STUDENT":
-                cognitive_profile = self.collection.find_one({"user_id": user["_id"]})
-                if cognitive_profile:
-                    profile_data["cognitive_profile"] = cognitive_profile
-
-            return profile_data
-
+            # Utilizar el servicio de perfiles centralizado
+            return self.profile_service.get_user_profile(email_or_id)
         except Exception as e:
             logging.error(f"Error al obtener perfil de usuario: {str(e)}")
             return None
@@ -176,7 +124,12 @@ class UserService(VerificationBaseService):
                 ]
             })
             get_db().contents.delete_many({"student_id": user_id})
-            get_db().cognitive_profiles.delete_one({"user_id": user_id})
+            
+            # Eliminar perfiles usando el servicio de perfiles
+            self.profile_service.delete_student_profile(str(user_id))
+            self.profile_service.delete_cognitive_profile(str(user_id))
+            
+            # Eliminar el usuario
             self.collection.delete_one({"_id": user_id})
 
             return True, "Estudiante eliminado exitosamente"

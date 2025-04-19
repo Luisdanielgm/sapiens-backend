@@ -1,67 +1,42 @@
-from datetime import datetime
+from typing import Optional, Dict, List
 from bson import ObjectId
-from typing import Dict, Optional, List
+from datetime import datetime
 
 class User:
+    """
+    Modelo de usuario.
+    Contiene la información básica de un usuario registrado en el sistema.
+    """
     def __init__(self,
-                 email: str,
-                 name: str,
-                 picture: str,
-                 role: str,
-                 birth_date: Optional[str] = None,
-                 status: str = "active",
-                 institute_name: Optional[str] = None):
+                email: str,
+                name: str,
+                role: str,
+                password: Optional[str] = None,
+                picture: str = "",
+                status: str = "active",
+                provider: str = "local",
+                email_verified: bool = False):
         self.email = email
         self.name = name
+        self.password = password
         self.picture = picture
-        self.role = role.upper()
-        self.birth_date = birth_date
+        self.role = role
         self.status = status
-        self.institute_name = institute_name
+        self.provider = provider
+        self.email_verified = email_verified
         self.created_at = datetime.now()
-
+        self.updated_at = datetime.now()
+        
     def to_dict(self) -> dict:
         return {
             "email": self.email,
             "name": self.name,
+            "password": self.password,
             "picture": self.picture,
             "role": self.role,
-            "birth_date": self.birth_date,
             "status": self.status,
-            "created_at": self.created_at
-        }
-
-class CognitiveProfile:
-    def __init__(self,
-                 user_id: str,
-                 learning_style: Dict[str, int] = None,
-                 diagnosis: str = "",
-                 cognitive_strengths: List[str] = None,
-                 cognitive_difficulties: List[str] = None,
-                 personal_context: str = "",
-                 recommended_strategies: List[str] = None):
-        self.user_id = ObjectId(user_id)
-        self.learning_style = learning_style or {
-            "visual": 0,
-            "kinesthetic": 0,
-            "auditory": 0,
-            "readingWriting": 0
-        }
-        self.diagnosis = diagnosis
-        self.cognitive_strengths = cognitive_strengths or []
-        self.cognitive_difficulties = cognitive_difficulties or []
-        self.personal_context = personal_context
-        self.recommended_strategies = recommended_strategies or []
-        self.created_at = datetime.now()
-
-    def to_dict(self) -> dict:
-        return {
-            "user_id": self.user_id,
-            "learning_style": self.learning_style,
-            "diagnosis": self.diagnosis,
-            "cognitive_strengths": self.cognitive_strengths,
-            "cognitive_difficulties": self.cognitive_difficulties,
-            "personal_context": self.personal_context,
-            "recommended_strategies": self.recommended_strategies,
-            "created_at": self.created_at
+            "provider": self.provider,
+            "email_verified": self.email_verified,
+            "created_at": self.created_at,
+            "updated_at": self.updated_at
         }

@@ -1,12 +1,26 @@
 from typing import Dict, List, Optional, Tuple
 from datetime import datetime
 from bson import ObjectId
+import json
 
 from src.shared.database import get_db
 from src.shared.standardization import VerificationBaseService, ErrorCodes
 from src.shared.exceptions import AppException
-from src.shared.logging import log_error, log_info
-from src.profiles.models import TeacherProfile, StudentProfile, AdminProfile
+from src.shared.logging import log_error, log_info, log_warning
+from src.profiles.models import TeacherProfile, StudentProfile, AdminProfile, CognitiveProfile, InstituteAdminProfile, InstituteProfile
+
+
+# Función auxiliar para hacer objetos serializables
+def make_json_serializable(obj):
+    if isinstance(obj, ObjectId):
+        return str(obj)
+    elif isinstance(obj, datetime):
+        return obj.isoformat()
+    elif isinstance(obj, dict):
+        return {k: make_json_serializable(v) for k, v in obj.items()}
+    elif isinstance(obj, list):
+        return [make_json_serializable(item) for item in obj]
+    return obj
 
 
 class ProfileService(VerificationBaseService):
@@ -15,8 +29,6 @@ class ProfileService(VerificationBaseService):
     Incluye funcionalidad para crear, actualizar y obtener perfiles de profesores, estudiantes y administradores.
     """
     def __init__(self):
-        # Inicializamos con una colección para que BaseService funcione correctamente
-        # Pero mantenemos flexibilidad para trabajar con múltiples colecciones
         super().__init__(collection_name="profiles")
     
     def _get_user_id(self, user_id_or_email: str) -> Optional[ObjectId]:
@@ -41,6 +53,69 @@ class ProfileService(VerificationBaseService):
         except Exception as e:
             log_error(f"Error al obtener ID de usuario para '{user_id_or_email}'", e, "profiles.services")
             return None
+    
+    def get_user_role(self, user_id_or_email: str) -> Optional[str]:
+        """
+        Obtiene el rol del usuario.
+        
+        Args:
+            user_id_or_email: ID o email del usuario
+            
+        Returns:
+            str: Rol del usuario si se encuentra, None en caso contrario
+        """
+        try:
+            if ObjectId.is_valid(user_id_or_email):
+                user = self.db.users.find_one({"_id": ObjectId(user_id_or_email)})
+            else:
+                user = self.db.users.find_one({"email": user_id_or_email})
+            
+            if user and "role" in user:
+                return user["role"]
+            return None
+        except Exception as e:
+            log_error(f"Error al obtener rol de usuario para '{user_id_or_email}'", e, "profiles.services")
+            return None
+    
+    #
+    # MÉTODOS PARA PERFIL DE PROFESOR
+    #
+    
+    def create_teacher_profile(self, user_id_or_email: str, profile_data: Dict) -> Tuple[bool, str]:
+        """
+        Crea un nuevo perfil de profesor
+        
+        Args:
+            user_id_or_email: ID o email del usuario profesor
+            profile_data: Datos del perfil a crear
+            
+        Returns:
+            Tuple[bool, str]: (Éxito, Mensaje o ID del perfil)
+        """
+        try:
+            # Verificar si el usuario existe y es profesor
+            user_id = self._get_user_id(user_id_or_email)
+            if not user_id:
+                return False, f"Usuario no encontrado: {user_id_or_email}"
+            
+            user_role = self.get_user_role(user_id_or_email)
+            if user_role != "TEACHER":
+                return False, f"El usuario no es un profesor: {user_id_or_email}"
+            
+            # Verificar si ya existe un perfil
+            existing_profile = self.db.teacher_profiles.find_one({"user_id": user_id})
+            if existing_profile:
+                return False, f"Ya existe un perfil para este profesor: {user_id_or_email}"
+            
+            # Crear un nuevo perfil
+            profile_data["user_id"] = user_id
+            teacher_profile = TeacherProfile(**profile_data)
+            result = self.db.teacher_profiles.insert_one(teacher_profile.to_dict())
+            
+            return True, str(result.inserted_id)
+        except Exception as e:
+            log_error(f"Error al crear perfil de profesor: {str(e)}", e, "profiles.services")
+            return False, str(e)
     
     def get_teacher_profile(self, user_id_or_email: str) -> Optional[Dict]:
         """
@@ -75,7 +150,7 @@ class ProfileService(VerificationBaseService):
             
         return profile
     
-    def update_teacher_profile(self, user_id_or_email: str, profile_data: Dict) -> None:
+    def update_teacher_profile(self, user_id_or_email: str, profile_data: Dict) -> bool:
         """
         Actualiza o crea un perfil de profesor
         
@@ -97,6 +172,7 @@ class ProfileService(VerificationBaseService):
         try:
             if profile:
                 # Actualizar perfil existente
+                profile_data["updated_at"] = datetime.now()
                 result = self.db.teacher_profiles.update_one(
                     {"user_id": user_id},
                     {"$set": profile_data}
@@ -108,13 +184,74 @@ class ProfileService(VerificationBaseService):
                 # Crear un nuevo perfil
                 profile_data["user_id"] = user_id
                 profile_data["created_at"] = datetime.now()
+                profile_data["updated_at"] = datetime.now()
                 
                 teacher_profile = TeacherProfile(**profile_data)
                 self.db.teacher_profiles.insert_one(teacher_profile.to_dict())
+                
+            return True
         except AppException:
             raise
         except Exception as e:
+            log_error(f"Error al actualizar perfil de profesor: {str(e)}", e, "profiles.services")
             raise AppException(f"Error al actualizar perfil de profesor: {str(e)}", AppException.BAD_REQUEST)
+    
+    def delete_teacher_profile(self, user_id_or_email: str) -> bool:
+        """
+        Elimina el perfil de profesor para un usuario específico.
+        
+        Args:
+            user_id_or_email: ID o email del usuario profesor
+            
+        Returns:
+            bool: True si se eliminó correctamente, False en caso contrario
+        """
+        user_id = self._get_user_id(user_id_or_email)
+        if not user_id:
+            return False
+            
+        result = self.db.teacher_profiles.delete_one({"user_id": user_id})
+        return result.deleted_count > 0
+    
+    #
+    # MÉTODOS PARA PERFIL DE ESTUDIANTE
+    #
+    
+    def create_student_profile(self, user_id_or_email: str, profile_data: Dict) -> Tuple[bool, str]:
+        """
+        Crea un nuevo perfil de estudiante
+        
+        Args:
+            user_id_or_email: ID o email del usuario estudiante
+            profile_data: Datos del perfil a crear
+            
+        Returns:
+            Tuple[bool, str]: (Éxito, Mensaje o ID del perfil)
+        """
+        try:
+            # Verificar si el usuario existe y es estudiante
+            user_id = self._get_user_id(user_id_or_email)
+            if not user_id:
+                return False, f"Usuario no encontrado: {user_id_or_email}"
+            
+            user_role = self.get_user_role(user_id_or_email)
+            if user_role != "STUDENT":
+                return False, f"El usuario no es un estudiante: {user_id_or_email}"
+            
+            # Verificar si ya existe un perfil
+            existing_profile = self.db.student_profiles.find_one({"user_id": user_id})
+            if existing_profile:
+                return False, f"Ya existe un perfil para este estudiante: {user_id_or_email}"
+            
+            # Crear un nuevo perfil
+            profile_data["user_id"] = user_id
+            student_profile = StudentProfile(**profile_data)
+            result = self.db.student_profiles.insert_one(student_profile.to_dict())
+            
+            return True, str(result.inserted_id)
+        except Exception as e:
+            log_error(f"Error al crear perfil de estudiante: {str(e)}", e, "profiles.services")
+            return False, str(e)
     
     def get_student_profile(self, user_id_or_email: str) -> Optional[Dict]:
         """
@@ -229,7 +366,7 @@ class ProfileService(VerificationBaseService):
             log_error(f"Error al obtener perfil de estudiante: {str(e)}", e, "profiles.services")
             return None
     
-    def update_student_profile(self, user_id_or_email: str, profile_data: Dict) -> None:
+    def update_student_profile(self, user_id_or_email: str, profile_data: Dict) -> bool:
         """
         Actualiza el perfil de estudiante para un usuario específico.
         
@@ -250,24 +387,85 @@ class ProfileService(VerificationBaseService):
         try:
             if profile:
                 # Actualizar perfil existente
+                profile_data["updated_at"] = datetime.now()
                 result = self.db.student_profiles.update_one(
                     {"user_id": user_id},
                     {"$set": profile_data}
                 )
                 
                 if result.modified_count == 0:
-                    raise AppException("No se realizaron cambios al perfil", AppException.BAD_REQUEST)
+                    log_info(f"No se realizaron cambios al perfil de estudiante para: {user_id_or_email}", "profiles.services")
             else:
                 # Crear un nuevo perfil
                 profile_data["user_id"] = user_id
                 profile_data["created_at"] = datetime.now()
+                profile_data["updated_at"] = datetime.now()
                 
                 student_profile = StudentProfile(**profile_data)
                 self.db.student_profiles.insert_one(student_profile.to_dict())
-        except AppException:
-            raise
+                log_info(f"Perfil de estudiante creado para: {user_id_or_email}", "profiles.services")
+            
+            return True
         except Exception as e:
+            log_error(f"Error al actualizar perfil de estudiante: {str(e)}", e, "profiles.services")
             raise AppException(f"Error al actualizar perfil de estudiante: {str(e)}", AppException.BAD_REQUEST)
+    
+    def delete_student_profile(self, user_id_or_email: str) -> bool:
+        """
+        Elimina el perfil de estudiante para un usuario específico.
+        
+        Args:
+            user_id_or_email: ID o email del usuario estudiante
+            
+        Returns:
+            bool: True si se eliminó correctamente, False en caso contrario
+        """
+        user_id = self._get_user_id(user_id_or_email)
+        if not user_id:
+            return False
+            
+        result = self.db.student_profiles.delete_one({"user_id": user_id})
+        return result.deleted_count > 0
+    
+    #
+    # MÉTODOS PARA PERFIL DE ADMINISTRADOR
+    #
+    
+    def create_admin_profile(self, user_id_or_email: str, profile_data: Dict) -> Tuple[bool, str]:
+        """
+        Crea un nuevo perfil de administrador
+        
+        Args:
+            user_id_or_email: ID o email del usuario administrador
+            profile_data: Datos del perfil a crear
+            
+        Returns:
+            Tuple[bool, str]: (Éxito, Mensaje o ID del perfil)
+        """
+        try:
+            # Verificar si el usuario existe y es administrador
+            user_id = self._get_user_id(user_id_or_email)
+            if not user_id:
+                return False, f"Usuario no encontrado: {user_id_or_email}"
+            
+            user_role = self.get_user_role(user_id_or_email)
+            if user_role not in ["ADMIN", "INSTITUTE_ADMIN"]:
+                return False, f"El usuario no es un administrador: {user_id_or_email}"
+            
+            # Verificar si ya existe un perfil
+            existing_profile = self.db.admin_profiles.find_one({"user_id": user_id})
+            if existing_profile:
+                return False, f"Ya existe un perfil para este administrador: {user_id_or_email}"
+            
+            # Crear un nuevo perfil
+            profile_data["user_id"] = user_id
+            admin_profile = AdminProfile(**profile_data)
+            result = self.db.admin_profiles.insert_one(admin_profile.to_dict())
+            
+            return True, str(result.inserted_id)
+        except Exception as e:
+            log_error(f"Error al crear perfil de administrador: {str(e)}", e, "profiles.services")
+            return False, str(e)
     
     def get_admin_profile(self, user_id_or_email: str) -> Optional[Dict]:
         """
@@ -302,7 +500,7 @@ class ProfileService(VerificationBaseService):
             
         return profile
     
-    def update_admin_profile(self, user_id_or_email: str, profile_data: Dict) -> None:
+    def update_admin_profile(self, user_id_or_email: str, profile_data: Dict) -> bool:
         """
         Actualiza el perfil de administrador para un usuario específico.
         
@@ -313,16 +511,18 @@ class ProfileService(VerificationBaseService):
         Raises:
             AppException: Si el usuario no existe o si ocurre un error durante la actualización
         """
-        user_id = self._get_user_id(user_id_or_email)
-        if not user_id:
+        if not self.check_user_exists(user_id_or_email):
             raise AppException(f"Usuario no encontrado: {user_id_or_email}", AppException.NOT_FOUND)
-            
+        
+        user_id = self._get_user_id(user_id_or_email)
+        
         # Verificar si ya existe un perfil
         profile = self.db.admin_profiles.find_one({"user_id": user_id})
         
         try:
             if profile:
                 # Actualizar perfil existente
+                profile_data["updated_at"] = datetime.now()
                 result = self.db.admin_profiles.update_one(
                     {"user_id": user_id},
                     {"$set": profile_data}
@@ -334,17 +534,218 @@ class ProfileService(VerificationBaseService):
                 # Crear un nuevo perfil
                 profile_data["user_id"] = user_id
                 profile_data["created_at"] = datetime.now()
+                profile_data["updated_at"] = datetime.now()
                 
                 admin_profile = AdminProfile(**profile_data)
                 self.db.admin_profiles.insert_one(admin_profile.to_dict())
+            
+            return True
         except AppException:
             raise
         except Exception as e:
+            log_error(f"Error al actualizar perfil de administrador: {str(e)}", e, "profiles.services")
             raise AppException(f"Error al actualizar perfil de administrador: {str(e)}", AppException.BAD_REQUEST)
-
+    
+    def delete_admin_profile(self, user_id_or_email: str) -> bool:
+        """
+        Elimina el perfil de administrador para un usuario específico.
+        
+        Args:
+            user_id_or_email: ID o email del usuario administrador
+            
+        Returns:
+            bool: True si se eliminó correctamente, False en caso contrario
+        """
+        user_id = self._get_user_id(user_id_or_email)
+        if not user_id:
+            return False
+            
+        result = self.db.admin_profiles.delete_one({"user_id": user_id})
+        return result.deleted_count > 0
+    
+    #
+    # MÉTODOS PARA PERFIL COGNITIVO
+    #
+    
+    def create_cognitive_profile(self, user_id_or_email: str, profile_data: Dict = None) -> Tuple[bool, str]:
+        """
+        Crea un nuevo perfil cognitivo para un estudiante.
+        
+        Args:
+            user_id_or_email: ID o email del usuario estudiante
+            profile_data: Datos del perfil a crear (opcional)
+            
+        Returns:
+            Tuple[bool, str]: (Éxito, Mensaje o ID del perfil)
+        """
+        try:
+            # Verificar si el usuario existe y es estudiante
+            user_id = self._get_user_id(user_id_or_email)
+            if not user_id:
+                return False, f"Usuario no encontrado: {user_id_or_email}"
+            
+            user_role = self.get_user_role(user_id_or_email)
+            if user_role != "STUDENT":
+                return False, f"El usuario no es un estudiante: {user_id_or_email}"
+            
+            # Verificar si ya existe un perfil cognitivo
+            existing_profile = self.db.cognitive_profiles.find_one({"user_id": user_id})
+            if existing_profile:
+                return False, f"Ya existe un perfil cognitivo para este estudiante: {user_id_or_email}"
+            
+            # Crear un nuevo perfil cognitivo con valores por defecto o con los datos proporcionados
+            cognitive_profile = CognitiveProfile(
+                user_id=str(user_id),
+                **(profile_data or {})
+            )
+            
+            # Convertir a versión serializable
+            profile_dict = cognitive_profile.to_dict()
+            profile_dict_serializable = make_json_serializable(profile_dict)
+            
+            # Guardar el perfil cognitivo
+            result = self.db.cognitive_profiles.insert_one({
+                "user_id": profile_dict["user_id"],  # Mantener como ObjectId para la BD
+                "learning_style": profile_dict["learning_style"],
+                "diagnosis": profile_dict["diagnosis"],
+                "cognitive_strengths": profile_dict["cognitive_strengths"],
+                "cognitive_difficulties": profile_dict["cognitive_difficulties"],
+                "personal_context": profile_dict["personal_context"],
+                "recommended_strategies": profile_dict["recommended_strategies"],
+                "created_at": profile_dict["created_at"],
+                "updated_at": profile_dict["updated_at"],
+                "profile": json.dumps(profile_dict_serializable)  # Versión serializable
+            })
+            
+            return True, str(result.inserted_id)
+        except Exception as e:
+            log_error(f"Error al crear perfil cognitivo: {str(e)}", e, "profiles.services")
+            return False, str(e)
+    
+    def get_cognitive_profile(self, user_id_or_email: str) -> Optional[Dict]:
+        """
+        Obtiene el perfil cognitivo para un usuario específico.
+        
+        Args:
+            user_id_or_email: ID o email del usuario estudiante
+            
+        Returns:
+            Dict: Información del perfil cognitivo si existe, None en caso contrario
+        """
+        try:
+            user_id = self._get_user_id(user_id_or_email)
+            if not user_id:
+                return None
+                
+            profile = self.db.cognitive_profiles.find_one({"user_id": user_id})
+            if not profile:
+                return None
+                
+            # Convertir ObjectId a string para serialización
+            profile["_id"] = str(profile["_id"])
+            profile["user_id"] = str(profile["user_id"])
+            
+            # Cargar el perfil completo desde el campo profile si existe
+            if "profile" in profile and profile["profile"]:
+                try:
+                    profile_data = json.loads(profile["profile"])
+                    profile["profile_data"] = profile_data
+                except:
+                    profile["profile_data"] = {}
+            
+            # Obtener información del usuario asociado
+            user = self.db.users.find_one({"_id": user_id})
+            if user:
+                profile["user"] = {
+                    "name": user.get("name", ""),
+                    "email": user.get("email", ""),
+                    "picture": user.get("picture", "")
+                }
+                
+            return profile
+        except Exception as e:
+            log_error(f"Error al obtener perfil cognitivo: {str(e)}", e, "profiles.services")
+            return None
+    
+    def update_cognitive_profile(self, user_id_or_email: str, profile_data: Dict) -> bool:
+        """
+        Actualiza el perfil cognitivo para un usuario específico.
+        
+        Args:
+            user_id_or_email: ID o email del usuario estudiante
+            profile_data: Datos del perfil a actualizar (puede ser un diccionario o un string JSON)
+            
+        Returns:
+            bool: True si se actualizó correctamente, False en caso contrario
+        """
+        try:
+            user_id = self._get_user_id(user_id_or_email)
+            if not user_id:
+                return False
+            
+            # Convertir profile_data a diccionario si es string
+            if isinstance(profile_data, str):
+                profile_dict = json.loads(profile_data)
+            else:
+                profile_dict = profile_data
+            
+            # Crear una versión serializable para almacenar en el campo 'profile'
+            profile_dict_serializable = make_json_serializable(profile_dict)
+            
+            # Verificar si ya existe un perfil
+            existing_profile = self.db.cognitive_profiles.find_one({"user_id": user_id})
+            
+            if existing_profile:
+                # Actualizar perfil existente
+                update_data = {
+                    "updated_at": datetime.now(),
+                    "profile": json.dumps(profile_dict_serializable)
+                }
+                
+                # Añadir campos individuales si existen en profile_dict
+                for field in ["learning_style", "diagnosis", "cognitive_strengths", 
+                              "cognitive_difficulties", "personal_context", "recommended_strategies"]:
+                    if field in profile_dict:
+                        update_data[field] = profile_dict[field]
+                
+                result = self.db.cognitive_profiles.update_one(
+                    {"user_id": user_id},
+                    {"$set": update_data}
+                )
+                
+                return result.modified_count > 0
+            else:
+                # Crear un nuevo perfil cognitivo
+                return self.create_cognitive_profile(user_id_or_email, profile_dict)[0]
+                
+        except Exception as e:
+            log_error(f"Error al actualizar perfil cognitivo: {str(e)}", e, "profiles.services")
+            return False
+    
+    def delete_cognitive_profile(self, user_id_or_email: str) -> bool:
+        """
+        Elimina el perfil cognitivo para un usuario específico.
+        
+        Args:
+            user_id_or_email: ID o email del usuario estudiante
+            
+        Returns:
+            bool: True si se eliminó correctamente, False en caso contrario
+        """
+        user_id = self._get_user_id(user_id_or_email)
+        if not user_id:
+            return False
+            
+        result = self.db.cognitive_profiles.delete_one({"user_id": user_id})
+        return result.deleted_count > 0
+    
+    #
+    # MÉTODOS GENERALES
+    #
+    
     def check_user_exists(self, user_id_or_email: str) -> bool:
         """
-        Verifica si un usuario existe basado en su ID o email
+        Verifica si un usuario existe en la base de datos.
         
         Args:
             user_id_or_email: ID o email del usuario
@@ -352,8 +753,519 @@ class ProfileService(VerificationBaseService):
         Returns:
             bool: True si el usuario existe, False en caso contrario
         """
+        user_id = self._get_user_id(user_id_or_email)
+        return user_id is not None
+    
+    def create_profile_for_user(self, user_id_or_email: str, user_role: str = None) -> Tuple[bool, str]:
+        """
+        Crea el perfil adecuado según el rol del usuario.
+        
+        Args:
+            user_id_or_email: ID o email del usuario
+            user_role: Rol del usuario (opcional, si no se proporciona se obtiene de la base de datos)
+            
+        Returns:
+            Tuple[bool, str]: (Éxito, Mensaje o ID del perfil)
+        """
+        if not user_role:
+            user_role = self.get_user_role(user_id_or_email)
+            
+        if not user_role:
+            return False, f"No se pudo determinar el rol del usuario: {user_id_or_email}"
+            
+        if user_role == "TEACHER":
+            return self.create_teacher_profile(user_id_or_email, {})
+        elif user_role == "STUDENT":
+            # Para estudiantes, crear tanto el perfil regular como el cognitivo
+            success, message = self.create_student_profile(user_id_or_email, {})
+            if not success:
+                return False, message
+                
+            cognitive_success, cognitive_message = self.create_cognitive_profile(user_id_or_email)
+            if not cognitive_success:
+                log_info(f"No se pudo crear el perfil cognitivo, pero se creó el perfil regular: {cognitive_message}", "profiles.services")
+                
+            return True, message
+        elif user_role == "ADMIN":
+            # Perfil de administrador general del sistema
+            return self.create_admin_profile(user_id_or_email, {})
+        elif user_role == "INSTITUTE_ADMIN":
+            # Para administradores de instituto, primero necesitamos obtener el ID del instituto
+            try:
+                user_id = self._get_user_id(user_id_or_email)
+                # Buscar la relación instituto-admin
+                institute_member = self.db.institute_members.find_one({
+                    "user_id": user_id,
+                    "role": "INSTITUTE_ADMIN"
+                })
+                
+                if not institute_member or "institute_id" not in institute_member:
+                    # Si no hay relación, mostrar error, no crear perfil admin estándar
+                    return False, f"No se encontró relación instituto-admin para {user_id_or_email}"
+                
+                institute_id = str(institute_member["institute_id"])
+                
+                # Crear perfil de administrador de instituto
+                admin_success, admin_message = self.create_institute_admin_profile(
+                    user_id_or_email, 
+                    institute_id,
+                    {
+                        "role_in_institute": "INSTITUTE_ADMIN",
+                        "responsibilities": ["Gestión general del instituto"]
+                    }
+                )
+                
+                if not admin_success:
+                    return False, admin_message
+                    
+                # Verificar si ya existe un perfil para el instituto, si no, crearlo
+                institute = self.db.institutes.find_one({"_id": ObjectId(institute_id)})
+                if institute:
+                    if not self.db.institute_profiles.find_one({"institute_id": ObjectId(institute_id)}):
+                        # Crear perfil básico del instituto
+                        institute_success, institute_message = self.create_institute_profile(
+                            institute_id, 
+                            institute.get("name", "Instituto sin nombre"),
+                            {
+                                "status": institute.get("status", "active"),
+                                "created_at": institute.get("created_at", datetime.now())
+                            }
+                        )
+                        if not institute_success:
+                            log_warning(f"No se pudo crear perfil del instituto: {institute_message}", "profiles.services")
+                
+                return admin_success, admin_message
+            except Exception as e:
+                log_error(f"Error al crear perfil de administrador de instituto: {str(e)}", e, "profiles.services")
+                return False, f"Error al crear perfil: {str(e)}"
+        else:
+            return False, f"Rol de usuario no soportado: {user_role}"
+    
+    def get_user_profile(self, user_id_or_email: str) -> Optional[Dict]:
+        """
+        Obtiene el perfil completo de un usuario, incluyendo su perfil específico según el rol.
+        
+        Args:
+            user_id_or_email: ID o email del usuario
+            
+        Returns:
+            Dict: Perfil completo del usuario
+        """
         try:
             user_id = self._get_user_id(user_id_or_email)
-            return user_id is not None
-        except Exception:
+            if not user_id:
+                return None
+                
+            # Obtener información básica del usuario
+            user = self.db.users.find_one({"_id": user_id})
+            if not user:
+                return None
+                
+            # Crear respuesta base
+            profile_data = {
+                "user_info": {
+                    "id": str(user["_id"]),
+                    "name": user.get("name", ""),
+                    "email": user.get("email", ""),
+                    "role": user.get("role", ""),
+                    "picture": user.get("picture", ""),
+                    "status": user.get("status", "active")
+                },
+                "specific_profile": None,
+                "cognitive_profile": None
+            }
+            
+            # Obtener perfil específico según el rol
+            role = user.get("role", "")
+            if role == "TEACHER":
+                specific_profile = self.get_teacher_profile(user_id_or_email)
+                if specific_profile:
+                    profile_data["specific_profile"] = specific_profile
+            elif role == "STUDENT":
+                specific_profile = self.get_student_profile(user_id_or_email)
+                if specific_profile:
+                    profile_data["specific_profile"] = specific_profile
+                    
+                # Añadir perfil cognitivo para estudiantes
+                cognitive_profile = self.get_cognitive_profile(user_id_or_email)
+                if cognitive_profile:
+                    profile_data["cognitive_profile"] = cognitive_profile
+            elif role in ["ADMIN", "INSTITUTE_ADMIN"]:
+                specific_profile = self.get_admin_profile(user_id_or_email)
+                if specific_profile:
+                    profile_data["specific_profile"] = specific_profile
+            
+            return profile_data
+        except Exception as e:
+            log_error(f"Error al obtener perfil de usuario: {str(e)}", e, "profiles.services")
+            return None
+    
+    #
+    # MÉTODOS PARA PERFIL DE ADMINISTRADOR DE INSTITUTO
+    #
+    
+    def create_institute_admin_profile(self, user_id_or_email: str, institute_id: str, profile_data: Dict = None) -> Tuple[bool, str]:
+        """
+        Crea un nuevo perfil de administrador de instituto
+        
+        Args:
+            user_id_or_email: ID o email del usuario administrador de instituto
+            institute_id: ID del instituto que administra
+            profile_data: Datos adicionales del perfil a crear (opcional)
+            
+        Returns:
+            Tuple[bool, str]: (Éxito, Mensaje o ID del perfil)
+        """
+        try:
+            # Verificar si el usuario existe y es administrador de instituto
+            user_id = self._get_user_id(user_id_or_email)
+            if not user_id:
+                return False, f"Usuario no encontrado: {user_id_or_email}"
+            
+            user_role = self.get_user_role(user_id_or_email)
+            if user_role != "INSTITUTE_ADMIN":
+                return False, f"El usuario no es un administrador de instituto: {user_id_or_email}"
+            
+            # Verificar si ya existe un perfil
+            existing_profile = self.db.institute_admin_profiles.find_one({"user_id": user_id})
+            if existing_profile:
+                return True, str(existing_profile["_id"])  # Retornamos éxito y el ID si ya existe
+            
+            # Verificar que el instituto exista
+            institute_obj_id = ObjectId(institute_id) if isinstance(institute_id, str) else institute_id
+            institute = self.db.institutes.find_one({"_id": institute_obj_id})
+            if not institute:
+                return False, f"No se encontró el instituto con ID: {institute_id}"
+            
+            # Verificar relación instituto-admin si no se está creando junto con el usuario
+            if not self.db.institute_members.find_one({
+                "user_id": user_id, 
+                "institute_id": institute_obj_id, 
+                "role": "INSTITUTE_ADMIN"
+            }):
+                # Crear la relación si no existe
+                log_info(f"Creando relación instituto-admin para usuario {user_id_or_email}", "profiles.services")
+                self.db.institute_members.insert_one({
+                    "institute_id": institute_obj_id,
+                    "user_id": user_id,
+                    "role": "INSTITUTE_ADMIN",
+                    "joined_at": datetime.now()
+                })
+            
+            # Crear un nuevo perfil con los datos proporcionados
+            profile_data = profile_data or {}
+            
+            # Asegurar campos mínimos
+            if "institute_permissions" not in profile_data:
+                profile_data["institute_permissions"] = ["manage_members", "manage_courses", "view_reports"]
+            if "responsibilities" not in profile_data:
+                profile_data["responsibilities"] = ["Gestión general del instituto"]
+                
+            profile_data["user_id"] = user_id
+            profile_data["institute_id"] = institute_obj_id
+            profile_data["role_in_institute"] = profile_data.get("role_in_institute", "INSTITUTE_ADMIN")
+            
+            institute_admin_profile = InstituteAdminProfile(**profile_data)
+            result = self.db.institute_admin_profiles.insert_one(institute_admin_profile.to_dict())
+            
+            log_info(f"Perfil de administrador de instituto creado para usuario {user_id_or_email}", "profiles.services")
+            return True, str(result.inserted_id)
+        except Exception as e:
+            log_error(f"Error al crear perfil de administrador de instituto: {str(e)}", e, "profiles.services")
+            return False, str(e)
+    
+    def get_institute_admin_profile(self, user_id_or_email: str) -> Optional[Dict]:
+        """
+        Obtiene el perfil de administrador de instituto para un usuario específico.
+        
+        Args:
+            user_id_or_email: ID o email del usuario administrador de instituto
+            
+        Returns:
+            Dict: Información del perfil de administrador de instituto si existe, None en caso contrario
+        """
+        user_id = self._get_user_id(user_id_or_email)
+        if not user_id:
+            return None
+            
+        profile = self.db.institute_admin_profiles.find_one({"user_id": user_id})
+        if not profile:
+            return None
+            
+        # Convertir ObjectId a string para serialización
+        profile["_id"] = str(profile["_id"])
+        profile["user_id"] = str(profile["user_id"])
+        profile["institute_id"] = str(profile["institute_id"])
+        
+        # Obtener información del usuario asociado
+        user = self.db.users.find_one({"_id": user_id})
+        if user:
+            profile["user"] = {
+                "name": user.get("name", ""),
+                "email": user.get("email", ""),
+                "picture": user.get("picture", "")
+            }
+            
+        # Obtener información del instituto asociado
+        institute = self.db.institutes.find_one({"_id": profile["institute_id"]})
+        if institute:
+            profile["institute"] = {
+                "name": institute.get("name", ""),
+                "status": institute.get("status", "")
+            }
+            
+        return profile
+    
+    def update_institute_admin_profile(self, user_id_or_email: str, profile_data: Dict) -> bool:
+        """
+        Actualiza el perfil de administrador de instituto para un usuario específico.
+        
+        Args:
+            user_id_or_email: ID o email del usuario administrador de instituto
+            profile_data: Datos del perfil a actualizar
+            
+        Returns:
+            bool: True si se actualizó correctamente, False en caso contrario
+        """
+        try:
+            user_id = self._get_user_id(user_id_or_email)
+            if not user_id:
+                return False
+            
+            # Verificar si ya existe un perfil
+            profile = self.db.institute_admin_profiles.find_one({"user_id": user_id})
+            
+            if profile:
+                # No permitir actualizar el user_id o institute_id para mantener integridad
+                if "user_id" in profile_data:
+                    del profile_data["user_id"]
+                
+                # Actualizar perfil existente
+                profile_data["updated_at"] = datetime.now()
+                result = self.db.institute_admin_profiles.update_one(
+                    {"user_id": user_id},
+                    {"$set": profile_data}
+                )
+                
+                return result.modified_count > 0
+            else:
+                # No se puede actualizar un perfil que no existe
+                log_error(f"No existe un perfil de administrador de instituto para: {user_id_or_email}", None, "profiles.services")
+                return False
+                
+        except Exception as e:
+            log_error(f"Error al actualizar perfil de administrador de instituto: {str(e)}", e, "profiles.services")
+            return False
+    
+    def delete_institute_admin_profile(self, user_id_or_email: str) -> bool:
+        """
+        Elimina el perfil de administrador de instituto para un usuario específico.
+        
+        Args:
+            user_id_or_email: ID o email del usuario administrador de instituto
+            
+        Returns:
+            bool: True si se eliminó correctamente, False en caso contrario
+        """
+        user_id = self._get_user_id(user_id_or_email)
+        if not user_id:
+            return False
+            
+        result = self.db.institute_admin_profiles.delete_one({"user_id": user_id})
+        return result.deleted_count > 0
+    
+    #
+    # MÉTODOS PARA PERFIL DE INSTITUTO
+    #
+    
+    def create_institute_profile(self, institute_id: str, name: str, profile_data: Dict = None) -> Tuple[bool, str]:
+        """
+        Crea un nuevo perfil para un instituto
+        
+        Args:
+            institute_id: ID del instituto
+            name: Nombre del instituto
+            profile_data: Datos adicionales del perfil a crear (opcional)
+            
+        Returns:
+            Tuple[bool, str]: (Éxito, Mensaje o ID del perfil)
+        """
+        try:
+            # Convertir institute_id a ObjectId
+            institute_obj_id = ObjectId(institute_id) if isinstance(institute_id, str) else institute_id
+            
+            # Verificar si ya existe un perfil
+            existing_profile = self.db.institute_profiles.find_one({
+                "institute_id": institute_obj_id
+            })
+            
+            if existing_profile:
+                return True, str(existing_profile["_id"])  # Retornamos éxito y el ID si ya existe
+            
+            # Verificar que el instituto exista
+            institute = self.db.institutes.find_one({"_id": institute_obj_id})
+            if not institute:
+                return False, f"No se encontró el instituto con ID: {institute_id}"
+            
+            # Usar nombre de la colección institutes si no se proporciona
+            if not name or name == "Instituto sin nombre":
+                name = institute.get("name", "Instituto sin nombre")
+            
+            # Crear un nuevo perfil con los datos proporcionados
+            profile_data = profile_data or {}
+            
+            # Establecer campos mínimos
+            minimal_data = {
+                "institute_id": institute_obj_id,
+                "name": name,
+                "status": institute.get("status", "active"),
+                "created_at": institute.get("created_at", datetime.now()),
+                "educational_levels": [],
+                "number_of_students": 0,
+                "number_of_teachers": 0
+            }
+            
+            # Combinar datos mínimos con los proporcionados
+            for key, value in minimal_data.items():
+                if key not in profile_data:
+                    profile_data[key] = value
+            
+            institute_profile = InstituteProfile(**profile_data)
+            result = self.db.institute_profiles.insert_one(institute_profile.to_dict())
+            
+            log_info(f"Perfil de instituto creado para {name} (ID: {institute_id})", "profiles.services")
+            return True, str(result.inserted_id)
+        except Exception as e:
+            log_error(f"Error al crear perfil de instituto: {str(e)}", e, "profiles.services")
+            return False, str(e)
+    
+    def get_institute_profile(self, institute_id: str) -> Optional[Dict]:
+        """
+        Obtiene el perfil de un instituto específico.
+        
+        Args:
+            institute_id: ID del instituto
+            
+        Returns:
+            Dict: Información del perfil del instituto si existe, None en caso contrario
+        """
+        try:
+            institute_obj_id = ObjectId(institute_id) if isinstance(institute_id, str) else institute_id
+            profile = self.db.institute_profiles.find_one({"institute_id": institute_obj_id})
+            
+            if not profile:
+                # Verificar si existe el instituto pero no tiene perfil
+                institute = self.db.institutes.find_one({"_id": institute_obj_id})
+                if not institute:
+                    return None
+                
+                # Crear un perfil básico para el instituto
+                profile_data = {
+                    "institute_id": institute_obj_id,
+                    "name": institute.get("name", "Instituto sin nombre"),
+                    "status": institute.get("status", "active"),
+                    "created_at": institute.get("created_at", datetime.now())
+                }
+                
+                institute_profile = InstituteProfile(**profile_data)
+                result = self.db.institute_profiles.insert_one(institute_profile.to_dict())
+                
+                # Obtener el perfil recién creado
+                profile = self.db.institute_profiles.find_one({"_id": result.inserted_id})
+                if not profile:
+                    return None
+            
+            # Convertir ObjectId a string para serialización
+            profile["_id"] = str(profile["_id"])
+            profile["institute_id"] = str(profile["institute_id"])
+            
+            # Obtener estadísticas adicionales
+            try:
+                # Contar miembros del instituto
+                member_count = self.db.institute_members.count_documents({
+                    "institute_id": institute_obj_id
+                })
+                
+                # Contar clases del instituto
+                class_count = self.db.classes.count_documents({
+                    "institute_id": institute_obj_id
+                })
+                
+                profile["statistics"] = {
+                    "total_members": member_count,
+                    "total_classes": class_count
+                }
+            except Exception as stats_e:
+                log_error(f"Error al obtener estadísticas del instituto: {str(stats_e)}", stats_e, "profiles.services")
+                
+            return profile
+        except Exception as e:
+            log_error(f"Error al obtener perfil de instituto: {str(e)}", e, "profiles.services")
+            return None
+    
+    def update_institute_profile(self, institute_id: str, profile_data: Dict) -> bool:
+        """
+        Actualiza el perfil de un instituto específico.
+        
+        Args:
+            institute_id: ID del instituto
+            profile_data: Datos del perfil a actualizar
+            
+        Returns:
+            bool: True si se actualizó correctamente, False en caso contrario
+        """
+        try:
+            institute_obj_id = ObjectId(institute_id) if isinstance(institute_id, str) else institute_id
+            
+            # Verificar si ya existe un perfil
+            profile = self.db.institute_profiles.find_one({"institute_id": institute_obj_id})
+            
+            if profile:
+                # No permitir actualizar el institute_id para mantener integridad
+                if "institute_id" in profile_data:
+                    del profile_data["institute_id"]
+                
+                # Actualizar perfil existente
+                profile_data["updated_at"] = datetime.now()
+                result = self.db.institute_profiles.update_one(
+                    {"institute_id": institute_obj_id},
+                    {"$set": profile_data}
+                )
+                
+                return result.modified_count > 0
+            else:
+                # Si no existe un perfil, intentar crear uno
+                if "name" not in profile_data:
+                    # Obtener el nombre del instituto de la colección institutes
+                    institute = self.db.institutes.find_one({"_id": institute_obj_id})
+                    if not institute:
+                        return False
+                    profile_data["name"] = institute.get("name", "Instituto sin nombre")
+                
+                profile_data["institute_id"] = institute_obj_id
+                institute_profile = InstituteProfile(**profile_data)
+                result = self.db.institute_profiles.insert_one(institute_profile.to_dict())
+                
+                return result.acknowledged
+                
+        except Exception as e:
+            log_error(f"Error al actualizar perfil de instituto: {str(e)}", e, "profiles.services")
+            return False
+    
+    def delete_institute_profile(self, institute_id: str) -> bool:
+        """
+        Elimina el perfil de un instituto específico.
+        
+        Args:
+            institute_id: ID del instituto
+            
+        Returns:
+            bool: True si se eliminó correctamente, False en caso contrario
+        """
+        try:
+            institute_obj_id = ObjectId(institute_id) if isinstance(institute_id, str) else institute_id
+            result = self.db.institute_profiles.delete_one({"institute_id": institute_obj_id})
+            return result.deleted_count > 0
+        except Exception as e:
+            log_error(f"Error al eliminar perfil de instituto: {str(e)}", e, "profiles.services")
             return False 
