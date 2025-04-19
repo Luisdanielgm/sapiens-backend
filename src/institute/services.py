@@ -21,7 +21,22 @@ class InstituteService(VerificationBaseService):
             # Crear instituto
             institute = Institute(**institute_data)
             result = self.collection.insert_one(institute.to_dict())
-            return True, str(result.inserted_id)
+            institute_id = str(result.inserted_id)
+            
+            # Crear automáticamente el perfil del instituto en la colección institute_profiles
+            try:
+                from src.profiles.services import ProfileService
+                profile_service = ProfileService()
+                profile_service.create_institute_profile(
+                    institute_id=institute_id,
+                    name=institute_data.get("name", "Instituto sin nombre"),
+                    profile_data=None
+                )
+            except Exception as profile_error:
+                print(f"Error al crear el perfil del instituto: {str(profile_error)}")
+                # Continuar a pesar del error en la creación del perfil
+            
+            return True, institute_id
         except Exception as e:
             return False, str(e)
 

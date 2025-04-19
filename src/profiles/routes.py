@@ -600,7 +600,7 @@ def delete_institute_admin_profile(user_id_or_email):
 @profiles_bp.route('/institute', methods=['POST'])
 @APIRoute.standard(auth_required_flag=True, roles=[ROLES["ADMIN"], ROLES["INSTITUTE_ADMIN"]], 
                    required_fields=['institute_id', 'name'])
-def create_institute_profile():
+def create_institute_profile(): 
     """
     Crea un perfil para un instituto específico.
     

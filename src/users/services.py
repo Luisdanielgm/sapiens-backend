@@ -43,13 +43,35 @@ class UserService(VerificationBaseService):
                     'status': 'pending'
                 })
                 
+                institute_id = institute_result.inserted_id
+                
                 # Crear relación instituto-admin
                 db.institute_members.insert_one({
-                    'institute_id': institute_result.inserted_id,
+                    'institute_id': institute_id,
                     'user_id': user_id,
                     'role': 'INSTITUTE_ADMIN',
                     'joined_at': datetime.now()
                 })
+                
+                # Crear perfil del instituto
+                try:
+                    from src.profiles.services import ProfileService
+                    profile_service = ProfileService()
+                    profile_service.create_institute_profile(
+                        institute_id=str(institute_id),
+                        name=institute_name,
+                        profile_data=None
+                    )
+                    
+                    # Crear perfil de administrador de instituto
+                    profile_service.create_institute_admin_profile(
+                        user_id_or_email=str(user_id),
+                        institute_id=str(institute_id),
+                        profile_data=None
+                    )
+                except Exception as profile_error:
+                    logging.error(f"Error al crear los perfiles de instituto: {str(profile_error)}")
+                    # Continuar a pesar del error en la creación del perfil
 
             # Crear perfiles para el usuario según su rol
             try:

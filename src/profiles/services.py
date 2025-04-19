@@ -188,7 +188,7 @@ class ProfileService(VerificationBaseService):
                 
                 teacher_profile = TeacherProfile(**profile_data)
                 self.db.teacher_profiles.insert_one(teacher_profile.to_dict())
-                
+            
             return True
         except AppException:
             raise
@@ -1117,6 +1117,11 @@ class ProfileService(VerificationBaseService):
         """
         Crea un nuevo perfil para un instituto
         
+        IMPORTANTE: Este método crea un perfil para un instituto existente, NO crea el instituto en sí.
+        Sigue el mismo patrón que los perfiles de usuario (student_profiles, teacher_profiles, etc.)
+        donde los datos básicos están en una colección (institutes) y los datos específicos del perfil
+        en otra (institute_profiles).
+        
         Args:
             institute_id: ID del instituto
             name: Nombre del instituto
@@ -1165,6 +1170,7 @@ class ProfileService(VerificationBaseService):
                 if key not in profile_data:
                     profile_data[key] = value
             
+            # Aseguramos que usamos el modelo InstituteProfile y lo guardamos en institute_profiles
             institute_profile = InstituteProfile(**profile_data)
             result = self.db.institute_profiles.insert_one(institute_profile.to_dict())
             
