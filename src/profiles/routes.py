@@ -538,12 +538,18 @@ def update_institute_admin_profile():
     profile_data = data.get('profile_data', {})
     
     # Verificar que el usuario actual tenga permisos para actualizar este perfil
-    current_user = request.user
-    user_role = current_user.get("role")
+    # Usar request.user_id y request.user_role establecidos por @auth_required
+    current_user_id = getattr(request, 'user_id', None)
+    current_user_role = getattr(request, 'user_role', None)
     
-    if user_role == ROLES["INSTITUTE_ADMIN"]:
+    if not current_user_id or not current_user_role:
+        # Esto no debería suceder si @auth_required funciona, pero es una comprobación segura
+        return APIRoute.error(ErrorCodes.UNAUTHORIZED, "Usuario no autenticado.", status_code=401)
+
+    if current_user_role == ROLES["INSTITUTE_ADMIN"]:
         # Si es INSTITUTE_ADMIN, solo puede actualizar su propio perfil
-        if str(current_user["_id"]) != str(profile_service._get_user_id(user_id_or_email)):
+        target_user_id = profile_service._get_user_id(user_id_or_email)
+        if not target_user_id or str(current_user_id) != str(target_user_id):
             return APIRoute.error(
                 ErrorCodes.FORBIDDEN,
                 "No tiene permisos para actualizar este perfil",
@@ -609,20 +615,33 @@ def create_institute_profile():
     profile_data = data.get('profile_data', {})
     
     # Si es INSTITUTE_ADMIN, verificar que pertenezca al instituto
-    current_user = request.user
-    if current_user.get("role") == ROLES["INSTITUTE_ADMIN"]:
-        institute_member = profile_service.db.institute_members.find_one({
-            "user_id": current_user["_id"],
-            "institute_id": ObjectId(institute_id)
-        })
-        
-        if not institute_member:
-            return APIRoute.error(
-                ErrorCodes.FORBIDDEN,
-                "No tiene permisos para crear un perfil para este instituto",
-                status_code=403
-            )
-    
+    # Usar request.user_id y request.user_role establecidos por @auth_required
+    current_user_id = getattr(request, 'user_id', None)
+    current_user_role = getattr(request, 'user_role', None)
+
+    if not current_user_id or not current_user_role:
+        return APIRoute.error(ErrorCodes.UNAUTHORIZED, "Usuario no autenticado.", status_code=401)
+
+    if current_user_role == ROLES["INSTITUTE_ADMIN"]:
+        try:
+            user_obj_id = ObjectId(current_user_id)
+            institute_obj_id = ObjectId(institute_id)
+            institute_member = profile_service.db.institute_members.find_one({
+                "user_id": user_obj_id,
+                "institute_id": institute_obj_id,
+                "role": ROLES["INSTITUTE_ADMIN"] # Asegurar que verificamos el rol correcto
+            })
+            
+            if not institute_member:
+                return APIRoute.error(
+                    ErrorCodes.FORBIDDEN,
+                    "No tiene permisos para crear un perfil para este instituto",
+                    status_code=403
+                )
+        except Exception as e:
+             log_error(f"Error al verificar membresía de instituto para {current_user_id}: {str(e)}", e, "profiles.routes")
+             return APIRoute.error(ErrorCodes.BAD_REQUEST, f"Error al verificar instituto: {str(e)}", status_code=400)
+
     success, result = profile_service.create_institute_profile(institute_id, name, profile_data)
     
     if success:
@@ -680,20 +699,33 @@ def update_institute_profile(institute_id):
     profile_data = data.get('profile_data', {})
     
     # Si es INSTITUTE_ADMIN, verificar que pertenezca al instituto
-    current_user = request.user
-    if current_user.get("role") == ROLES["INSTITUTE_ADMIN"]:
-        institute_member = profile_service.db.institute_members.find_one({
-            "user_id": current_user["_id"],
-            "institute_id": ObjectId(institute_id)
-        })
-        
-        if not institute_member:
-            return APIRoute.error(
-                ErrorCodes.FORBIDDEN,
-                "No tiene permisos para actualizar el perfil de este instituto",
-                status_code=403
-            )
-    
+    # Usar request.user_id y request.user_role establecidos por @auth_required
+    current_user_id = getattr(request, 'user_id', None)
+    current_user_role = getattr(request, 'user_role', None)
+
+    if not current_user_id or not current_user_role:
+        return APIRoute.error(ErrorCodes.UNAUTHORIZED, "Usuario no autenticado.", status_code=401)
+
+    if current_user_role == ROLES["INSTITUTE_ADMIN"]:
+        try:
+            user_obj_id = ObjectId(current_user_id)
+            institute_obj_id = ObjectId(institute_id)
+            institute_member = profile_service.db.institute_members.find_one({
+                "user_id": user_obj_id,
+                "institute_id": institute_obj_id,
+                "role": ROLES["INSTITUTE_ADMIN"] # Asegurar que verificamos el rol correcto
+            })
+            
+            if not institute_member:
+                return APIRoute.error(
+                    ErrorCodes.FORBIDDEN,
+                    "No tiene permisos para actualizar el perfil de este instituto",
+                    status_code=403
+                )
+        except Exception as e:
+             log_error(f"Error al verificar membresía de instituto para {current_user_id}: {str(e)}", e, "profiles.routes")
+             return APIRoute.error(ErrorCodes.BAD_REQUEST, f"Error al verificar instituto: {str(e)}", status_code=400)
+
     success = profile_service.update_institute_profile(institute_id, profile_data)
     
     if success:
