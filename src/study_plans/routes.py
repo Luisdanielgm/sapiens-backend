@@ -11,9 +11,9 @@ from .services import (
     ContentTypeService,
     LearningMethodologyService,
     TopicContentService,
-    LearningResourceService,
     TopicResourceService
 )
+from src.resources.services import ResourceService
 import logging
 from src.shared.constants import ROLES
 from bson import ObjectId
@@ -33,7 +33,7 @@ topic_service = TopicService()
 content_type_service = ContentTypeService()
 methodology_service = LearningMethodologyService()
 topic_content_service = TopicContentService()
-resource_service = LearningResourceService()
+resource_service = ResourceService()
 topic_resource_service = TopicResourceService()
 
 # Rutas para Plan de Estudio
@@ -1135,9 +1135,7 @@ def create_resource():
             resource_data['folder_id'] = data['folder_id']
             
         # Crear el recurso usando ResourceService
-        from src.resources.services import ResourceService
-        resource_service_new = ResourceService()
-        success, result = resource_service_new.create_resource(resource_data)
+        success, result = resource_service.create_resource(resource_data)
         
         if not success:
             return APIRoute.error(

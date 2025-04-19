@@ -770,25 +770,32 @@ class TopicService(VerificationBaseService):
                             topic_resource_service = TopicResourceService()
                             
                             for resource_data in external_resources:
-                                # Preparar datos del recurso
+                                # Preparar datos del recurso (asegurarse de que created_by esté presente)
                                 resource_to_create = {
                                     "name": resource_data.get("title", "Recurso sin título"),
                                     "type": resource_data.get("resource_type", "link"),
                                     "url": resource_data.get("url", ""),
                                     "description": resource_data.get("description", ""),
                                     "tags": resource_data.get("tags", []),
-                                    "created_by": str(creator_id)
+                                    "created_by": str(creator_id) # Esencial para get_or_create
                                 }
                                 
-                                # Añadir la carpeta si existe
+                                # Añadir la carpeta por defecto si existe
                                 if class_resources_folder_id:
                                     resource_to_create["folder_id"] = class_resources_folder_id
                                 
-                                # Crear el recurso
-                                success, resource_id = resource_service.create_resource(resource_to_create)
+                                # Obtener o crear el recurso externo
+                                success, resource_id_or_msg, existed = resource_service.get_or_create_external_resource(resource_to_create)
+                                
                                 if success:
-                                    # Vincular recurso al tema
-                                    link_success, _ = topic_resource_service.link_resource_to_topic(
+                                    resource_id = resource_id_or_msg
+                                    if existed:
+                                        logging.info(f"Recurso externo existente encontrado (URL: {resource_data.get('url')}), ID: {resource_id}")
+                                    else:
+                                        logging.info(f"Nuevo recurso externo creado (URL: {resource_data.get('url')}), ID: {resource_id}")
+                                        
+                                    # Vincular recurso (nuevo o existente) al tema
+                                    link_success, link_result = topic_resource_service.link_resource_to_topic(
                                         topic_id=topic_id,
                                         resource_id=resource_id,
                                         relevance_score=resource_data.get("relevance_score", 0.7),
@@ -798,7 +805,10 @@ class TopicService(VerificationBaseService):
                                         created_by=str(creator_id)
                                     )
                                     if not link_success:
-                                        logging.error(f"Error al vincular recurso {resource_id} al tema {topic_id}")
+                                        logging.error(f"Error al vincular recurso {resource_id} al tema {topic_id}: {link_result}")
+                                else:
+                                    # Falló la obtención o creación del recurso
+                                    logging.error(f"Error al obtener/crear recurso externo (URL: {resource_data.get('url')}): {resource_id_or_msg}")
             
             return True, topic_id
         except Exception as e:
@@ -828,20 +838,62 @@ class TopicService(VerificationBaseService):
             return False, str(e)
     
     def delete_topic(self, topic_id: str) -> Tuple[bool, str]:
+        """
+        Elimina un tema y sus vinculaciones. 
+        Elimina los recursos asociados SOLO si este tema era el único que los vinculaba.
+        """
         try:
+            # Validar ID
+            topic_id_obj = ObjectId(topic_id)
+
             # Verificar que el tema existe
-            topic = self.collection.find_one({"_id": ObjectId(topic_id)})
+            topic = self.collection.find_one({"_id": topic_id_obj})
             if not topic:
                 return False, "Tema no encontrado"
+
+            # Obtener todos los resource_id vinculados a este tema
+            topic_resource_links = list(get_db().topic_resources.find({"_id": topic_id_obj}))
+            resource_ids_to_check = [link["resource_id"] for link in topic_resource_links]
+
+            # Eliminar las vinculaciones de este tema
+            deleted_links_count = get_db().topic_resources.delete_many({"_id": topic_id_obj}).deleted_count
+            logging.info(f"Eliminadas {deleted_links_count} vinculaciones para el tema {topic_id}")
+
+            # Verificar y eliminar recursos huérfanos
+            resources_deleted_count = 0
+            resource_service = ResourceService()
+            for resource_id in resource_ids_to_check:
+                # Contar cuántas *otras* vinculaciones activas tiene este recurso
+                other_links_count = get_db().topic_resources.count_documents({
+                    "resource_id": resource_id,
+                    "$ne": topic_id_obj, # Excluir el topic actual
+                    "status": "active" # Asegurarse de contar solo links activos
+                })
+
+                if other_links_count == 0:
+                    # Si no hay otras vinculaciones, eliminar el recurso
+                    logging.info(f"El recurso {resource_id} quedó huérfano tras eliminar el tema {topic_id}. Procediendo a eliminar el recurso.")
+                    success, msg = resource_service.delete_resource(str(resource_id))
+                    if success:
+                        resources_deleted_count += 1
+                    else:
+                        logging.error(f"Error al intentar eliminar el recurso huérfano {resource_id}: {msg}")
             
-            # Eliminar el tema
-            result = self.collection.delete_one({"_id": ObjectId(topic_id)})
+            # Finalmente, eliminar el tema en sí
+            result = self.collection.delete_one({"_id": topic_id_obj})
             
             if result.deleted_count > 0:
-                return True, "Tema eliminado exitosamente"
-            return False, "No se pudo eliminar el tema"
+                msg = f"Tema eliminado exitosamente. {deleted_links_count} vinculaciones eliminadas."
+                if resources_deleted_count > 0:
+                    msg += f" {resources_deleted_count} recursos huérfanos eliminados."
+                return True, msg
+            
+            # Si llegamos aquí, el tema no se eliminó por alguna razón
+            return False, "No se pudo eliminar el tema después de procesar vinculaciones"
+
         except Exception as e:
-            return False, str(e)
+            logging.error(f"Error al eliminar el tema {topic_id}: {str(e)}")
+            return False, f"Error interno al eliminar el tema: {str(e)}"
     
     def get_topic(self, topic_id: str) -> Optional[Dict]:
         try:
@@ -855,6 +907,7 @@ class TopicService(VerificationBaseService):
             
             return topic
         except Exception as e:
+            logging.error(f"Error al obtener tema: {str(e)}")
             return None
     
     def get_module_topics(self, module_id: str) -> List[Dict]:
@@ -2019,154 +2072,6 @@ class TopicContentService(VerificationBaseService):
                 "suggested_templates": [],
                 "recommended_types": []
             }
-
-class LearningResourceService(VerificationBaseService):
-    """
-    Servicio para gestionar recursos de aprendizaje asociados a temas.
-    """
-    def __init__(self):
-        super().__init__(collection_name="learning_resources")
-        
-    def create_resource(self, resource_data: dict) -> Tuple[bool, str]:
-        """
-        Crea un nuevo recurso de aprendizaje.
-        
-        ADVERTENCIA: Este método está obsoleto y se eliminará en futuras versiones.
-        Utilice ResourceService.create_resource() y TopicResourceService.link_resource_to_topic() en su lugar.
-        
-        Args:
-            resource_data: Datos del recurso a crear
-            
-        Returns:
-            Tupla con estado y mensaje/ID
-        """
-        logging.warning("MÉTODO OBSOLETO: LearningResourceService.create_resource() está obsoleto. " +
-                      "Utilice ResourceService.create_resource() y TopicResourceService.link_resource_to_topic() en su lugar.")
-        try:
-            # Validar que existe el tema
-            topic_id = resource_data.get("topic_id")
-            topic = get_db().topics.find_one({"_id": ObjectId(topic_id)})
-            if not topic:
-                return False, "Tema no encontrado"
-                
-            # Crear el recurso
-            resource = LearningResource(**resource_data)
-            result = self.collection.insert_one(resource.to_dict())
-            
-            return True, str(result.inserted_id)
-        except Exception as e:
-            logging.error(f"Error al crear recurso: {str(e)}")
-            return False, str(e)
-            
-    def get_topic_resources(self, topic_id: str) -> List[Dict]:
-        """
-        Obtiene todos los recursos asociados a un tema.
-        
-        Args:
-            topic_id: ID del tema
-            
-        Returns:
-            Lista de recursos
-        """
-        try:
-            resources = list(self.collection.find({"topic_id": ObjectId(topic_id)}))
-            
-            # Convertir ObjectId a str para serialización
-            for resource in resources:
-                if "_id" in resource:
-                    resource["_id"] = str(resource["_id"])
-                if "topic_id" in resource:
-                    resource["topic_id"] = str(resource["topic_id"])
-                    
-            return resources
-        except Exception as e:
-            logging.error(f"Error al obtener recursos del tema: {str(e)}")
-            return []
-            
-    def get_resource(self, resource_id: str) -> Optional[Dict]:
-        """
-        Obtiene un recurso específico por su ID.
-        
-        Args:
-            resource_id: ID del recurso
-            
-        Returns:
-            Diccionario con datos del recurso o None si no existe
-        """
-        try:
-            resource = self.collection.find_one({"_id": ObjectId(resource_id)})
-            if not resource:
-                return None
-                
-            # Convertir ObjectId a str para serialización
-            if "_id" in resource:
-                resource["_id"] = str(resource["_id"])
-            if "topic_id" in resource:
-                resource["topic_id"] = str(resource["topic_id"])
-                
-            return resource
-        except Exception as e:
-            logging.error(f"Error al obtener recurso: {str(e)}")
-            return None
-            
-    def update_resource(self, resource_id: str, update_data: dict) -> Tuple[bool, str]:
-        """
-        Actualiza un recurso existente.
-        
-        Args:
-            resource_id: ID del recurso a actualizar
-            update_data: Datos a actualizar
-            
-        Returns:
-            Tupla con estado y mensaje
-        """
-        try:
-            # Verificar que el recurso existe
-            resource = self.collection.find_one({"_id": ObjectId(resource_id)})
-            if not resource:
-                return False, "Recurso no encontrado"
-                
-            # Actualizar timestamp
-            update_data["updated_at"] = datetime.now()
-            
-            # Actualizar el recurso
-            result = self.collection.update_one(
-                {"_id": ObjectId(resource_id)},
-                {"$set": update_data}
-            )
-            
-            if result.modified_count > 0:
-                return True, "Recurso actualizado exitosamente"
-            return False, "No se realizaron cambios"
-        except Exception as e:
-            logging.error(f"Error al actualizar recurso: {str(e)}")
-            return False, str(e)
-            
-    def delete_resource(self, resource_id: str) -> Tuple[bool, str]:
-        """
-        Elimina un recurso existente.
-        
-        Args:
-            resource_id: ID del recurso a eliminar
-            
-        Returns:
-            Tupla con estado y mensaje
-        """
-        try:
-            # Verificar que el recurso existe
-            resource = self.collection.find_one({"_id": ObjectId(resource_id)})
-            if not resource:
-                return False, "Recurso no encontrado"
-                
-            # Eliminar el recurso
-            result = self.collection.delete_one({"_id": ObjectId(resource_id)})
-            
-            if result.deleted_count > 0:
-                return True, "Recurso eliminado exitosamente"
-            return False, "No se pudo eliminar el recurso"
-        except Exception as e:
-            logging.error(f"Error al eliminar recurso: {str(e)}")
-            return False, str(e)
 
 class TopicResourceService(VerificationBaseService):
     """

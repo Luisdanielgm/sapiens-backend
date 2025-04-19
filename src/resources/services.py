@@ -15,7 +15,8 @@ class ResourceService(VerificationBaseService):
         
     def create_resource(self, resource_data: dict) -> Tuple[bool, str]:
         """
-        Crea un nuevo recurso
+        Crea un nuevo recurso. No verifica duplicados por sí mismo.
+        Usar get_or_create_external_resource para manejar recursos externos con URLs.
         
         Args:
             resource_data: Datos del recurso a crear
@@ -26,7 +27,7 @@ class ResourceService(VerificationBaseService):
         try:
             # Validar si el usuario existe
             if not self.check_user_exists(resource_data.get("created_by")):
-                return False, "El usuario no existe"
+                return False, "El usuario creador no existe"
                 
             # Validar si la carpeta existe (si se especifica)
             folder_id = resource_data.get("folder_id")
@@ -39,7 +40,63 @@ class ResourceService(VerificationBaseService):
             return True, str(result.inserted_id)
         except Exception as e:
             log_error(f"Error al crear recurso: {str(e)}")
-            return False, str(e)
+            return False, f"Error interno al crear recurso: {str(e)}"
+
+    def get_or_create_external_resource(self, resource_data: dict) -> Tuple[bool, str, bool]:
+        """
+        Obtiene un recurso externo existente por URL y creador, o lo crea si no existe.
+        Solo aplica a recursos de tipo 'link' o tipos considerados externos.
+
+        Args:
+            resource_data: Datos del recurso a crear/obtener. Debe incluir 'url', 'created_by', 'type'.
+
+        Returns:
+            Tuple[bool, str, bool]: (éxito, id del recurso, si ya existía)
+                                     En caso de error, (False, mensaje de error, False)
+        """
+        resource_type = resource_data.get("type", "link") # Asumir link si no se especifica
+        url = resource_data.get("url")
+        created_by = resource_data.get("created_by")
+
+        # Validar datos esenciales
+        if not url or not created_by:
+            return False, "URL y created_by son requeridos para get_or_create_external_resource", False
+        
+        # Considerar 'link' y otros tipos potencialmente externos como candidatos para no duplicación por URL
+        # Podríamos tener una lista más explícita si fuera necesario
+        if resource_type not in ["link", "video", "external_document"]: # Ejemplo de tipos externos
+             # Si no es un tipo externo basado en URL, simplemente lo creamos
+            success, result = self.create_resource(resource_data)
+            return success, result, False
+
+        try:
+            # Intentar convertir created_by a ObjectId
+            creator_id = ObjectId(created_by)
+
+            # Buscar recurso existente con la misma URL y creado por el mismo usuario
+            existing_resource = self.collection.find_one({
+                "url": url,
+                "created_by": creator_id,
+                "type": resource_type # Asegurarse que el tipo también coincida
+            })
+
+            if existing_resource:
+                # Recurso encontrado, devolver su ID
+                return True, str(existing_resource["_id"]), True
+            else:
+                # Recurso no encontrado, proceder a crearlo
+                # Asegurarse que is_external sea True para estos tipos
+                resource_data['is_external'] = True
+                success, new_resource_id = self.create_resource(resource_data)
+                if success:
+                    return True, new_resource_id, False
+                else:
+                    # create_resource ya logueó el error
+                    return False, new_resource_id, False # new_resource_id contiene el mensaje de error aquí
+
+        except Exception as e:
+            log_error(f"Error en get_or_create_external_resource (URL: {url}, User: {created_by}): {str(e)}")
+            return False, f"Error interno procesando recurso externo: {str(e)}", False
             
     def get_resource(self, resource_id: str) -> Optional[Dict]:
         """
@@ -107,7 +164,7 @@ class ResourceService(VerificationBaseService):
             
     def delete_resource(self, resource_id: str) -> Tuple[bool, str]:
         """
-        Elimina un recurso
+        Elimina un recurso y todas sus vinculaciones con temas.
         
         Args:
             resource_id: ID del recurso a eliminar
@@ -116,14 +173,26 @@ class ResourceService(VerificationBaseService):
             Tuple[bool, str]: (éxito, mensaje)
         """
         try:
+            # 1. Eliminar todas las vinculaciones en topic_resources
+            topic_links_deleted = get_db().topic_resources.delete_many({
+                "resource_id": ObjectId(resource_id)
+            }).deleted_count
+            
+            # 2. Eliminar el recurso
             result = self.collection.delete_one({"_id": ObjectId(resource_id)})
             
             if result.deleted_count > 0:
-                return True, "Recurso eliminado correctamente"
+                return True, f"Recurso eliminado correctamente. {topic_links_deleted} vinculaciones eliminadas."
+            
+            # Si el recurso no se encontró pero sí había links, podría ser un estado inconsistente
+            if topic_links_deleted > 0:
+                 log_error(f"Recurso {resource_id} no encontrado, pero se eliminaron {topic_links_deleted} vinculaciones.")
+                 return True, f"Recurso no encontrado, pero se eliminaron {topic_links_deleted} vinculaciones."
+
             return False, "El recurso no existe o ya fue eliminado"
         except Exception as e:
-            log_error(f"Error al eliminar recurso: {str(e)}")
-            return False, str(e)
+            log_error(f"Error al eliminar recurso {resource_id}: {str(e)}")
+            return False, f"Error interno al eliminar recurso: {str(e)}"
             
     def get_teacher_resources(self, teacher_id: str, folder_id: Optional[str] = None) -> List[Dict]:
         """
@@ -366,7 +435,8 @@ class ResourceFolderService(VerificationBaseService):
             
     def delete_folder(self, folder_id: str) -> Tuple[bool, str]:
         """
-        Elimina una carpeta y opcionalmente sus recursos
+        Elimina una carpeta y opcionalmente sus recursos. 
+        Mueve las subcarpetas al nivel superior.
         
         Args:
             folder_id: ID de la carpeta a eliminar
@@ -380,8 +450,17 @@ class ResourceFolderService(VerificationBaseService):
             if not folder:
                 return False, "La carpeta no existe"
                 
-            # Eliminar recursos asociados a la carpeta
-            resources_deleted = get_db().resources.delete_many({"folder_id": ObjectId(folder_id)}).deleted_count
+            # Eliminar recursos asociados a la carpeta usando ResourceService
+            # NOTA: Esto requiere que ResourceService tenga un método para eliminar por folder_id
+            # o iterar y eliminar uno por uno. Por simplicidad, asumimos que se hace aquí.
+            # Se podría refactorizar para que ResourceService maneje esto.
+            resources_in_folder = list(get_db().resources.find({"folder_id": ObjectId(folder_id)}))
+            resources_deleted_count = 0
+            resource_service = ResourceService() # Instancia para eliminar recursos
+            for resource in resources_in_folder:
+                success, _ = resource_service.delete_resource(str(resource["_id"]))
+                if success:
+                    resources_deleted_count += 1
             
             # Buscar carpetas hijas
             child_folders = list(self.collection.find({"parent_id": ObjectId(folder_id)}))
@@ -399,7 +478,7 @@ class ResourceFolderService(VerificationBaseService):
             result = self.collection.delete_one({"_id": ObjectId(folder_id)})
             
             if result.deleted_count > 0:
-                message = f"Carpeta eliminada. {resources_deleted} recursos eliminados. {children_updated} subcarpetas actualizadas."
+                message = f"Carpeta eliminada. {resources_deleted_count} recursos eliminados. {children_updated} subcarpetas movidas al nivel superior."
                 return True, message
             return False, "No se pudo eliminar la carpeta"
         except Exception as e:
