@@ -628,4 +628,45 @@ def delete_folder(folder_id):
             ErrorCodes.SERVER_ERROR, 
             str(e), 
             status_code=500
+        )
+
+@resources_bp.route('/folders/tree', methods=['GET'])
+@APIRoute.standard(auth_required_flag=True)
+def get_folders_tree():
+    """
+    Obtiene el árbol completo de carpetas y recursos de un usuario.
+    Respeta la jerarquía de carpetas del usuario.
+    """
+    try:
+        # Obtener parámetros
+        email = request.args.get('email')
+        
+        # Validar email
+        if not email:
+            return APIRoute.error(
+                ErrorCodes.MISSING_FIELDS, 
+                "Se requiere el email del usuario", 
+                status_code=400
+            )
+            
+        # Obtener el ID del usuario a partir del email
+        user = get_db().users.find_one({"email": email})
+        if not user:
+            return APIRoute.error(
+                ErrorCodes.USER_NOT_FOUND, 
+                "Usuario no encontrado", 
+                status_code=404
+            )
+        
+        user_id = str(user["_id"])
+            
+        # Obtener árbol de carpetas (pasando email para respetar jerarquía)
+        tree = folder_service.get_folder_tree(user_id, email=email)
+            
+        return APIRoute.success(tree)
+    except Exception as e:
+        return APIRoute.error(
+            ErrorCodes.SERVER_ERROR, 
+            str(e), 
+            status_code=500
         ) 
