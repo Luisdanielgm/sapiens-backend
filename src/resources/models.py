@@ -13,6 +13,7 @@ class ResourceFolder:
         created_by: str,
         description: Optional[str] = None,
         parent_id: Optional[str] = None,
+        metadata: Optional[Dict[str, Any]] = None,
         created_at: Optional[datetime] = None,
         updated_at: Optional[datetime] = None,
         _id: Optional[ObjectId] = None
@@ -22,6 +23,7 @@ class ResourceFolder:
         self.description = description
         self.created_by = ObjectId(created_by)
         self.parent_id = ObjectId(parent_id) if parent_id else None
+        self.metadata = metadata or {}
         self.created_at = created_at or datetime.now()
         self.updated_at = updated_at or datetime.now()
 
@@ -40,6 +42,9 @@ class ResourceFolder:
             
         if self.parent_id:
             result["parent_id"] = self.parent_id
+            
+        if self.metadata:
+            result["metadata"] = self.metadata
             
         return result
 
