@@ -634,39 +634,35 @@ def delete_folder(folder_id):
 @APIRoute.standard(auth_required_flag=True)
 def get_folders_tree():
     """
-    Obtiene el árbol completo de carpetas y recursos de un usuario.
-    Respeta la jerarquía de carpetas del usuario.
+    Obtiene el árbol de carpetas del usuario especificado.
+    Requiere el parámetro email para identificar al usuario.
     """
     try:
-        # Obtener parámetros
+        # Obtener email de la solicitud
         email = request.args.get('email')
-        
-        # Validar email
         if not email:
             return APIRoute.error(
-                ErrorCodes.MISSING_FIELDS, 
-                "Se requiere el email del usuario", 
+                ErrorCodes.MISSING_FIELDS,
+                "Se requiere el email del usuario para obtener el árbol de carpetas",
                 status_code=400
             )
             
-        # Obtener el ID del usuario a partir del email
-        user = get_db().users.find_one({"email": email})
-        if not user:
+        # Obtener árbol de carpetas - Esto debería encontrar la carpeta raíz existente
+        # sin crear una nueva usando la lógica mejorada en get_user_root_folder
+        try:
+            folder_tree = folder_service.get_folder_tree(None, email=email)
+            return APIRoute.success(folder_tree)
+        except Exception as e:
+            log_error = getattr(folder_service, 'log_error', print)
+            log_error(f"Error al obtener árbol de carpetas: {str(e)}")
             return APIRoute.error(
-                ErrorCodes.USER_NOT_FOUND, 
-                "Usuario no encontrado", 
-                status_code=404
+                ErrorCodes.SERVER_ERROR,
+                f"Error al obtener el árbol de carpetas: {str(e)}",
+                status_code=500
             )
-        
-        user_id = str(user["_id"])
-            
-        # Obtener árbol de carpetas (pasando email para respetar jerarquía)
-        tree = folder_service.get_folder_tree(user_id, email=email)
-            
-        return APIRoute.success(tree)
     except Exception as e:
         return APIRoute.error(
-            ErrorCodes.SERVER_ERROR, 
-            str(e), 
+            ErrorCodes.SERVER_ERROR,
+            str(e),
             status_code=500
         ) 

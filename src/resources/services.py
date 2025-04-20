@@ -528,19 +528,38 @@ class ResourceFolderService(VerificationBaseService):
             user_id = user["_id"]
             username = email.split('@')[0]
             
-            # Buscar carpeta raíz existente
+            # Buscar carpeta raíz existente de varias formas para evitar duplicación
+            # 1. Primero por metadata.root_user
             root_folder = self.collection.find_one({
-                "created_by": user_id,
-                "name": username,
-                "parent_id": None
+                "metadata.root_user": username
             })
             
-            # Si no existe, crearla
+            # 2. Si no encuentra, buscar por el criterio original
+            if not root_folder:
+                root_folder = self.collection.find_one({
+                    "created_by": user_id,
+                    "name": username,
+                    "parent_id": None
+                })
+                
+            # 3. Búsqueda amplia como último recurso
+            if not root_folder:
+                root_folder = self.collection.find_one({
+                    "$or": [
+                        {"name": username, "created_by": user_id, "parent_id": None},
+                        {"metadata.root_user": username}
+                    ]
+                })
+            
+            # Si no existe, crearla con metadatos adecuados
             if not root_folder:
                 folder_data = {
                     "name": username,
                     "created_by": str(user_id),
-                    "description": "Carpeta personal del usuario"
+                    "description": "Carpeta personal del usuario",
+                    "metadata": {
+                        "root_user": username
+                    }
                 }
                 folder = ResourceFolder(**folder_data)
                 result = self.collection.insert_one(folder.to_dict())
@@ -548,7 +567,7 @@ class ResourceFolderService(VerificationBaseService):
                     raise AppException("Error al crear carpeta raíz", AppException.INTERNAL_ERROR)
                 
                 root_folder = self.collection.find_one({"_id": result.inserted_id})
-                
+            
             return root_folder
         except Exception as e:
             log_error(f"Error al obtener/crear carpeta raíz: {str(e)}")
@@ -894,19 +913,33 @@ class ResourceFolderService(VerificationBaseService):
             log_error(f"Error al obtener carpetas del profesor: {str(e)}")
             return []
             
-    def get_folder_tree(self, teacher_id: str, email: str = None) -> Dict:
+    def get_folder_tree(self, teacher_id: str = None, email: str = None) -> Dict:
         """
-        Obtiene el árbol de carpetas de un profesor con sus recursos,
-        opcionalmente restringido a la jerarquía del usuario
+        Obtiene el árbol de carpetas de un usuario con sus recursos,
+        opcionalmente restringido a la jerarquía del usuario.
+        Si se proporciona email pero no teacher_id, se usa el email para buscar el ID del usuario.
         
         Args:
-            teacher_id: ID del profesor
-            email: Email del profesor (opcional, para restringir a jerarquía)
+            teacher_id: ID del usuario (opcional si se proporciona email)
+            email: Email del usuario (opcional, para restringir a jerarquía)
             
         Returns:
             Dict: Árbol de carpetas con recursos
         """
         try:
+            # Si no se proporcionó teacher_id pero sí email, obtener el ID del usuario
+            if not teacher_id and email:
+                user = self.db.users.find_one({"email": email})
+                if user:
+                    teacher_id = str(user["_id"])
+                else:
+                    # Si no se encuentra el usuario, devolver árbol vacío
+                    return {"folders": [], "resources": []}
+            
+            # Verificar que tenemos un teacher_id para continuar
+            if not teacher_id:
+                return {"folders": [], "resources": []}
+            
             # Obtener todas las carpetas del profesor (opcionalmente en jerarquía)
             folders = self.get_teacher_folders(teacher_id, email)
             
@@ -916,8 +949,9 @@ class ResourceFolderService(VerificationBaseService):
                 try:
                     root_folder = self.get_user_root_folder(email)
                     root_folder_id = str(root_folder["_id"])
-                except:
-                    pass
+                except Exception as e:
+                    log_error(f"Error al obtener carpeta raíz para árbol: {str(e)}")
+                    # Continuar sin carpeta raíz
             
             # Agrupar carpetas por parent_id
             folder_map = {}
