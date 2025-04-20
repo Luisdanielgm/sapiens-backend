@@ -113,6 +113,17 @@ def get_folder_tree():
         )
 
 @resources_bp.route('/teacher', methods=['POST', 'OPTIONS'])
+def create_resource_handler():
+    """
+    Punto de entrada para crear un nuevo recurso a través del endpoint /teacher.
+    Maneja directamente las solicitudes OPTIONS para evitar problemas de CORS.
+    """
+    if request.method == 'OPTIONS':
+        return APIRoute.success({})
+    
+    # Para POST, usar el handler con autenticación
+    return create_resource()
+
 @APIRoute.standard(auth_required_flag=True, roles=[ROLES["TEACHER"]])
 def create_resource():
     """
@@ -120,10 +131,6 @@ def create_resource():
     El frontend debe haber subido el archivo a la nube y proporcionar la URL.
     Respeta la jerarquía de carpetas del usuario.
     """
-    # Manejar OPTIONS para CORS preflight
-    if request.method == 'OPTIONS':
-        return APIRoute.success({})
-        
     try:
         # Validar que vienen los campos requeridos
         required_fields = ['name', 'type', 'url', 'created_by']
@@ -209,7 +216,18 @@ def get_resource(resource_id):
             status_code=500
         )
 
-@resources_bp.route('/<resource_id>', methods=['PUT'])
+@resources_bp.route('/<resource_id>', methods=['PUT', 'OPTIONS'])
+def update_resource_handler(resource_id):
+    """
+    Punto de entrada para actualizar un recurso.
+    Maneja directamente las solicitudes OPTIONS para evitar problemas de CORS.
+    """
+    if request.method == 'OPTIONS':
+        return APIRoute.success({})
+    
+    # Para PUT, usar el handler con autenticación
+    return update_resource(resource_id)
+
 @APIRoute.standard(auth_required_flag=True, roles=[ROLES["TEACHER"]])
 def update_resource(resource_id):
     """
@@ -269,56 +287,18 @@ def update_resource(resource_id):
             status_code=500
         )
 
-@resources_bp.route('/<resource_id>', methods=['DELETE'])
-@APIRoute.standard(auth_required_flag=True, roles=[ROLES["TEACHER"]])
-def delete_resource(resource_id):
+@resources_bp.route('/<resource_id>/move', methods=['PUT', 'OPTIONS'])
+def move_resource_handler(resource_id):
     """
-    Elimina un recurso específico por su ID.
+    Punto de entrada para mover un recurso.
+    Maneja directamente las solicitudes OPTIONS para evitar problemas de CORS.
     """
-    try:
-        # Obtener email para verificación de jerarquía
-        email = request.args.get('email')
-        
-        # Si se proporciona email, primero verificar pertenencia
-        if email:
-            # Obtener recurso y verificar que pertenece al usuario
-            resource = resource_service.get_resource(resource_id)
-            if not resource:
-                return APIRoute.error(
-                    ErrorCodes.RESOURCE_NOT_FOUND,
-                    "Recurso no encontrado",
-                    status_code=404
-                )
-                
-            # Verificar que el recurso pertenece al usuario
-            user = get_db().users.find_one({"email": email})
-            if not user or str(user["_id"]) != resource["created_by"]:
-                return APIRoute.error(
-                    ErrorCodes.PERMISSION_DENIED,
-                    "No tienes permiso para eliminar este recurso",
-                    status_code=403
-                )
-        
-        success, result = resource_service.delete_resource(resource_id)
-        
-        if success:
-            return APIRoute.success(
-                {"message": result}
-            )
-        else:
-            return APIRoute.error(
-                ErrorCodes.OPERATION_FAILED, 
-                result, 
-                status_code=400
-            )
-    except Exception as e:
-        return APIRoute.error(
-            ErrorCodes.SERVER_ERROR, 
-            str(e), 
-            status_code=500
-        )
+    if request.method == 'OPTIONS':
+        return APIRoute.success({})
+    
+    # Para PUT, usar el handler con autenticación
+    return move_resource(resource_id)
 
-@resources_bp.route('/<resource_id>/move', methods=['PUT'])
 @APIRoute.standard(auth_required_flag=True, roles=[ROLES["TEACHER"]])
 def move_resource(resource_id):
     """
@@ -405,7 +385,78 @@ def move_resource(resource_id):
             status_code=500
         )
 
-@resources_bp.route('/folders', methods=['POST'])
+@resources_bp.route('/<resource_id>', methods=['DELETE', 'OPTIONS'])
+def delete_resource_handler(resource_id):
+    """
+    Punto de entrada para eliminar un recurso.
+    Maneja directamente las solicitudes OPTIONS para evitar problemas de CORS.
+    """
+    if request.method == 'OPTIONS':
+        return APIRoute.success({})
+    
+    # Para DELETE, usar el handler con autenticación
+    return delete_resource(resource_id)
+
+@APIRoute.standard(auth_required_flag=True, roles=[ROLES["TEACHER"]])
+def delete_resource(resource_id):
+    """
+    Elimina un recurso específico por su ID.
+    """
+    try:
+        # Obtener email para verificación de jerarquía
+        email = request.args.get('email')
+        
+        # Si se proporciona email, primero verificar pertenencia
+        if email:
+            # Obtener recurso y verificar que pertenece al usuario
+            resource = resource_service.get_resource(resource_id)
+            if not resource:
+                return APIRoute.error(
+                    ErrorCodes.RESOURCE_NOT_FOUND,
+                    "Recurso no encontrado",
+                    status_code=404
+                )
+                
+            # Verificar que el recurso pertenece al usuario
+            user = get_db().users.find_one({"email": email})
+            if not user or str(user["_id"]) != resource["created_by"]:
+                return APIRoute.error(
+                    ErrorCodes.PERMISSION_DENIED,
+                    "No tienes permiso para eliminar este recurso",
+                    status_code=403
+                )
+        
+        success, result = resource_service.delete_resource(resource_id)
+        
+        if success:
+            return APIRoute.success(
+                {"message": result}
+            )
+        else:
+            return APIRoute.error(
+                ErrorCodes.OPERATION_FAILED, 
+                result, 
+                status_code=400
+            )
+    except Exception as e:
+        return APIRoute.error(
+            ErrorCodes.SERVER_ERROR, 
+            str(e), 
+            status_code=500
+        )
+
+@resources_bp.route('/folders', methods=['POST', 'OPTIONS'])
+def create_folder_handler():
+    """
+    Punto de entrada para crear una nueva carpeta.
+    Maneja directamente las solicitudes OPTIONS para evitar problemas de CORS.
+    """
+    if request.method == 'OPTIONS':
+        return APIRoute.success({})
+    
+    # Para POST, usar el handler con autenticación
+    return create_folder()
+
 @APIRoute.standard(auth_required_flag=True, roles=[ROLES["TEACHER"]])
 def create_folder():
     """
@@ -546,7 +597,18 @@ def get_folder_resources(folder_id):
             status_code=500
         )
 
-@resources_bp.route('/folders/<folder_id>', methods=['PUT'])
+@resources_bp.route('/folders/<folder_id>', methods=['PUT', 'OPTIONS'])
+def update_folder_handler(folder_id):
+    """
+    Punto de entrada para actualizar una carpeta.
+    Maneja directamente las solicitudes OPTIONS para evitar problemas de CORS.
+    """
+    if request.method == 'OPTIONS':
+        return APIRoute.success({})
+    
+    # Para PUT, usar el handler con autenticación
+    return update_folder(folder_id)
+
 @APIRoute.standard(auth_required_flag=True, roles=[ROLES["TEACHER"]])
 def update_folder(folder_id):
     """
@@ -603,7 +665,18 @@ def update_folder(folder_id):
             status_code=500
         )
 
-@resources_bp.route('/folders/<folder_id>', methods=['DELETE'])
+@resources_bp.route('/folders/<folder_id>', methods=['DELETE', 'OPTIONS'])
+def delete_folder_handler(folder_id):
+    """
+    Punto de entrada para eliminar una carpeta.
+    Maneja directamente las solicitudes OPTIONS para evitar problemas de CORS.
+    """
+    if request.method == 'OPTIONS':
+        return APIRoute.success({})
+    
+    # Para DELETE, usar el handler con autenticación
+    return delete_folder(folder_id)
+
 @APIRoute.standard(auth_required_flag=True, roles=[ROLES["TEACHER"]])
 def delete_folder(folder_id):
     """
@@ -672,6 +745,17 @@ def get_folders_tree():
         )
 
 @resources_bp.route('', methods=['POST', 'OPTIONS'])
+def create_resource_direct_handler():
+    """
+    Punto de entrada para crear un nuevo recurso directo.
+    Maneja directamente las solicitudes OPTIONS para evitar problemas de CORS.
+    """
+    if request.method == 'OPTIONS':
+        return APIRoute.success({})
+    
+    # Para POST, usar el handler con autenticación
+    return create_resource_direct()
+
 @APIRoute.standard(auth_required_flag=True, roles=[ROLES["TEACHER"]])
 def create_resource_direct():
     """
@@ -679,10 +763,6 @@ def create_resource_direct():
     El frontend debe haber subido el archivo a la nube y proporcionar la URL.
     Respeta la jerarquía de carpetas del usuario.
     """
-    # Manejar OPTIONS para CORS preflight
-    if request.method == 'OPTIONS':
-        return APIRoute.success({})
-        
     try:
         # Validar que vienen los campos requeridos
         required_fields = ['name', 'type', 'url', 'created_by']
