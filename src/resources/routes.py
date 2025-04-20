@@ -3,6 +3,7 @@ from bson import ObjectId
 
 from src.shared.standardization import APIBlueprint, APIRoute, ErrorCodes
 from src.shared.constants import ROLES
+from src.shared.database import get_db
 from .services import ResourceService, ResourceFolderService
 
 resources_bp = APIBlueprint('resources', __name__)
@@ -15,6 +16,7 @@ def list_teacher_resources():
     """
     Obtiene todos los recursos de un profesor.
     Puede filtrar por carpeta_id y admite búsqueda de texto.
+    Respeta la jerarquía de carpetas del usuario.
     """
     try:
         # Obtener parámetros
@@ -57,11 +59,11 @@ def list_teacher_resources():
                 filters['start_date'] = request.args.get('start_date')
                 filters['end_date'] = request.args.get('end_date')
                 
-            # Buscar recursos
-            resources = resource_service.search_resources(teacher_id, query, filters)
+            # Buscar recursos (pasando email para respetar jerarquía)
+            resources = resource_service.search_resources(teacher_id, query, filters, email=email)
         else:
-            # Listado simple por carpeta o todos
-            resources = resource_service.get_teacher_resources(teacher_id, folder_id)
+            # Listado simple por carpeta o todos (pasando email para respetar jerarquía)
+            resources = resource_service.get_teacher_resources(teacher_id, folder_id, email=email)
             
         return APIRoute.success({"resources": resources})
     except Exception as e:
@@ -76,6 +78,7 @@ def list_teacher_resources():
 def get_folder_tree():
     """
     Obtiene el árbol completo de carpetas y recursos del profesor.
+    Respeta la jerarquía de carpetas del usuario.
     """
     try:
         # Obtener parámetros
@@ -98,8 +101,8 @@ def get_folder_tree():
                 status_code=404
             )
             
-        # Obtener árbol de carpetas
-        tree = folder_service.get_folder_tree(teacher_id)
+        # Obtener árbol de carpetas (pasando email para respetar jerarquía)
+        tree = folder_service.get_folder_tree(teacher_id, email=email)
             
         return APIRoute.success(tree)
     except Exception as e:
@@ -115,6 +118,7 @@ def create_resource():
     """
     Crea un nuevo recurso.
     El frontend debe haber subido el archivo a la nube y proporcionar la URL.
+    Respeta la jerarquía de carpetas del usuario.
     """
     try:
         # Validar que vienen los campos requeridos
@@ -126,9 +130,36 @@ def create_resource():
                     f"Campo requerido: {field}", 
                     status_code=400
                 )
+        
+        # Asegurarse de que se proporciona email para respetar jerarquía
+        email = request.json.get('email')
+        if not email:
+            # Intentar obtener email del usuario creador
+            created_by = request.json.get('created_by')
+            if created_by:
+                user = get_db().users.find_one({"_id": ObjectId(created_by)})
+                if user and "email" in user:
+                    # Agregar email a los datos del recurso para jerarquía
+                    email = user.get("email")
+                    resource_data = request.json.copy()
+                    resource_data["email"] = email
+                else:
+                    return APIRoute.error(
+                        ErrorCodes.MISSING_FIELDS,
+                        "No se pudo determinar el email del creador",
+                        status_code=400
+                    )
+            else:
+                return APIRoute.error(
+                    ErrorCodes.MISSING_FIELDS,
+                    "Se requiere el email o created_by para crear el recurso",
+                    status_code=400
+                )
+        else:
+            resource_data = request.json
                 
         # Crear recurso
-        success, result = resource_service.create_resource(request.json)
+        success, result = resource_service.create_resource(resource_data)
         
         if success:
             # Obtener el recurso creado
@@ -179,6 +210,7 @@ def get_resource(resource_id):
 def update_resource(resource_id):
     """
     Actualiza un recurso existente.
+    Respeta la jerarquía de carpetas del usuario.
     """
     try:
         # Validar que viene al menos un campo para actualizar
@@ -206,9 +238,12 @@ def update_resource(resource_id):
                 "No se proporcionaron campos válidos para actualizar", 
                 status_code=400
             )
+        
+        # Obtener email para verificación de jerarquía
+        email = request.json.get('email')
             
         # Actualizar recurso
-        success, result = resource_service.update_resource(resource_id, updates)
+        success, result = resource_service.update_resource(resource_id, updates, email=email)
         
         if success:
             # Obtener el recurso actualizado
@@ -237,6 +272,29 @@ def delete_resource(resource_id):
     Elimina un recurso específico por su ID.
     """
     try:
+        # Obtener email para verificación de jerarquía
+        email = request.args.get('email')
+        
+        # Si se proporciona email, primero verificar pertenencia
+        if email:
+            # Obtener recurso y verificar que pertenece al usuario
+            resource = resource_service.get_resource(resource_id)
+            if not resource:
+                return APIRoute.error(
+                    ErrorCodes.RESOURCE_NOT_FOUND,
+                    "Recurso no encontrado",
+                    status_code=404
+                )
+                
+            # Verificar que el recurso pertenece al usuario
+            user = get_db().users.find_one({"email": email})
+            if not user or str(user["_id"]) != resource["created_by"]:
+                return APIRoute.error(
+                    ErrorCodes.PERMISSION_DENIED,
+                    "No tienes permiso para eliminar este recurso",
+                    status_code=403
+                )
+        
         success, result = resource_service.delete_resource(resource_id)
         
         if success:
@@ -261,6 +319,7 @@ def delete_resource(resource_id):
 def move_resource(resource_id):
     """
     Mueve un recurso a otra carpeta.
+    Respeta la jerarquía de carpetas del usuario.
     """
     try:
         # Validar que viene el campo folder_id
@@ -272,6 +331,41 @@ def move_resource(resource_id):
             )
             
         folder_id = request.json.get('folder_id')
+        email = request.json.get('email')
+        
+        # Verificar pertenencia si se proporciona email
+        if email:
+            # Obtener recurso y verificar que pertenece al usuario
+            resource = resource_service.get_resource(resource_id)
+            if not resource:
+                return APIRoute.error(
+                    ErrorCodes.RESOURCE_NOT_FOUND,
+                    "Recurso no encontrado",
+                    status_code=404
+                )
+                
+            # Verificar que el recurso pertenece al usuario
+            user = get_db().users.find_one({"email": email})
+            if not user or str(user["_id"]) != resource["created_by"]:
+                return APIRoute.error(
+                    ErrorCodes.PERMISSION_DENIED,
+                    "No tienes permiso para mover este recurso",
+                    status_code=403
+                )
+                
+            # Si folder_id no es nulo, verificar que está en la jerarquía del usuario
+            if folder_id:
+                folder_service = ResourceFolderService()
+                root_folder = folder_service.get_user_root_folder(email)
+                is_in_hierarchy = folder_service._verify_folder_in_user_hierarchy(
+                    ObjectId(folder_id), root_folder["_id"])
+                
+                if not is_in_hierarchy:
+                    return APIRoute.error(
+                        ErrorCodes.PERMISSION_DENIED,
+                        "No puedes mover el recurso fuera de tu espacio de usuario",
+                        status_code=403
+                    )
         
         # Si folder_id es null, mover a la raíz
         if folder_id is None:
@@ -287,8 +381,8 @@ def move_resource(resource_id):
                 
             updates = {"folder_id": folder_id}
             
-        # Actualizar recurso
-        success, result = resource_service.update_resource(resource_id, updates)
+        # Actualizar recurso (pasando email para respetar jerarquía)
+        success, result = resource_service.update_resource(resource_id, updates, email=email)
         
         if success:
             return APIRoute.success(
@@ -312,6 +406,7 @@ def move_resource(resource_id):
 def create_folder():
     """
     Crea una nueva carpeta de recursos.
+    Respeta la jerarquía de carpetas del usuario.
     """
     try:
         # Validar que vienen los campos requeridos
@@ -321,6 +416,28 @@ def create_folder():
                 return APIRoute.error(
                     ErrorCodes.MISSING_FIELDS, 
                     f"Campo requerido: {field}", 
+                    status_code=400
+                )
+        
+        # Asegurarse que email esté presente para jerarquía
+        if 'email' not in request.json:
+            # Intentar obtener email del usuario creador
+            created_by = request.json.get('created_by')
+            if created_by:
+                user = get_db().users.find_one({"_id": ObjectId(created_by)})
+                if user and "email" in user:
+                    # Agregar email a los datos de la carpeta para jerarquía
+                    request.json["email"] = user.get("email")
+                else:
+                    return APIRoute.error(
+                        ErrorCodes.MISSING_FIELDS,
+                        "No se pudo determinar el email del creador",
+                        status_code=400
+                    )
+            else:
+                return APIRoute.error(
+                    ErrorCodes.MISSING_FIELDS,
+                    "Se requiere el email para crear la carpeta en la jerarquía correcta",
                     status_code=400
                 )
                 
@@ -376,8 +493,12 @@ def get_folder(folder_id):
 def get_folder_resources(folder_id):
     """
     Obtiene todos los recursos de una carpeta específica.
+    Respeta la jerarquía de carpetas del usuario.
     """
     try:
+        # Obtener email para verificación de jerarquía
+        email = request.args.get('email')
+        
         # Verificar que la carpeta existe
         folder = folder_service.get_folder(folder_id)
         if not folder:
@@ -386,9 +507,29 @@ def get_folder_resources(folder_id):
                 "Carpeta no encontrada", 
                 status_code=404
             )
+        
+        # Si se proporciona email, verificar que la carpeta está en la jerarquía
+        if email:
+            try:
+                root_folder = folder_service.get_user_root_folder(email)
+                is_in_hierarchy = folder_service._verify_folder_in_user_hierarchy(
+                    ObjectId(folder_id), root_folder["_id"])
+                
+                if not is_in_hierarchy:
+                    return APIRoute.error(
+                        ErrorCodes.PERMISSION_DENIED,
+                        "No tienes permiso para acceder a esta carpeta",
+                        status_code=403
+                    )
+            except Exception as e:
+                return APIRoute.error(
+                    ErrorCodes.SERVER_ERROR,
+                    f"Error al verificar jerarquía: {str(e)}",
+                    status_code=500
+                )
             
-        # Obtener recursos de la carpeta
-        resources = resource_service.get_teacher_resources(folder["created_by"], folder_id)
+        # Obtener recursos de la carpeta (pasando email para respetar jerarquía)
+        resources = resource_service.get_teacher_resources(folder["created_by"], folder_id, email=email)
             
         return APIRoute.success({
             "folder": folder,
@@ -406,6 +547,7 @@ def get_folder_resources(folder_id):
 def update_folder(folder_id):
     """
     Actualiza una carpeta existente.
+    Respeta la jerarquía de carpetas del usuario.
     """
     try:
         # Validar que viene al menos un campo para actualizar
@@ -431,8 +573,11 @@ def update_folder(folder_id):
                 status_code=400
             )
             
-        # Actualizar carpeta
-        success, result = folder_service.update_folder(folder_id, updates)
+        # Obtener email para verificación de jerarquía
+        email = request.json.get('email')
+            
+        # Actualizar carpeta (pasando email para respetar jerarquía)
+        success, result = folder_service.update_folder(folder_id, updates, email=email)
         
         if success:
             # Obtener la carpeta actualizada
@@ -459,9 +604,14 @@ def update_folder(folder_id):
 def delete_folder(folder_id):
     """
     Elimina una carpeta específica por su ID.
+    Respeta la jerarquía de carpetas del usuario.
     """
     try:
-        success, result = folder_service.delete_folder(folder_id)
+        # Obtener email para verificación de jerarquía
+        email = request.args.get('email')
+        
+        # Eliminar carpeta (pasando email para respetar jerarquía)
+        success, result = folder_service.delete_folder(folder_id, email=email)
         
         if success:
             return APIRoute.success(
