@@ -112,14 +112,18 @@ def get_folder_tree():
             status_code=500
         )
 
-@resources_bp.route('/teacher', methods=['POST'])
+@resources_bp.route('/teacher', methods=['POST', 'OPTIONS'])
 @APIRoute.standard(auth_required_flag=True, roles=[ROLES["TEACHER"]])
 def create_resource():
     """
-    Crea un nuevo recurso.
+    Crea un nuevo recurso a través del endpoint /teacher.
     El frontend debe haber subido el archivo a la nube y proporcionar la URL.
     Respeta la jerarquía de carpetas del usuario.
     """
+    # Manejar OPTIONS para CORS preflight
+    if request.method == 'OPTIONS':
+        return APIRoute.success({})
+        
     try:
         # Validar que vienen los campos requeridos
         required_fields = ['name', 'type', 'url', 'created_by']
@@ -664,5 +668,79 @@ def get_folders_tree():
         return APIRoute.error(
             ErrorCodes.SERVER_ERROR,
             str(e),
+            status_code=500
+        )
+
+@resources_bp.route('', methods=['POST', 'OPTIONS'])
+@APIRoute.standard(auth_required_flag=True, roles=[ROLES["TEACHER"]])
+def create_resource_direct():
+    """
+    Endpoint directo para crear un nuevo recurso.
+    El frontend debe haber subido el archivo a la nube y proporcionar la URL.
+    Respeta la jerarquía de carpetas del usuario.
+    """
+    # Manejar OPTIONS para CORS preflight
+    if request.method == 'OPTIONS':
+        return APIRoute.success({})
+        
+    try:
+        # Validar que vienen los campos requeridos
+        required_fields = ['name', 'type', 'url', 'created_by']
+        for field in required_fields:
+            if field not in request.json:
+                return APIRoute.error(
+                    ErrorCodes.MISSING_FIELDS, 
+                    f"Campo requerido: {field}", 
+                    status_code=400
+                )
+        
+        # Asegurarse de que se proporciona email para respetar jerarquía
+        email = request.json.get('email')
+        if not email:
+            # Intentar obtener email del usuario creador
+            created_by = request.json.get('created_by')
+            if created_by:
+                user = get_db().users.find_one({"_id": ObjectId(created_by)})
+                if user and "email" in user:
+                    # Agregar email a los datos del recurso para jerarquía
+                    email = user.get("email")
+                    resource_data = request.json.copy()
+                    resource_data["email"] = email
+                else:
+                    return APIRoute.error(
+                        ErrorCodes.MISSING_FIELDS,
+                        "No se pudo determinar el email del creador",
+                        status_code=400
+                    )
+            else:
+                return APIRoute.error(
+                    ErrorCodes.MISSING_FIELDS,
+                    "Se requiere el email o created_by para crear el recurso",
+                    status_code=400
+                )
+        else:
+            resource_data = request.json
+                
+        # Crear recurso
+        success, result = resource_service.create_resource(resource_data)
+        
+        if success:
+            # Obtener el recurso creado
+            resource = resource_service.get_resource(result)
+            return APIRoute.success(
+                resource, 
+                message="Recurso creado exitosamente", 
+                status_code=201
+            )
+        else:
+            return APIRoute.error(
+                ErrorCodes.CREATION_ERROR, 
+                result, 
+                status_code=400
+            )
+    except Exception as e:
+        return APIRoute.error(
+            ErrorCodes.SERVER_ERROR, 
+            str(e), 
             status_code=500
         ) 
