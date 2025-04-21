@@ -784,8 +784,7 @@ class ResourceFolderService(VerificationBaseService):
             
     def delete_folder(self, folder_id: str, email: str = None) -> Tuple[bool, str]:
         """
-        Elimina una carpeta y sus recursos, verificando jerarquía.
-        Mueve las subcarpetas al nivel superior (dentro de la jerarquía).
+        Elimina una carpeta y todo su contenido (recursos y subcarpetas) de forma recursiva.
         
         Args:
             folder_id: ID de la carpeta a eliminar
@@ -814,60 +813,42 @@ class ResourceFolderService(VerificationBaseService):
                 if not is_in_hierarchy:
                     return False, "No tienes permiso para eliminar esta carpeta"
             
-            # Eliminar recursos asociados a la carpeta usando ResourceService
-            resources_in_folder = list(get_db().resources.find({"folder_id": ObjectId(folder_id)}))
-            resources_deleted_count = 0
-            resource_service = ResourceService() # Instancia para eliminar recursos
-            for resource in resources_in_folder:
-                success, _ = resource_service.delete_resource(str(resource["_id"]))
-                if success:
-                    resources_deleted_count += 1
+            # Estadísticas para el reporte
+            total_folders_deleted = 0
+            total_resources_deleted = 0
             
-            # Buscar carpetas hijas
-            child_folders = list(self.collection.find({"parent_id": ObjectId(folder_id)}))
-            
-            # Si hay carpeta raíz y estamos dentro de jerarquía, mover a carpeta raíz
-            # en lugar de nivel superior (null)
-            parent_id = None
-            if email:
-                root_folder = self.get_user_root_folder(email)
-                # Si la carpeta a eliminar no es de primer nivel (directamente bajo raíz)
-                folder_parent = folder.get("parent_id")
-                if folder_parent:
-                    # Usar el parent actual de la carpeta
-                    parent_id = folder_parent
-                else:
-                    # Si es de primer nivel, usar la raíz
-                    parent_id = root_folder["_id"]
-            
-            # Mover subcarpetas al nuevo parent_id (raíz o null)
-            children_updated = 0
-            if child_folders:
-                update_data = {"updated_at": datetime.now()}
-                if parent_id:
-                    update_data["parent_id"] = parent_id
-                else:
-                    # $unset para quitar parent_id completamente
-                    update_result = self.collection.update_many(
-                        {"parent_id": ObjectId(folder_id)},
-                        {"$unset": {"parent_id": ""}, "$set": {"updated_at": datetime.now()}}
-                    )
-                    children_updated = update_result.modified_count
+            # Función recursiva para eliminar carpetas y su contenido
+            def delete_folder_recursive(folder_id: ObjectId):
+                nonlocal total_folders_deleted, total_resources_deleted
                 
-                if parent_id:
-                    update_result = self.collection.update_many(
-                        {"parent_id": ObjectId(folder_id)},
-                        {"$set": update_data}
-                    )
-                    children_updated = update_result.modified_count
+                # 1. Eliminar recursos asociados a la carpeta
+                resources_in_folder = list(get_db().resources.find({"folder_id": folder_id}))
+                resource_service = ResourceService()
+                for resource in resources_in_folder:
+                    success, _ = resource_service.delete_resource(str(resource["_id"]))
+                    if success:
+                        total_resources_deleted += 1
+                
+                # 2. Buscar todas las subcarpetas
+                child_folders = list(self.collection.find({"parent_id": folder_id}))
+                
+                # 3. Eliminar recursivamente cada subcarpeta
+                for child in child_folders:
+                    child_id = child["_id"]
+                    delete_folder_recursive(child_id)
+                
+                # 4. Finalmente eliminar esta carpeta
+                result = self.collection.delete_one({"_id": folder_id})
+                if result.deleted_count > 0:
+                    total_folders_deleted += 1
             
-            # Eliminar la carpeta
-            result = self.collection.delete_one({"_id": ObjectId(folder_id)})
+            # Iniciar eliminación recursiva desde la carpeta solicitada
+            delete_folder_recursive(ObjectId(folder_id))
             
-            if result.deleted_count > 0:
-                message = f"Carpeta eliminada. {resources_deleted_count} recursos eliminados. {children_updated} subcarpetas movidas."
-                return True, message
-            return False, "No se pudo eliminar la carpeta"
+            # Generar mensaje de resultado
+            message = f"Carpeta eliminada. {total_resources_deleted} recursos y {total_folders_deleted} carpetas eliminadas."
+            return True, message
+            
         except Exception as e:
             log_error(f"Error al eliminar carpeta: {str(e)}")
             return False, str(e)
