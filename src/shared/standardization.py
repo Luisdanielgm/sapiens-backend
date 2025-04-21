@@ -312,6 +312,7 @@ class ErrorCodes:
     
     # Errores de recursos
     RESOURCE_NOT_FOUND = "RECURSO_NO_ENCONTRADO"    # 404 - Recurso solicitado no encontrado
+    NOT_FOUND = "RECURSO_NO_ENCONTRADO"             # Alias de RESOURCE_NOT_FOUND para compatibilidad
     RESOURCE_ALREADY_EXISTS = "RECURSO_YA_EXISTE"   # 409 - Conflicto, el recurso ya existe
     RESOURCE_DELETED = "RECURSO_ELIMINADO"          # 410 - Recurso eliminado permanentemente
     
