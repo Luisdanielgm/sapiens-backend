@@ -1226,136 +1226,87 @@ def update_resource(resource_id):
             status_code=500
         )
 
+@study_plan_bp.route('/resources/<resource_id>', methods=['DELETE'])
+@APIRoute.standard(auth_required_flag=True, roles=[ROLES["TEACHER"]])
+def delete_resource(resource_id):
+    """Elimina un recurso existente"""
+    try:
+        success, result = resource_service.delete_resource(resource_id)
+        
+        if not success:
+            return APIRoute.error(
+                ErrorCodes.BAD_REQUEST,
+                result,
+                status_code=400
+            )
+            
+        return APIRoute.success(
+            message="Recurso eliminado exitosamente"
+        )
+    except Exception as e:
+        logging.error(f"Error al eliminar recurso: {str(e)}")
+        return APIRoute.error(
+            ErrorCodes.SERVER_ERROR,
+            str(e),
+            status_code=500
+        )
+
 @study_plan_bp.route('/topic-resources/<topic_id>/<resource_id>', methods=['POST'])
-@APIRoute.standard(auth_required_flag=True, roles=[ROLES["TEACHER"]], required_fields=['relevance_score', 'recommended_for', 'usage_context', 'content_types'])
+@APIRoute.standard(auth_required_flag=True, roles=[ROLES["TEACHER"]])
 def link_resource_to_topic(topic_id, resource_id):
     """
+    DEPRECATED: Usar /api/topic-resources/<topic_id>/<resource_id> en su lugar.
+    Ruta mantenida temporalmente por compatibilidad.
+    
     Vincula un recurso específico a un tema.
-    
-    Args:
-        topic_id: ID del tema
-        resource_id: ID del recurso a vincular
-    
-    Returns:
-        Respuesta con el estado de la operación
     """
-    data = request.get_json()
-    current_user = request.user
+    # Importación circular, solo necesaria para esta redirección temporal
+    from src.topic_resources.routes import link_resource_to_topic as new_link_resource
     
-    relevance_score = data.get("relevance_score", 0.5)
-    recommended_for = data.get("recommended_for", [])
-    usage_context = data.get("usage_context", "supplementary")
-    content_types = data.get("content_types", [])
-    
-    success, result = topic_resource_service.link_resource_to_topic(
-        topic_id=topic_id,
-        resource_id=resource_id,
-        relevance_score=relevance_score,
-        recommended_for=recommended_for,
-        usage_context=usage_context,
-        content_types=content_types,
-        created_by=str(current_user["_id"])
-    )
-    
-    if success:
-        return {
-            "success": True,
-            "message": "Recurso vinculado correctamente al tema",
-            "data": {"id": result}
-        }
-    else:
-        raise APIRoute.error(
-            ErrorCodes.BAD_REQUEST,
-            result,
-            status_code=400
-        )
+    # Redirigir a la nueva implementación
+    return new_link_resource(topic_id, resource_id)
 
 @study_plan_bp.route('/topic-resources/<topic_id>/<resource_id>', methods=['DELETE'])
 @APIRoute.standard(auth_required_flag=True, roles=[ROLES["TEACHER"]])
 def unlink_resource_from_topic(topic_id, resource_id):
     """
+    DEPRECATED: Usar /api/topic-resources/<topic_id>/<resource_id> en su lugar.
+    Ruta mantenida temporalmente por compatibilidad.
+    
     Desvincula un recurso de un tema.
-    
-    Args:
-        topic_id: ID del tema
-        resource_id: ID del recurso
-    
-    Returns:
-        Respuesta con el estado de la operación
     """
-    current_user = request.user
+    # Importación circular, solo necesaria para esta redirección temporal
+    from src.topic_resources.routes import unlink_resource_from_topic as new_unlink_resource
     
-    success, message = topic_resource_service.unlink_resource_from_topic(topic_id, resource_id)
-    
-    if success:
-        return {
-            "success": True,
-            "message": message,
-            "data": None
-        }
-    else:
-        raise APIRoute.error(
-            ErrorCodes.NOT_FOUND,
-            message,
-            status_code=404
-        )
+    # Redirigir a la nueva implementación
+    return new_unlink_resource(topic_id, resource_id)
 
 @study_plan_bp.route('/topic-resources/<topic_id>', methods=['GET'])
 @APIRoute.standard(auth_required_flag=True)
 def get_topic_resources(topic_id):
     """
+    DEPRECATED: Usar /api/topic-resources/<topic_id> en su lugar.
+    Ruta mantenida temporalmente por compatibilidad.
+    
     Obtiene todos los recursos asociados a un tema específico.
-    
-    Args:
-        topic_id: ID del tema
-    
-    Returns:
-        Lista de recursos asociados al tema
     """
-    current_user = request.user
-    content_type = request.args.get('content_type')
-    usage_context = request.args.get('usage_context')
-    personalized = request.args.get('personalized', 'false').lower() == 'true'
+    # Importación circular, solo necesaria para esta redirección temporal
+    from src.topic_resources.routes import get_topic_resources as new_get_topic_resources
     
-    # Obtener perfil cognitivo si es necesario para personalización
-    cognitive_profile = None
-    if personalized:
-        profile_service = ProfileService()
-        profile = profile_service.get_user_profile(str(current_user["_id"]))
-        if profile:
-            cognitive_profile = profile.get("cognitive_profile", {})
-    
-    resources = topic_resource_service.get_topic_resources(
-        topic_id=topic_id,
-        cognitive_profile=cognitive_profile,
-        content_type=content_type,
-        usage_context=usage_context
-    )
-    
-    return {
-        "success": True,
-        "message": f"Se encontraron {len(resources)} recursos para el tema",
-        "data": resources
-    }
+    # Redirigir a la nueva implementación
+    return new_get_topic_resources(topic_id)
 
 @study_plan_bp.route('/resource-topics/<resource_id>', methods=['GET'])
 @APIRoute.standard(auth_required_flag=True)
 def get_resource_topics(resource_id):
     """
+    DEPRECATED: Usar /api/topic-resources/by-resource/<resource_id> en su lugar.
+    Ruta mantenida temporalmente por compatibilidad.
+    
     Obtiene todos los temas asociados a un recurso específico.
-    
-    Args:
-        resource_id: ID del recurso
-    
-    Returns:
-        Lista de temas asociados al recurso
     """
-    current_user = request.user
+    # Importación circular, solo necesaria para esta redirección temporal
+    from src.topic_resources.routes import get_resource_topics as new_get_resource_topics
     
-    topics = topic_resource_service.get_resource_topics(resource_id)
-    
-    return {
-        "success": True,
-        "message": f"Se encontraron {len(topics)} temas para el recurso",
-        "data": topics
-    }
+    # Redirigir a la nueva implementación
+    return new_get_resource_topics(resource_id)

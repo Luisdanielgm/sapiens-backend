@@ -43,6 +43,7 @@ from src.games.routes import games_bp
 from src.simulations.routes import simulations_bp
 from src.resources.routes import resources_bp
 from src.deep_research.routes import deep_research_bp
+from src.topic_resources.routes import topic_resources_bp
 
 def create_app(config_object=active_config):
     """
@@ -211,6 +212,7 @@ def create_app(config_object=active_config):
     app.register_blueprint(simulations_bp, url_prefix='/api/simulations')
     app.register_blueprint(resources_bp, url_prefix='/api/resources')
     app.register_blueprint(deep_research_bp, url_prefix='/api/deep-research')
+    app.register_blueprint(topic_resources_bp, url_prefix='/api/topic-resources')
 
     @app.route('/')
     def health_check():
