@@ -43,7 +43,7 @@ Crea o actualiza la vinculación entre un topic y un recurso.
 ```
 DELETE /api/topic-resources/<topic_id>/<resource_id>
 ```
-Marca la vinculación como "deleted" sin eliminar el recurso.
+Elimina completamente la vinculación entre el recurso y el topic. Esta operación no afecta al recurso en sí, sólo elimina la relación.
 
 ### Obtener recursos de un topic
 ```

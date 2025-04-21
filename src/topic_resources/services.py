@@ -117,7 +117,7 @@ class TopicResourceService(VerificationBaseService):
             
     def unlink_resource_from_topic(self, topic_id: str, resource_id: str) -> Tuple[bool, str]:
         """
-        Desvincula un recurso de un tema.
+        Desvincula un recurso de un tema eliminando completamente el registro.
         
         Args:
             topic_id: ID del tema
@@ -127,15 +127,14 @@ class TopicResourceService(VerificationBaseService):
             Tuple[bool, str]: (éxito, mensaje)
         """
         try:
-            result = self.collection.update_one(
+            result = self.collection.delete_one(
                 {
                     "topic_id": ObjectId(topic_id),
                     "resource_id": ObjectId(resource_id)
-                },
-                {"$set": {"status": "deleted"}}
+                }
             )
             
-            if result.modified_count > 0:
+            if result.deleted_count > 0:
                 return True, "Recurso desvinculado del tema correctamente"
             return False, "No se encontró la relación entre el tema y el recurso"
             
