@@ -30,7 +30,7 @@ def link_resource_to_topic(topic_id, resource_id):
         Respuesta con el estado de la operación
     """
     data = request.get_json()
-    current_user = request.user
+    current_user_id = request.user_id
     
     relevance_score = data.get("relevance_score", 0.5)
     recommended_for = data.get("recommended_for", [])
@@ -44,7 +44,7 @@ def link_resource_to_topic(topic_id, resource_id):
         recommended_for=recommended_for,
         usage_context=usage_context,
         content_types=content_types,
-        created_by=str(current_user["_id"])
+        created_by=current_user_id
     )
     
     if success:
@@ -72,7 +72,7 @@ def unlink_resource_from_topic(topic_id, resource_id):
     Returns:
         Respuesta con el estado de la operación
     """
-    current_user = request.user
+    current_user_id = request.user_id
     
     success, message = topic_resource_service.unlink_resource_from_topic(topic_id, resource_id)
     
@@ -99,7 +99,7 @@ def get_topic_resources(topic_id):
     Returns:
         Lista de recursos asociados al tema
     """
-    current_user = request.user
+    current_user_id = request.user_id
     content_type = request.args.get('content_type')
     usage_context = request.args.get('usage_context')
     personalized = request.args.get('personalized', 'false').lower() == 'true'
@@ -108,7 +108,7 @@ def get_topic_resources(topic_id):
     cognitive_profile = None
     if personalized:
         profile_service = ProfileService()
-        profile = profile_service.get_user_profile(str(current_user["_id"]))
+        profile = profile_service.get_user_profile(current_user_id)
         if profile:
             cognitive_profile = profile.get("cognitive_profile", {})
     
@@ -136,7 +136,7 @@ def get_resource_topics(resource_id):
     Returns:
         Lista de temas asociados al recurso
     """
-    current_user = request.user
+    current_user_id = request.user_id
     
     topics = topic_resource_service.get_resource_topics(resource_id)
     
