@@ -34,6 +34,12 @@ def register_user():
     """
     data = request.get_json()
     
+    # Mapear camelCase a snake_case para compatibilidad con frontend
+    if 'birthDate' in data:
+        data['birth_date'] = data.pop('birthDate')
+    if 'instituteName' in data:
+        data['institute_name'] = data.pop('instituteName')
+    
     # Validar campos
     if data.get('role') == 'INSTITUTE_ADMIN' and not data.get('institute_name'):
         return APIRoute.error(

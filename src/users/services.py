@@ -29,18 +29,20 @@ class UserService(VerificationBaseService):
 
     def register_user(self, user_data: dict, institute_name: Optional[str] = None) -> Tuple[bool, str]:
         try:
+            # Extraer institute_name localmente sin afectar user_data original
+            institute_name_local = institute_name or user_data.get('institute_name')
             # Crear usuario
-            user_data_clean = user_data.copy()
-            user_data_clean.pop('institute_name', None)
+            # Preparar datos para User sin campo institute_name
+            user_data_clean = {k: v for k, v in user_data.items() if k != 'institute_name'}
             user = User(**user_data_clean)
             result = self.collection.insert_one(user.to_dict())
             user_id = result.inserted_id
 
             # Si es INSTITUTE_ADMIN, crear instituto
-            if user.role == 'INSTITUTE_ADMIN' and institute_name:
+            if user.role == 'INSTITUTE_ADMIN' and institute_name_local:
                 db = get_db()
                 institute_result = db.institutes.insert_one({
-                    'name': institute_name,
+                    'name': institute_name_local,
                     'created_at': datetime.now(),
                     'status': 'pending'
                 })
@@ -61,7 +63,7 @@ class UserService(VerificationBaseService):
                     profile_service = ProfileService()
                     profile_service.create_institute_profile(
                         institute_id=str(institute_id),
-                        name=institute_name,
+                        name=institute_name_local,
                         profile_data=None
                     )
                     
