@@ -11,6 +11,7 @@ class User:
                 email: str,
                 name: str,
                 role: str,
+                birth_date: Optional[str] = None,
                 password: Optional[str] = None,
                 picture: str = "",
                 status: str = "active",
@@ -18,6 +19,7 @@ class User:
                 email_verified: bool = False):
         self.email = email
         self.name = name
+        self.birth_date = birth_date
         self.password = password
         self.picture = picture
         self.role = role
@@ -31,6 +33,7 @@ class User:
         return {
             "email": self.email,
             "name": self.name,
+            "birth_date": self.birth_date,
             "password": self.password,
             "picture": self.picture,
             "role": self.role,

@@ -318,6 +318,7 @@ class ErrorCodes:
     
     # Errores de validación
     INVALID_DATA = "DATOS_INVALIDOS"                # 400 - Datos no válidos (genérico)
+    BAD_REQUEST = INVALID_DATA                         # Alias para compatibilidad con BAD_REQUEST
     MISSING_FIELDS = "CAMPOS_FALTANTES"             # 400 - Faltan campos requeridos
     VALIDATION_ERROR = "ERROR_VALIDACION"           # 400 - Error en validación de datos
     INVALID_FORMAT = "FORMATO_INVALIDO"             # 400 - Formato de datos incorrecto
