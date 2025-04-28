@@ -243,26 +243,6 @@ def update_cognitive_profile():
             status_code=400
         )
 
-@users_bp.route('/<user_id>', methods=['GET'])
-@APIRoute.standard(auth_required_flag=True)
-def get_user(user_id):
-    """Obtiene un usuario por su ID"""
-    try:
-        user = user_service.get_user_by_id(user_id)
-        if user:
-            return APIRoute.success(data=user)
-        return APIRoute.error(
-            ErrorCodes.USER_NOT_FOUND,
-            "Usuario no encontrado",
-            status_code=404
-        )
-    except Exception as e:
-        return APIRoute.error(
-            ErrorCodes.SERVER_ERROR,
-            str(e),
-            status_code=500
-        )
-
 @users_bp.route('/email/<email>', methods=['GET'])
 @APIRoute.standard(auth_required_flag=True)
 def get_user_by_email(email):
