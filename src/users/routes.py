@@ -132,15 +132,22 @@ def search_users():
         message=f"Se encontraron {len(results)} usuarios"
     )
 
-@users_bp.route('/user-info/<email>', methods=['GET'])
+@users_bp.route('/user-info', methods=['GET'])
 @APIRoute.standard(auth_required_flag=True)
-def get_user_info(email):
+def get_user_info():
     """
     Obtiene información básica de un usuario.
     
     Args:
         email: Email del usuario
     """
+    email = request.args.get('email')
+    if not email:
+        return APIRoute.error(
+            ErrorCodes.MISSING_FIELDS,
+            "El campo email es requerido",
+            status_code=400
+        )
     user_info = user_service.get_user_info(email)
     
     if user_info:
