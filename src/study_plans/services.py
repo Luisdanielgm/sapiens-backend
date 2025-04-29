@@ -196,11 +196,23 @@ class StudyPlanService(VerificationBaseService):
                 module["_id"] = str(module["_id"])
                 module["study_plan_id"] = str(module["study_plan_id"])
                 
-                # Obtener topics y convertir sus ObjectId
+                # Rellenar date_start y date_end si faltan (para registros antiguos)
+                if 'date_start' not in module or module.get('date_start') is None:
+                    module['date_start'] = module.get('created_at')
+                if 'date_end' not in module or module.get('date_end') is None:
+                    module['date_end'] = module.get('created_at')
+                
+                # Obtener temas relacionados
                 topics = list(get_db().topics.find({"module_id": ObjectId(module["_id"])}))
                 for topic in topics:
                     topic["_id"] = str(topic["_id"])
                     topic["module_id"] = str(topic["module_id"])
+                    
+                    # Rellenar date_start y date_end si faltan en el topic
+                    if 'date_start' not in topic or topic.get('date_start') is None:
+                        topic['date_start'] = topic.get('created_at')
+                    if 'date_end' not in topic or topic.get('date_end') is None:
+                        topic['date_end'] = topic.get('created_at')
                 
                 module["topics"] = topics
                 
@@ -536,6 +548,12 @@ class ModuleService(VerificationBaseService):
             if not module:
                 return None
                 
+            # Rellenar date_start y date_end si faltan (para registros antiguos)
+            if 'date_start' not in module or module.get('date_start') is None:
+                module['date_start'] = module.get('created_at')
+            if 'date_end' not in module or module.get('date_end') is None:
+                module['date_end'] = module.get('created_at')
+            
             # Obtener temas relacionados
             topics = list(get_db().topics.find({"module_id": ObjectId(module_id)}))
             
@@ -653,6 +671,12 @@ class ModuleService(VerificationBaseService):
             module = self.collection.find_one({"_id": ObjectId(module_id)})
             if not module:
                 return None
+            
+            # Rellenar date_start y date_end si faltan en get_module
+            if 'date_start' not in module or module.get('date_start') is None:
+                module['date_start'] = module.get('created_at')
+            if 'date_end' not in module or module.get('date_end') is None:
+                module['date_end'] = module.get('created_at')
             
             # Convertir ObjectId a string
             module['_id'] = str(module['_id'])
@@ -954,6 +978,12 @@ class TopicService(VerificationBaseService):
             topic['_id'] = str(topic['_id'])
             topic['module_id'] = str(topic['module_id'])
             
+            # Rellenar date_start y date_end si faltan en get_topic
+            if 'date_start' not in topic or topic.get('date_start') is None:
+                topic['date_start'] = topic.get('created_at')
+            if 'date_end' not in topic or topic.get('date_end') is None:
+                topic['date_end'] = topic.get('created_at')
+
             return topic
         except Exception as e:
             logging.error(f"Error al obtener tema: {str(e)}")
@@ -967,6 +997,12 @@ class TopicService(VerificationBaseService):
             for topic in topics:
                 topic['_id'] = str(topic['_id'])
                 topic['module_id'] = str(topic['module_id'])
+                
+                # Rellenar date_start y date_end si faltan en lista de topics
+                if 'date_start' not in topic or topic.get('date_start') is None:
+                    topic['date_start'] = topic.get('created_at')
+                if 'date_end' not in topic or topic.get('date_end') is None:
+                    topic['date_end'] = topic.get('created_at')
             
             return topics
         except Exception as e:
