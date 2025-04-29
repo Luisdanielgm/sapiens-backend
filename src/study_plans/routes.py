@@ -194,7 +194,7 @@ def list_plan_assignments():
 
 # Rutas para Módulos
 @study_plan_bp.route('/module', methods=['POST'])
-@APIRoute.standard(auth_required_flag=True, roles=[ROLES["TEACHER"]], required_fields=['study_plan_id', 'name', 'learning_outcomes', 'evaluation_rubric'])
+@APIRoute.standard(auth_required_flag=True, roles=[ROLES["TEACHER"]], required_fields=['study_plan_id', 'name', 'learning_outcomes', 'evaluation_rubric', 'date_start', 'date_end'])
 def create_module():
     """Crea un nuevo módulo"""
     data = request.get_json()
@@ -291,7 +291,7 @@ def delete_module(module_id):
 
 # Rutas para Topics
 @study_plan_bp.route('/topic', methods=['POST'])
-@APIRoute.standard(auth_required_flag=True, roles=[ROLES["TEACHER"]])
+@APIRoute.standard(auth_required_flag=True, roles=[ROLES["TEACHER"]], required_fields=['module_id', 'name', 'difficulty', 'date_start', 'date_end'])
 def create_topic():
     """Crea un nuevo topic para un módulo"""
     data = request.get_json()

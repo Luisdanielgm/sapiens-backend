@@ -61,11 +61,15 @@ class Module:
                  study_plan_id: str,
                  name: str,
                  learning_outcomes: List[str],
-                 evaluation_rubric: Dict[str, any]):
+                 evaluation_rubric: Dict[str, any],
+                 date_start: datetime,
+                 date_end: datetime):
         self.study_plan_id = ObjectId(study_plan_id)
         self.name = name
         self.learning_outcomes = learning_outcomes
         self.evaluation_rubric = evaluation_rubric
+        self.date_start = date_start
+        self.date_end = date_end
         self.created_at = datetime.now()
 
     def to_dict(self) -> dict:
@@ -74,6 +78,8 @@ class Module:
             "name": self.name,
             "learning_outcomes": self.learning_outcomes,
             "evaluation_rubric": self.evaluation_rubric,
+            "date_start": self.date_start,
+            "date_end": self.date_end,
             "created_at": self.created_at
         }
 
@@ -82,6 +88,8 @@ class Topic:
                  module_id: str,
                  name: str,
                  difficulty: str,
+                 date_start: datetime,
+                 date_end: datetime,
                  resources: List[Dict] = None,
                  theory_content: str = ""):
         self.module_id = ObjectId(module_id)
@@ -89,6 +97,8 @@ class Topic:
         self.difficulty = difficulty
         self.resources = resources or []
         self.theory_content = theory_content
+        self.date_start = date_start
+        self.date_end = date_end
         self.created_at = datetime.now()
 
     def to_dict(self) -> dict:
@@ -98,6 +108,8 @@ class Topic:
             "difficulty": self.difficulty,
             "resources": self.resources,
             "theory_content": self.theory_content,
+            "date_start": self.date_start,
+            "date_end": self.date_end,
             "created_at": self.created_at
         }
 

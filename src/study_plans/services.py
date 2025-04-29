@@ -567,6 +567,16 @@ class ModuleService(VerificationBaseService):
                 "evaluation_rubric": module_data.get('evaluation_rubric')
             }
             
+            # Agregar parseo de date_start y date_end
+            date_start = module_data.get('date_start')
+            if isinstance(date_start, str):
+                date_start = datetime.fromisoformat(date_start)
+            date_end = module_data.get('date_end')
+            if isinstance(date_end, str):
+                date_end = datetime.fromisoformat(date_end)
+            module_dict['date_start'] = date_start
+            module_dict['date_end'] = date_end
+            
             # Crear el módulo con parámetros exactos
             module = Module(**module_dict)
             
@@ -587,6 +597,19 @@ class ModuleService(VerificationBaseService):
             module = self.collection.find_one({"_id": ObjectId(module_id)})
             if not module:
                 return False, "Módulo no encontrado"
+            
+            # Manejar date_start y date_end: parsear o crear si no existen
+            if 'date_start' in update_data:
+                if isinstance(update_data['date_start'], str):
+                    update_data['date_start'] = datetime.fromisoformat(update_data['date_start'])
+            elif 'date_start' not in module or module.get('date_start') is None:
+                update_data['date_start'] = module.get('created_at')
+
+            if 'date_end' in update_data:
+                if isinstance(update_data['date_end'], str):
+                    update_data['date_end'] = datetime.fromisoformat(update_data['date_end'])
+            elif 'date_end' not in module or module.get('date_end') is None:
+                update_data['date_end'] = module.get('created_at')
             
             # Actualizar timestamp
             update_data['updated_at'] = datetime.now()
@@ -667,6 +690,16 @@ class TopicService(VerificationBaseService):
                 "difficulty": topic_data.get("difficulty"),
                 "theory_content": topic_data.get("theory_content", "")
             }
+            
+            # Agregar parseo de date_start y date_end
+            date_start = topic_data.get('date_start')
+            if isinstance(date_start, str):
+                date_start = datetime.fromisoformat(date_start)
+            date_end = topic_data.get('date_end')
+            if isinstance(date_end, str):
+                date_end = datetime.fromisoformat(date_end)
+            topic_dict['date_start'] = date_start
+            topic_dict['date_end'] = date_end
             
             # Crear el tema con parámetros exactos
             topic = Topic(**topic_dict)
@@ -824,6 +857,19 @@ class TopicService(VerificationBaseService):
             topic = self.collection.find_one({"_id": ObjectId(topic_id)})
             if not topic:
                 return False, "Tema no encontrado"
+            
+            # Manejar date_start y date_end: parsear o crear si no existen
+            if 'date_start' in update_data:
+                if isinstance(update_data['date_start'], str):
+                    update_data['date_start'] = datetime.fromisoformat(update_data['date_start'])
+            elif 'date_start' not in topic or topic.get('date_start') is None:
+                update_data['date_start'] = topic.get('created_at')
+
+            if 'date_end' in update_data:
+                if isinstance(update_data['date_end'], str):
+                    update_data['date_end'] = datetime.fromisoformat(update_data['date_end'])
+            elif 'date_end' not in topic or topic.get('date_end') is None:
+                update_data['date_end'] = topic.get('created_at')
             
             # Actualizar timestamp
             update_data['updated_at'] = datetime.now()
