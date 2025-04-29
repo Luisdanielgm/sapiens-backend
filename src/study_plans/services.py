@@ -10,7 +10,7 @@ from src.shared.standardization import VerificationBaseService, ErrorCodes
 from src.shared.exceptions import AppException
 from src.shared.database import get_db
 from src.classes.services import ClassService
-from src.study_plans.models import StudyPlanPerSubject, Module, Topic, Evaluation, TopicResource
+from src.study_plans.models import StudyPlanPerSubject, StudyPlanAssignment, Module, Topic, Evaluation, TopicResource
 from src.resources.services import ResourceService, ResourceFolderService
 from src.topic_resources.services import TopicResourceService
 
