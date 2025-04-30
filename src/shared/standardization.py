@@ -332,6 +332,7 @@ class ErrorCodes:
     
     # Errores de operaciones
     OPERATION_FAILED = "OPERACION_FALLIDA"          # 400 - La operación no pudo completarse
+    UPDATE_ERROR = OPERATION_FAILED                  # 400 - Alias para error al actualizar un recurso
     DATABASE_ERROR = "ERROR_BASE_DATOS"             # 500 - Error al interactuar con la BD
     CREATION_ERROR = "ERROR_CREACION"               # 400 - Error al crear un recurso
     
