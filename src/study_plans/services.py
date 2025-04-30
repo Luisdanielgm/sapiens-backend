@@ -616,6 +616,10 @@ class ModuleService(VerificationBaseService):
             if not module:
                 return False, "Módulo no encontrado"
             
+            # Convertir study_plan_id a ObjectId si se actualiza
+            if 'study_plan_id' in update_data and isinstance(update_data['study_plan_id'], str):
+                update_data['study_plan_id'] = ObjectId(update_data['study_plan_id'])
+            
             # Manejar date_start y date_end: parsear o crear si no existen
             if 'date_start' in update_data:
                 if isinstance(update_data['date_start'], str):
@@ -881,6 +885,10 @@ class TopicService(VerificationBaseService):
             topic = self.collection.find_one({"_id": ObjectId(topic_id)})
             if not topic:
                 return False, "Tema no encontrado"
+            
+            # Convertir module_id a ObjectId si se actualiza
+            if 'module_id' in update_data and isinstance(update_data['module_id'], str):
+                update_data['module_id'] = ObjectId(update_data['module_id'])
             
             # Manejar date_start y date_end: parsear o crear si no existen
             if 'date_start' in update_data:
