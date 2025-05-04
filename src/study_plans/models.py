@@ -1,6 +1,7 @@
 from datetime import datetime
 from bson import ObjectId
 from typing import Dict, List, Optional
+from src.shared.constants import STATUS
 
 class StudyPlanPerSubject:
     def __init__(self,
@@ -152,7 +153,7 @@ class EvaluationResult:
         self.student_id = ObjectId(student_id)
         self.score = score
         self.feedback = feedback
-        self.submitted_at = datetime.now()
+        self.recorded_at = datetime.now()
 
     def to_dict(self) -> dict:
         return {
@@ -160,7 +161,39 @@ class EvaluationResult:
             "student_id": self.student_id,
             "score": self.score,
             "feedback": self.feedback,
-            "submitted_at": self.submitted_at
+            "recorded_at": self.recorded_at
+        }
+
+class EvaluationResource:
+    """
+    Modelo para la vinculación entre una Evaluación y un Recurso.
+    Define el rol del recurso en la evaluación (plantilla, entregable, material de apoyo).
+    """
+    def __init__(self,
+                 evaluation_id: str,
+                 resource_id: str,
+                 role: str,  # e.g., "template", "submission", "supporting_material"
+                 created_by: str,
+                 status: str = STATUS["ACTIVE"],
+                 _id: Optional[ObjectId] = None,
+                 created_at: Optional[datetime] = None):
+        self._id = _id or ObjectId()
+        self.evaluation_id = ObjectId(evaluation_id)
+        self.resource_id = ObjectId(resource_id)
+        self.role = role
+        self.created_by = ObjectId(created_by)
+        self.status = status
+        self.created_at = created_at or datetime.now()
+
+    def to_dict(self) -> dict:
+        return {
+            "_id": self._id,
+            "evaluation_id": self.evaluation_id,
+            "resource_id": self.resource_id,
+            "role": self.role,
+            "created_by": self.created_by,
+            "status": self.status,
+            "created_at": self.created_at
         }
 
 # Nuevos modelos para soportar múltiples tipos de contenido

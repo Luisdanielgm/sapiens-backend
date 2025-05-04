@@ -10,9 +10,14 @@ from src.shared.standardization import VerificationBaseService, ErrorCodes
 from src.shared.exceptions import AppException
 from src.shared.database import get_db
 from src.classes.services import ClassService
-from src.study_plans.models import StudyPlanPerSubject, StudyPlanAssignment, Module, Topic, Evaluation, TopicResource
+from src.study_plans.models import (
+    StudyPlanPerSubject, StudyPlanAssignment, Module, Topic, Evaluation, 
+    EvaluationResult, EvaluationResource, TopicResource, 
+    TopicContent, ContentTypeDefinition
+)
 from src.resources.services import ResourceService, ResourceFolderService
 from src.topic_resources.services import TopicResourceService
+from src.shared.logging import log_error
 
 class StudyPlanService(VerificationBaseService):
     def __init__(self):
@@ -2149,3 +2154,143 @@ class TopicContentService(VerificationBaseService):
                 "suggested_templates": [],
                 "recommended_types": []
             }
+
+class EvaluationResourceService(VerificationBaseService):
+    """
+    Servicio para gestionar la vinculación entre Evaluaciones y Recursos.
+    """
+    def __init__(self):
+        super().__init__(collection_name="evaluation_resources")
+
+    def check_evaluation_exists(self, evaluation_id: str) -> bool:
+        """Verifica si una evaluación existe."""
+        try:
+            return get_db().evaluations.find_one({"_id": ObjectId(evaluation_id)}) is not None
+        except Exception:
+            return False
+
+    def check_resource_exists(self, resource_id: str) -> bool:
+        """Verifica si un recurso existe."""
+        try:
+            return get_db().resources.find_one({"_id": ObjectId(resource_id)}) is not None
+        except Exception:
+            return False
+
+    def link_resource_to_evaluation(self, evaluation_id: str, resource_id: str, role: str, created_by: str) -> Tuple[bool, str]:
+        """
+        Vincula un recurso existente a una evaluación con un rol específico.
+        
+        Args:
+            evaluation_id: ID de la evaluación.
+            resource_id: ID del recurso.
+            role: Rol del recurso ("template", "submission", "supporting_material").
+            created_by: ID del usuario que crea la vinculación.
+            
+        Returns:
+            (éxito, ID de la vinculación o mensaje de error)
+        """
+        try:
+            if not self.check_evaluation_exists(evaluation_id):
+                return False, "Evaluación no encontrada"
+            if not self.check_resource_exists(resource_id):
+                return False, "Recurso no encontrado"
+
+            # Verificar si ya existe esta vinculación específica (podría ser opcional)
+            existing_link = self.collection.find_one({
+                "evaluation_id": ObjectId(evaluation_id),
+                "resource_id": ObjectId(resource_id)
+            })
+            if existing_link:
+                # Podríamos decidir actualizar el rol o simplemente retornar el existente
+                return True, str(existing_link["_id"])
+            
+            link_data = {
+                "evaluation_id": evaluation_id,
+                "resource_id": resource_id,
+                "role": role,
+                "created_by": created_by
+            }
+            evaluation_resource = EvaluationResource(**link_data)
+            result = self.collection.insert_one(evaluation_resource.to_dict())
+            
+            return True, str(result.inserted_id)
+        except Exception as e:
+            log_error(f"Error al vincular recurso {resource_id} a evaluación {evaluation_id}: {str(e)}")
+            return False, str(e)
+
+    def get_evaluation_resources(self, evaluation_id: str, role: Optional[str] = None, student_id: Optional[str] = None) -> List[Dict]:
+        """
+        Obtiene los recursos vinculados a una evaluación, con filtros opcionales.
+        
+        Args:
+            evaluation_id: ID de la evaluación.
+            role: Filtrar por rol del recurso.
+            student_id: Filtrar por entregables de un estudiante específico (si role="submission").
+            
+        Returns:
+            Lista de documentos de la vinculación (enriquecidos con datos del recurso).
+        """
+        try:
+            if not self.check_evaluation_exists(evaluation_id):
+                return []
+
+            query = {"evaluation_id": ObjectId(evaluation_id)}
+            if role:
+                query["role"] = role
+            if student_id and role == "submission":
+                query["created_by"] = ObjectId(student_id)
+            
+            links = list(self.collection.find(query))
+            
+            # Enriquecer con detalles del recurso
+            enriched_links = []
+            resource_ids = [link["resource_id"] for link in links]
+            resources = list(get_db().resources.find({"_id": {"$in": resource_ids}}))
+            resource_map = {str(r["_id"]): r for r in resources}
+
+            for link in links:
+                resource_id_str = str(link["resource_id"])
+                resource_details = resource_map.get(resource_id_str)
+                if resource_details:
+                    link["_id"] = str(link["_id"])
+                    link["evaluation_id"] = str(link["evaluation_id"])
+                    link["resource_id"] = resource_id_str
+                    link["created_by"] = str(link["created_by"])
+                    
+                    # Limpiar resource_details antes de añadirlo
+                    resource_details['_id'] = str(resource_details['_id'])
+                    if 'created_by' in resource_details: resource_details['created_by'] = str(resource_details['created_by'])
+                    if 'folder_id' in resource_details: resource_details['folder_id'] = str(resource_details['folder_id'])
+                    
+                    link["resource"] = resource_details
+                    enriched_links.append(link)
+                    
+            return enriched_links
+        except Exception as e:
+            log_error(f"Error al obtener recursos para evaluación {evaluation_id}: {str(e)}")
+            return []
+
+    def remove_resource_from_evaluation(self, evaluation_id: str, resource_id: str) -> Tuple[bool, str]:
+        """
+        Elimina la vinculación entre una evaluación y un recurso.
+        No elimina el recurso en sí.
+        
+        Args:
+            evaluation_id: ID de la evaluación.
+            resource_id: ID del recurso.
+            
+        Returns:
+            (éxito, mensaje)
+        """
+        try:
+            result = self.collection.delete_one({
+                "evaluation_id": ObjectId(evaluation_id),
+                "resource_id": ObjectId(resource_id)
+            })
+            
+            if result.deleted_count > 0:
+                return True, "Vinculación eliminada correctamente"
+            return False, "Vinculación no encontrada"
+        except Exception as e:
+            log_error(f"Error al eliminar vinculación recurso {resource_id} evaluación {evaluation_id}: {str(e)}")
+            return False, str(e)

@@ -11,9 +11,10 @@ from .services import (
     ContentTypeService,
     LearningMethodologyService,
     TopicContentService,
-    TopicResourceService
+    TopicResourceService,
+    EvaluationResourceService
 )
-from src.resources.services import ResourceService
+from src.resources.services import ResourceService, ResourceFolderService
 import logging
 from src.shared.constants import ROLES
 from bson import ObjectId
@@ -22,6 +23,9 @@ from datetime import datetime
 from src.shared.database import get_db
 from .models import ContentTypes, LearningMethodologyTypes
 from src.shared.constants import STATUS
+from werkzeug.utils import secure_filename
+import os
+from src.shared.logging import log_error
 
 study_plan_bp = APIBlueprint('study_plan', __name__)
 
@@ -35,6 +39,8 @@ methodology_service = LearningMethodologyService()
 topic_content_service = TopicContentService()
 resource_service = ResourceService()
 topic_resource_service = TopicResourceService()
+evaluation_resource_service = EvaluationResourceService()
+folder_service = ResourceFolderService()
 
 # Rutas para Plan de Estudio
 @study_plan_bp.route('/', methods=['POST'])
@@ -1299,3 +1305,255 @@ def get_resource_topics(resource_id):
     
     # Redirigir a la nueva implementación
     return new_get_resource_topics(resource_id)
+
+# Rutas para Recursos Vinculados a Evaluaciones
+@study_plan_bp.route('/evaluations/<evaluation_id>/resources', methods=['POST'])
+@APIRoute.standard(auth_required_flag=True, roles=[ROLES["TEACHER"]], required_fields=['resource_id', 'role'])
+def link_resource_to_evaluation_route(evaluation_id):
+    """Vincula un recurso existente a una evaluación con un rol específico."""
+    try:
+        data = request.get_json()
+        resource_id = data.get('resource_id')
+        role = data.get('role') # e.g., "template", "supporting_material"
+        created_by = request.user_id
+        
+        success, result = evaluation_resource_service.link_resource_to_evaluation(
+            evaluation_id=evaluation_id,
+            resource_id=resource_id,
+            role=role,
+            created_by=created_by
+        )
+        
+        if not success:
+            status_code = 404 if "no encontrado" in result else 400
+            return APIRoute.error(ErrorCodes.OPERATION_FAILED, result, status_code=status_code)
+            
+        return APIRoute.success({"link_id": result}, message="Recurso vinculado exitosamente", status_code=201)
+    except Exception as e:
+        logging.error(f"Error al vincular recurso a evaluación: {str(e)}")
+        return APIRoute.error(ErrorCodes.SERVER_ERROR, str(e), status_code=500)
+
+@study_plan_bp.route('/evaluations/<evaluation_id>/resources', methods=['GET'])
+@APIRoute.standard(auth_required_flag=True)
+def get_evaluation_resources_route(evaluation_id):
+    """Obtiene los recursos vinculados a una evaluación, con filtros opcionales y control de permisos."""
+    try:
+        current_user_id = request.user_id
+        current_user_role = getattr(request, 'user_role', None) # Asume que el rol está en request
+        if not current_user_role:
+             # Fallback: obtener rol de DB si no está en request (menos eficiente)
+             user = get_db().users.find_one({"_id": ObjectId(current_user_id)}, {"role": 1})
+             current_user_role = user.get("role") if user else None
+        if not current_user_role:
+             log_error(f"No se pudo determinar el rol para el usuario {current_user_id} al obtener recursos de evaluación {evaluation_id}")
+             return APIRoute.error(ErrorCodes.SERVER_ERROR, "No se pudo determinar el rol del usuario.", status_code=500)
+
+        # Filtros opcionales desde query params
+        role_filter = request.args.get('role')
+        student_id_filter = request.args.get('student_id')
+
+        # Lógica de permisos
+        allowed_roles_for_student = ["template", "submission", "supporting_material"] # Permitir supporting_material también
+        query_student_id = None
+
+        if current_user_role == ROLES["STUDENT"]:
+            # Estudiante solo ve plantillas, material de apoyo y SUS propios entregables
+            query_student_id = current_user_id # Solo puede ver sus propios entregables
+            if role_filter and role_filter == "submission" and student_id_filter and student_id_filter != current_user_id:
+                 # Un estudiante intenta ver entregables de otro estudiante
+                 return APIRoute.error(ErrorCodes.PERMISSION_DENIED, "No tienes permiso para ver los entregables de otros estudiantes.", status_code=403)
+            if role_filter and role_filter not in allowed_roles_for_student:
+                 # Un estudiante intenta filtrar por un rol no permitido para él
+                 return APIRoute.error(ErrorCodes.PERMISSION_DENIED, f"Rol '{role_filter}' no es válido para tu vista.", status_code=403)
+        elif current_user_role == ROLES["TEACHER"] or current_user_role == ROLES["ADMIN"] or current_user_role == ROLES["INSTITUTE_ADMIN"]:
+             # Profesor/Admin puede ver todo, puede filtrar por estudiante específico si quiere
+             query_student_id = student_id_filter # Usa el filtro si se proporcionó
+        else:
+             # Otros roles no tienen permiso por defecto
+             return APIRoute.error(ErrorCodes.PERMISSION_DENIED, "No tienes permiso para acceder a estos recursos.", status_code=403)
+
+        # Obtener los recursos usando el servicio
+        # Pasamos el student_id filtrado (sea el del propio estudiante o el del filtro del profesor)
+        # El rol también se pasa como filtro si se especificó
+        resources = evaluation_resource_service.get_evaluation_resources(
+            evaluation_id=evaluation_id,
+            role=role_filter, 
+            student_id=query_student_id # Filtra por estudiante si aplica (propio o especificado por profe)
+        )
+
+        # Filtrado adicional si es estudiante y no se especificó rol
+        # (para asegurar que solo vea roles permitidos si no filtró explícitamente)
+        if current_user_role == ROLES["STUDENT"] and not role_filter:
+            resources = [r for r in resources if r.get("role") in allowed_roles_for_student and (r.get("role") != "submission" or r.get("created_by") == current_user_id)]
+
+        return APIRoute.success({"resources": resources})
+    except Exception as e:
+        log_error(f"Error al obtener recursos de evaluación: {str(e)}")
+        return APIRoute.error(ErrorCodes.SERVER_ERROR, str(e), status_code=500)
+
+@study_plan_bp.route('/evaluations/<evaluation_id>/resources/<resource_id>', methods=['DELETE'])
+@APIRoute.standard(auth_required_flag=True, roles=[ROLES["TEACHER"]]) # Solo el profesor puede desvincular
+def remove_resource_from_evaluation_route(evaluation_id, resource_id):
+    """Elimina la vinculación entre una evaluación y un recurso."""
+    try:
+        success, result = evaluation_resource_service.remove_resource_from_evaluation(evaluation_id, resource_id)
+        
+        if not success:
+            status_code = 404 if "no encontrado" in result else 400
+            return APIRoute.error(ErrorCodes.OPERATION_FAILED, result, status_code=status_code)
+            
+        return APIRoute.success(message=result)
+    except Exception as e:
+        logging.error(f"Error al desvincular recurso de evaluación: {str(e)}")
+        return APIRoute.error(ErrorCodes.SERVER_ERROR, str(e), status_code=500)
+
+# Nueva Ruta para Subir Entregables (Submission)
+@study_plan_bp.route('/evaluations/<evaluation_id>/submissions', methods=['POST'])
+@APIRoute.standard(auth_required_flag=True, roles=[ROLES["STUDENT"]])
+def upload_evaluation_submission(evaluation_id):
+    """Permite a un estudiante subir un archivo como entregable para una evaluación."""
+    try:
+        student_id = request.user_id
+        # Obtener email del estudiante; si el middleware no lo proporciona, buscar en DB
+        student_email = getattr(request, 'user_email', None)
+        if not student_email:
+            user = get_db().users.find_one({"_id": ObjectId(student_id)})
+            student_email = user.get('email') if user and 'email' in user else None
+        if not student_email:
+            log_error(f"No se pudo obtener el email del estudiante {student_id} para subir entrega a evaluación {evaluation_id}")
+            return APIRoute.error(ErrorCodes.SERVER_ERROR, "No se pudo obtener el email del usuario.", status_code=500)
+
+        # 1. Validar que la evaluación existe
+        evaluation = evaluation_service.get_evaluation(evaluation_id)
+        if not evaluation:
+            return APIRoute.error(ErrorCodes.NOT_FOUND, "Evaluación no encontrada", status_code=404)
+
+        # 2. Validar que se envió un archivo
+        if 'file' not in request.files:
+            return APIRoute.error(ErrorCodes.MISSING_FIELD, "No se encontró el archivo en la solicitud", status_code=400)
+
+        file = request.files['file']
+        if file.filename == '':
+            return APIRoute.error(ErrorCodes.INVALID_DATA, "No se seleccionó ningún archivo", status_code=400)
+
+        # 3. Determinar la carpeta de destino para el entregable
+        submission_folder_id = None  # Inicializar
+        try:
+            # Obtener/crear carpeta raíz del estudiante
+            root_folder = folder_service.get_user_root_folder(student_email)
+            if not root_folder:
+                log_error(f"No se pudo obtener o crear la carpeta raíz para {student_email}")
+                return APIRoute.error(ErrorCodes.OPERATION_FAILED, "No se pudo determinar la carpeta de destino (raíz)", status_code=500)
+
+            # Obtener/crear subcarpeta "Entregables"
+            deliverables_folder_id = folder_service.get_or_create_subfolder(
+                parent_folder_id=str(root_folder["_id"]),
+                subfolder_name="Entregables",
+                created_by=student_id
+            )
+            if not deliverables_folder_id:
+                log_error(f"No se pudo obtener o crear la carpeta 'Entregables' para {student_email}")
+                return APIRoute.error(ErrorCodes.OPERATION_FAILED, "No se pudo determinar la carpeta de destino (entregables)", status_code=500)
+
+            # Obtener/crear subcarpeta específica de la evaluación
+            eval_title_safe = secure_filename(evaluation.get('title', 'evaluacion'))
+            evaluation_folder_name = f"{eval_title_safe}_{evaluation_id}"
+            submission_folder_id = folder_service.get_or_create_subfolder(
+                parent_folder_id=deliverables_folder_id,
+                subfolder_name=evaluation_folder_name,
+                created_by=student_id # El estudiante es el dueño de su carpeta de entregables
+            )
+            if not submission_folder_id:
+                log_error(f"No se pudo obtener o crear la carpeta específica para evaluación {evaluation_id} para {student_email}")
+                return APIRoute.error(ErrorCodes.OPERATION_FAILED, "No se pudo determinar la carpeta de destino (evaluación)", status_code=500)
+
+        except Exception as folder_e:
+            log_error(f"Error creando jerarquía de carpetas para entrega de {student_id} en eval {evaluation_id}: {str(folder_e)}")
+            return APIRoute.error(ErrorCodes.OPERATION_FAILED, "Error al preparar la carpeta de destino", status_code=500)
+
+        # 4. Guardar el archivo como un Recurso
+        # -------- INICIO: LÓGICA DE SUBIDA FÍSICA (EJEMPLO) --------
+        # Aquí iría la lógica real para subir el archivo `file` a S3, GCS, etc.
+        # Esta lógica debería devolver la URL final del archivo subido.
+        # Ejemplo conceptual (NO FUNCIONAL):
+        # try:
+        #     upload_service = StorageService() # Servicio hipotético
+        #     file_url = upload_service.upload_file(file, destination_path=f"submissions/{evaluation_id}/{student_id}/")
+        # except Exception as upload_error:
+        #     log_error(f"Error subiendo archivo para {student_id} en eval {evaluation_id}: {upload_error}")
+        #     return APIRoute.error(ErrorCodes.OPERATION_FAILED, "Error al subir el archivo físicamente.", status_code=500)
+        # -------- FIN: LÓGICA DE SUBIDA FÍSICA (EJEMPLO) --------
+        
+        filename = secure_filename(file.filename)
+        # !! URL SIMULADA !! Reemplazar con la URL real obtenida de la subida física
+        file_url = f"uploads/{student_id}/{submission_folder_id}/{filename}" 
+        resource_type = os.path.splitext(filename)[1].lower().strip('.') or 'other'
+
+        resource_data = {
+            "name": filename,
+            "type": resource_type,
+            "url": file_url, 
+            "description": f"Entregable para la evaluación: {evaluation.get('title', '')}",
+            "created_by": student_id,
+            "folder_id": submission_folder_id,
+            "is_external": False,
+            "email": student_email # Pasar email para asegurar jerarquía en create_resource
+        }
+
+        res_success, res_result = resource_service.create_resource(resource_data)
+
+        if not res_success:
+            log_error(f"Fallo al crear recurso para entrega de {student_id} en eval {evaluation_id}: {res_result}")
+            # Aquí no necesitamos rollback porque el recurso no se creó
+            return APIRoute.error(ErrorCodes.OPERATION_FAILED, f"No se pudo guardar el entregable: {res_result}", status_code=500)
+
+        new_resource_id = res_result
+
+        # 5. Vincular el nuevo Recurso a la Evaluación (con Rollback)
+        try:
+            link_success, link_result = evaluation_resource_service.link_resource_to_evaluation(
+                evaluation_id=evaluation_id,
+                resource_id=new_resource_id,
+                role="submission",
+                created_by=student_id
+            )
+
+            if not link_success:
+                # Si falla la vinculación, intentar eliminar el recurso creado (Rollback)
+                log_error(f"Fallo al VINCULAR recurso {new_resource_id} a eval {evaluation_id} para {student_id}: {link_result}. Intentando rollback...")
+                try:
+                    rb_success, rb_msg = resource_service.delete_resource(new_resource_id)
+                    if rb_success:
+                        log_error(f"Rollback exitoso: Recurso {new_resource_id} eliminado.")
+                    else:
+                        log_error(f"Error en Rollback: No se pudo eliminar el recurso {new_resource_id}: {rb_msg}")
+                except Exception as rb_e:
+                    log_error(f"Excepción durante Rollback del recurso {new_resource_id}: {str(rb_e)}")
+                # Devolver el error original de vinculación
+                return APIRoute.error(ErrorCodes.OPERATION_FAILED, f"Entregable guardado pero no vinculado: {link_result}", status_code=500)
+        except Exception as link_e:
+            # Capturar excepción durante la vinculación y intentar rollback
+            log_error(f"Excepción al VINCULAR recurso {new_resource_id} a eval {evaluation_id}: {str(link_e)}. Intentando rollback...")
+            try:
+                rb_success, rb_msg = resource_service.delete_resource(new_resource_id)
+                if rb_success:
+                    log_error(f"Rollback exitoso: Recurso {new_resource_id} eliminado.")
+                else:
+                    log_error(f"Error en Rollback: No se pudo eliminar el recurso {new_resource_id}: {rb_msg}")
+            except Exception as rb_e:
+                log_error(f"Excepción durante Rollback del recurso {new_resource_id}: {str(rb_e)}")
+            return APIRoute.error(ErrorCodes.OPERATION_FAILED, f"Error al vincular entregable: {str(link_e)}", status_code=500)
+
+        # 6. Devolver éxito
+        return APIRoute.success(
+            {"resource_id": new_resource_id, "link_id": link_result},
+            message="Entregable subido y vinculado exitosamente",
+            status_code=201
+        )
+
+    except Exception as e:
+        log_error(f"Error inesperado subiendo entrega para eval {evaluation_id} por {request.user_id if hasattr(request, 'user_id') else 'unknown'}: {str(e)}")
+        return APIRoute.error(ErrorCodes.SERVER_ERROR, f"Error interno al procesar la subida: {str(e)}", status_code=500)
+
+# Rutas para Recursos de Aprendizaje (DEPRECATED? Confirmar si se mueven a /resources)
+# ... (resto del código)

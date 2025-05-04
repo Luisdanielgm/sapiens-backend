@@ -14,7 +14,7 @@ class VirtualModule:
         self.student_id = ObjectId(student_id)
         self.name = name
         self.description = description
-        self.adaptations = adaptations or {}  # Adaptaciones específicas para el estudiante
+        self.adaptations = adaptations or {}
         self.generated_by = generated_by
         self.created_at = datetime.now()
         self.status = "active"

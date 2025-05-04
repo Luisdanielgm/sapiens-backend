@@ -760,7 +760,7 @@ def create_resource_direct_handler():
 def create_resource_direct():
     """
     Endpoint directo para crear un nuevo recurso.
-    El frontend debe haber subido el archivo a la nube y proporcionar la URL.
+    Intenta usar get_or_create_external_resource para tipos externos (link, video) para evitar duplicados.
     Respeta la jerarquía de carpetas del usuario.
     """
     try:
@@ -776,49 +776,57 @@ def create_resource_direct():
         
         # Asegurarse de que se proporciona email para respetar jerarquía
         email = request.json.get('email')
+        created_by = request.json.get('created_by') # Necesario para get_or_create
         if not email:
-            # Intentar obtener email del usuario creador
-            created_by = request.json.get('created_by')
             if created_by:
                 user = get_db().users.find_one({"_id": ObjectId(created_by)})
                 if user and "email" in user:
-                    # Agregar email a los datos del recurso para jerarquía
                     email = user.get("email")
-                    resource_data = request.json.copy()
-                    resource_data["email"] = email
                 else:
-                    return APIRoute.error(
-                        ErrorCodes.MISSING_FIELDS,
-                        "No se pudo determinar el email del creador",
-                        status_code=400
-                    )
+                    return APIRoute.error(ErrorCodes.MISSING_FIELDS, "No se pudo determinar el email del creador", status_code=400)
             else:
-                return APIRoute.error(
-                    ErrorCodes.MISSING_FIELDS,
-                    "Se requiere el email o created_by para crear el recurso",
-                    status_code=400
-                )
-        else:
-            resource_data = request.json
-                
-        # Crear recurso
-        success, result = resource_service.create_resource(resource_data)
+                return APIRoute.error(ErrorCodes.MISSING_FIELDS, "Se requiere el email o created_by", status_code=400)
         
-        if success:
-            # Obtener el recurso creado
-            resource = resource_service.get_resource(result)
-            return APIRoute.success(
-                resource, 
-                message="Recurso creado exitosamente", 
-                status_code=201
-            )
+        resource_data = request.json.copy()
+        resource_data["email"] = email # Asegurar que email esté para los servicios
+
+        resource_type = resource_data.get("type", "link")
+        is_external = resource_data.get("is_external", False) # Opcional, si el frontend lo indica
+        # Decidir si usar get_or_create basado en tipo o flag
+        use_get_or_create = is_external or resource_type in ["link", "video", "external_document"]
+
+        if use_get_or_create:
+            # Intentar obtener o crear recurso externo (evita duplicados por URL)
+            success, result_id_or_msg, existed = resource_service.get_or_create_external_resource(resource_data)
+            if not success:
+                 return APIRoute.error(ErrorCodes.OPERATION_FAILED, result_id_or_msg, status_code=400)
+            resource_id = result_id_or_msg
+            message = "Recurso externo encontrado" if existed else "Recurso externo creado exitosamente"
+            status_code = 200 if existed else 201
         else:
-            return APIRoute.error(
-                ErrorCodes.CREATION_ERROR, 
-                result, 
-                status_code=400
-            )
+            # Crear recurso interno (no chequea duplicados por URL)
+            success, result_id_or_msg = resource_service.create_resource(resource_data)
+            if not success:
+                 return APIRoute.error(ErrorCodes.CREATION_ERROR, result_id_or_msg, status_code=400)
+            resource_id = result_id_or_msg
+            message="Recurso creado exitosamente"
+            status_code = 201
+        
+        # Obtener el recurso final (existente o nuevo)
+        resource = resource_service.get_resource(resource_id)
+        if not resource:
+            # Esto no debería pasar si la creación/obtención fue exitosa, pero por seguridad
+            return APIRoute.error(ErrorCodes.RESOURCE_NOT_FOUND, "No se pudo encontrar el recurso después de crearlo/obtenerlo", status_code=404)
+
+        return APIRoute.success(
+            resource, 
+            message=message, 
+            status_code=status_code
+        )
+
     except Exception as e:
+        log_error = getattr(resource_service, 'log_error', print)
+        log_error(f"Error en create_resource_direct: {str(e)}")
         return APIRoute.error(
             ErrorCodes.SERVER_ERROR, 
             str(e), 

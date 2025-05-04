@@ -1056,4 +1056,48 @@ class ResourceFolderService(VerificationBaseService):
             return False
         except Exception:
             # En caso de error, prevenir el cambio
-            return True 
+            return True
+
+    def get_or_create_subfolder(self, parent_folder_id: str, subfolder_name: str, created_by: str) -> Optional[str]:
+        """
+        Busca una subcarpeta por nombre dentro de una carpeta padre.
+        Si no existe, la crea.
+        
+        Args:
+            parent_folder_id: ID de la carpeta padre.
+            subfolder_name: Nombre de la subcarpeta a buscar o crear.
+            created_by: ID del usuario que será propietario si se crea.
+            
+        Returns:
+            ID de la subcarpeta encontrada o creada, o None si hay error.
+        """
+        try:
+            parent_object_id = ObjectId(parent_folder_id)
+            
+            # Buscar la subcarpeta existente
+            subfolder = self.collection.find_one({
+                "parent_id": parent_object_id,
+                "name": subfolder_name,
+                "created_by": ObjectId(created_by) # Aseguramos que pertenezca al mismo usuario
+            })
+            
+            if subfolder:
+                return str(subfolder["_id"])
+            else:
+                # Si no existe, crearla
+                new_folder_data = {
+                    "name": subfolder_name,
+                    "parent_id": parent_folder_id,
+                    "created_by": created_by,
+                    "description": f"Carpeta para {subfolder_name}" # Descripción genérica
+                }
+                success, result = self.create_folder(new_folder_data)
+                if success:
+                    return result # create_folder devuelve el ID
+                else:
+                    log_error(f"Error al intentar crear subcarpeta '{subfolder_name}' en padre {parent_folder_id}: {result}")
+                    return None
+                    
+        except Exception as e:
+            log_error(f"Excepción en get_or_create_subfolder (padre={parent_folder_id}, nombre={subfolder_name}): {str(e)}")
+            return None 
