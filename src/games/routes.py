@@ -555,4 +555,25 @@ def personalize_game():
             ErrorCodes.SERVER_ERROR,
             str(e),
             status_code=500
-        ) 
+        )
+
+# Ruta para convertir un juego en TopicContent
+@games_bp.route('/<game_id>/convert-to-content', methods=['POST'])
+@APIRoute.standard(
+    auth_required_flag=True,
+    roles=[ROLES["TEACHER"]]
+)
+def convert_game_to_content(game_id):
+    """Convierte un juego existente en contenido asociado al tema"""
+    success, content_id = game_service.convert_game_to_content(game_id)
+    if success:
+        return APIRoute.success(
+            data={"content_id": content_id},
+            message="Contenido creado desde juego",
+            status_code=201
+        )
+    return APIRoute.error(
+        ErrorCodes.CREATION_ERROR,
+        content_id,
+        status_code=400
+    ) 

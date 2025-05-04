@@ -467,3 +467,24 @@ def generate_simulation():
             str(e),
             status_code=500
         )
+
+# Ruta para convertir una simulación en TopicContent
+@simulations_bp.route('/<simulation_id>/convert-to-content', methods=['POST'])
+@APIRoute.standard(
+    auth_required_flag=True,
+    roles=[ROLES["TEACHER"]]
+)
+def convert_simulation_to_content(simulation_id):
+    """Convierte una simulación existente en un contenido asociado al tema"""
+    success, content_id = simulation_service.convert_simulation_to_content(simulation_id)
+    if success:
+        return APIRoute.success(
+            data={"content_id": content_id},
+            message="Contenido creado desde simulación",
+            status_code=201
+        )
+    return APIRoute.error(
+        ErrorCodes.CREATION_ERROR,
+        content_id,
+        status_code=400
+    )

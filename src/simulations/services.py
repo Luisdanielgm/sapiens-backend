@@ -213,7 +213,7 @@ class SimulationService(VerificationBaseService):
         topic_id = simulation["topic_id"]
         content_data = {
             "topic_id": topic_id,
-            "content_type": ContentTypes.SIMULATION_GAME,
+            "content_type": ContentTypes.SIMULATION,
             "content": {
                 "simulation_id": simulation_id,
                 "title": simulation.get("title", ""),
