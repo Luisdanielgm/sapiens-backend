@@ -576,4 +576,20 @@ def convert_game_to_content(game_id):
         ErrorCodes.CREATION_ERROR,
         content_id,
         status_code=400
-    ) 
+    )
+
+@games_bp.route('/<game_id>/toggle-evaluation', methods=['PUT'])
+@APIRoute.standard(auth_required_flag=True, roles=[ROLES["TEACHER"]])
+def toggle_game_evaluation_status(game_id):
+    """Activa o desactiva el marcador 'is_evaluation' de un juego."""
+    success, message, new_status = game_service.toggle_evaluation_status(game_id)
+    
+    if success:
+        return APIRoute.success(data={"is_evaluation": new_status}, message=message)
+    else:
+        status_code = 404 if "no encontrado" in message else 400
+        return APIRoute.error(
+            ErrorCodes.UPDATE_ERROR, 
+            message, 
+            status_code=status_code
+        ) 

@@ -60,16 +60,35 @@ class VirtualTopic:
             "status": self.status
         }
 
-class VirtualEvaluation:
+class Quiz:
+    """
+    Modelo para quizzes o evaluaciones formativas interactivas.
+    Permite almacenar preguntas detalladas y calcular puntuaciones.
+    """
     def __init__(self,
                  virtual_module_id: str,
                  title: str,
                  description: str,
                  due_date: datetime,
                  topics_covered: List[str],
-                 questions: List[Dict],
+                 questions: List[Dict],  # See comment below for expected structure
                  total_points: float,
                  passing_score: float):
+        """
+        Args:
+            questions: Lista de diccionarios, cada uno representando una pregunta.
+                       Structure expected per question:
+                       {
+                           "id": str,  # Unique question identifier within the quiz
+                           "type": "multiple_choice" | "true_false" | "short_answer",
+                           "text": str,  # Question text
+                           "options": Optional[List[str]],  # For multiple_choice
+                           "correct_option": Optional[int],  # Index for multiple_choice
+                           "correct_value": Optional[bool],  # For true_false
+                           "correct_answer": Optional[str],  # For short_answer
+                           "points": float  # Points for this question
+                       }
+        """
         self.virtual_module_id = ObjectId(virtual_module_id)
         self.title = title
         self.description = description
@@ -95,14 +114,17 @@ class VirtualEvaluation:
             "status": self.status
         }
 
-class VirtualEvaluationResult:
+class QuizResult:
+    """
+    Almacena el resultado de un intento de quiz por parte de un estudiante.
+    """
     def __init__(self,
-                 virtual_evaluation_id: str,
+                 quiz_id: str,  # Renamed from virtual_evaluation_id
                  student_id: str,
                  answers: List[Dict],
                  score: float,
                  feedback: Optional[str] = None):
-        self.virtual_evaluation_id = ObjectId(virtual_evaluation_id)
+        self.quiz_id = ObjectId(quiz_id)
         self.student_id = ObjectId(student_id)
         self.answers = answers
         self.score = score
@@ -112,7 +134,7 @@ class VirtualEvaluationResult:
 
     def to_dict(self) -> dict:
         return {
-            "virtual_evaluation_id": self.virtual_evaluation_id,
+            "quiz_id": self.quiz_id,
             "student_id": self.student_id,
             "answers": self.answers,
             "score": self.score,

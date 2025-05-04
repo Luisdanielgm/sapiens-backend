@@ -3,14 +3,14 @@ from bson import ObjectId
 from datetime import datetime
 
 from src.shared.database import get_db
-from src.shared.constants import STATUS
+from src.shared.constants import STATUS, COLLECTIONS
 from src.shared.standardization import BaseService, VerificationBaseService
 from src.shared.exceptions import AppException
 from .models import (
     VirtualModule,
     VirtualTopic,
-    VirtualEvaluation,
-    VirtualEvaluationResult
+    Quiz,
+    QuizResult
 )
 
 class VirtualModuleService(VerificationBaseService):
@@ -144,13 +144,14 @@ class VirtualTopicService(VerificationBaseService):
             print(f"Error al obtener temas del módulo: {str(e)}")
             return []
 
-class VirtualEvaluationService(VerificationBaseService):
+class QuizService(VerificationBaseService):
     """
-    Servicio para gestionar evaluaciones virtuales.
+    Servicio para gestionar quizzes (evaluaciones formativas interactivas).
     """
     def __init__(self):
-        super().__init__(collection_name="virtual_evaluations")
-        
+        super().__init__(collection_name=COLLECTIONS["QUIZZES"])
+        self.results_collection = self.db[COLLECTIONS["QUIZ_RESULTS"]]
+
     def check_module_exists(self, module_id: str) -> bool:
         """
         Verifica si un módulo virtual existe.
@@ -167,51 +168,66 @@ class VirtualEvaluationService(VerificationBaseService):
         except Exception:
             return False
             
-    def check_evaluation_exists(self, evaluation_id: str) -> bool:
+    def check_quiz_exists(self, quiz_id: str) -> bool:
         """
-        Verifica si una evaluación existe.
+        Verifica si un quiz existe.
         
         Args:
-            evaluation_id: ID de la evaluación a verificar
+            quiz_id: ID del quiz a verificar
             
         Returns:
-            bool: True si la evaluación existe, False en caso contrario
+            bool: True si el quiz existe, False en caso contrario
         """
         try:
-            evaluation = self.collection.find_one({"_id": ObjectId(evaluation_id)})
-            return evaluation is not None
+            quiz = self.collection.find_one({"_id": ObjectId(quiz_id)})
+            return quiz is not None
         except Exception:
             return False
     
-    def create_evaluation(self, evaluation_data: dict) -> Tuple[bool, str]:
+    def create_quiz(self, quiz_data: dict) -> Tuple[bool, str]:
         """
-        Crea una nueva evaluación para un módulo virtual.
+        Crea un nuevo quiz para un módulo virtual.
         
         Args:
-            evaluation_data: Datos de la evaluación a crear
+            quiz_data: Datos del quiz a crear
             
         Returns:
             Tuple[bool, str]: (Éxito, mensaje o ID)
         """
         try:
             # Verificar que el módulo existe
-            if not self.check_module_exists(evaluation_data['virtual_module_id']):
+            if not self.check_module_exists(quiz_data.get('virtual_module_id')):
                 return False, "Módulo virtual no encontrado"
+            
+            # Validar estructura básica de preguntas
+            questions = quiz_data.get('questions', [])
+            if not isinstance(questions, list):
+                return False, "El campo 'questions' debe ser una lista."
+            for i, q in enumerate(questions):
+                if not isinstance(q, dict):
+                     return False, f"Cada elemento en 'questions' debe ser un diccionario (índice {i})."
+                if not all(k in q for k in ["id", "type", "text", "points"]):
+                     return False, f"Pregunta inválida en índice {i}. Faltan campos requeridos ('id', 'type', 'text', 'points')."
+                # Add more specific validation per type if needed here
                 
-            evaluation = VirtualEvaluation(**evaluation_data)
-            result = self.collection.insert_one(evaluation.to_dict())
+            quiz = Quiz(**quiz_data)
+            result = self.collection.insert_one(quiz.to_dict())
             return True, str(result.inserted_id)
         except Exception as e:
             return False, str(e)
 
-    def submit_evaluation(self, result_data: dict) -> Tuple[bool, str]:
+    def submit_quiz(self, result_data: dict) -> Tuple[bool, str]:
+        """
+        Registra las respuestas de un estudiante a un quiz y calcula la puntuación.
+        """
         try:
-            # Verificar que la evaluación existe
-            evaluation = self.collection.find_one(
-                {"_id": ObjectId(result_data['virtual_evaluation_id'])}
+            quiz_id = result_data.get('quiz_id')
+            # Verificar que el quiz existe
+            quiz = self.collection.find_one(
+                {"_id": ObjectId(quiz_id)}
             )
-            if not evaluation:
-                return False, "Evaluación no encontrada"
+            if not quiz:
+                return False, "Quiz no encontrado"
             
             # Verificar que el estudiante existe
             student = self.db.users.find_one(
@@ -221,18 +237,18 @@ class VirtualEvaluationService(VerificationBaseService):
                 return False, "Estudiante no encontrado"
                 
             # Calcular puntuación
-            score = self._calculate_score(evaluation, result_data['answers'])
+            score = self._calculate_score(quiz, result_data['answers'])
             
-            # Crear resultado de evaluación
-            result = VirtualEvaluationResult(
-                virtual_evaluation_id=result_data['virtual_evaluation_id'],
+            # Crear resultado de quiz
+            result_model = QuizResult(
+                quiz_id=quiz_id,
                 student_id=result_data['student_id'],
                 answers=result_data['answers'],
                 score=score,
                 submission_time=datetime.now()
             )
             
-            result_id = self.db.virtual_evaluation_results.insert_one(result.to_dict()).inserted_id
+            result_id = self.results_collection.insert_one(result_model.to_dict()).inserted_id
             return True, str(result_id)
         except Exception as e:
             return False, str(e)
@@ -242,54 +258,54 @@ class VirtualEvaluationService(VerificationBaseService):
             # Construir la consulta base
             query = {"student_id": ObjectId(student_id)}
             
-            # Si se especifica un módulo, filtrar por las evaluaciones de ese módulo
-            evaluation_filter = {}
+            # Si se especifica un módulo, filtrar por los quizzes de ese módulo
+            quiz_filter = {}
             if module_id:
-                # Obtener todas las evaluaciones del módulo
-                evaluations = list(self.collection.find(
+                # Obtener todos los quizzes del módulo
+                quizzes = list(self.collection.find(
                     {"virtual_module_id": ObjectId(module_id)}
                 ))
-                evaluation_ids = [evaluation["_id"] for evaluation in evaluations]
+                quiz_ids = [quiz["_id"] for quiz in quizzes]
                 
-                # Filtrar resultados por esas evaluaciones
-                if evaluation_ids:
-                    evaluation_filter = {"virtual_evaluation_id": {"$in": evaluation_ids}}
+                # Filtrar resultados por esos quizzes
+                if quiz_ids:
+                    quiz_filter = {"quiz_id": {"$in": quiz_ids}}
                 else:
-                    # Si no hay evaluaciones, devolver lista vacía
+                    # Si no hay quizzes, devolver lista vacía
                     return []
             
             # Combinar filtros
-            if evaluation_filter:
-                query.update(evaluation_filter)
+            if quiz_filter:
+                query.update(quiz_filter)
                 
             # Obtener resultados
-            results = list(self.db.virtual_evaluation_results.find(query))
+            results = list(self.results_collection.find(query))
             
-            # Procesar resultados (convertir ObjectId a string, obtener detalles de evaluación, etc.)
+            # Procesar resultados (convertir ObjectId a string, obtener detalles del quiz, etc.)
             processed_results = []
             for result in results:
                 result["_id"] = str(result["_id"])
-                result["virtual_evaluation_id"] = str(result["virtual_evaluation_id"])
+                result["quiz_id"] = str(result["quiz_id"])
                 result["student_id"] = str(result["student_id"])
                 
-                # Obtener detalles de la evaluación
-                evaluation = self.collection.find_one({"_id": ObjectId(result["virtual_evaluation_id"])})
-                if evaluation:
-                    result["evaluation_title"] = evaluation.get("title", "")
-                    result["total_points"] = evaluation.get("total_points", 0)
-                    result["module_id"] = str(evaluation.get("virtual_module_id", ""))
+                # Obtener detalles del quiz
+                quiz = self.collection.find_one({"_id": ObjectId(result["quiz_id"])})
+                if quiz:
+                    result["quiz_title"] = quiz.get("title", "")
+                    result["total_points"] = quiz.get("total_points", 0)
+                    result["module_id"] = str(quiz.get("virtual_module_id", ""))
                 
                 processed_results.append(result)
                 
             return processed_results
         except Exception as e:
-            print(f"Error al obtener resultados del estudiante: {str(e)}")
+            print(f"Error al obtener resultados de quizzes del estudiante: {str(e)}")
             return []
 
-    def _calculate_score(self, evaluation: Dict, answers: List[Dict]) -> float:
-        """Calcula la puntuación de una evaluación en base a las respuestas proporcionadas"""
-        questions = evaluation.get("questions", [])
-        max_points = evaluation.get("total_points", 100)
+    def _calculate_score(self, quiz: Dict, answers: List[Dict]) -> float:
+        """Calcula la puntuación de un quiz en base a las respuestas proporcionadas"""
+        questions = quiz.get("questions", [])
+        max_points = quiz.get("total_points", 100)
         
         # Crear un diccionario para acceder rápidamente a las preguntas por ID
         questions_dict = {str(q.get("question_id", i)): q for i, q in enumerate(questions)}

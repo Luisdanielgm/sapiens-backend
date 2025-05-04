@@ -6,14 +6,15 @@ from bson import ObjectId
 from datetime import datetime
 import logging
 
-from .services import VirtualModuleService, VirtualTopicService, VirtualEvaluationService
+from .services import VirtualModuleService, VirtualTopicService, QuizService
 from src.study_plans.models import ContentTypes, LearningMethodologyTypes
 
 virtual_bp = APIBlueprint('virtual', __name__)
+quiz_bp = APIBlueprint('quizzes', __name__, url_prefix='/api/quizzes')
 
 virtual_module_service = VirtualModuleService()
 virtual_topic_service = VirtualTopicService()
-virtual_evaluation_service = VirtualEvaluationService()
+quiz_service = QuizService()
 
 # Rutas para Módulos Virtuales
 @virtual_bp.route('/module', methods=['POST'])
@@ -83,23 +84,23 @@ def get_module_topics(module_id):
     topics = virtual_topic_service.get_module_topics(module_id)
     return APIRoute.success(data={"topics": topics})
 
-# Rutas para Evaluaciones Virtuales
-@virtual_bp.route('/evaluation', methods=['POST'])
+# Rutas para Quizzes
+@quiz_bp.route('/', methods=['POST'])
 @APIRoute.standard(
     auth_required_flag=True,
     roles=[ROLES["TEACHER"]],
     required_fields=['virtual_module_id', 'title', 'description', 'due_date', 
                    'topics_covered', 'questions', 'total_points', 'passing_score']
 )
-def create_virtual_evaluation():
-    """Crea una nueva evaluación virtual"""
+def create_quiz():
+    """Crea un nuevo quiz interactivo"""
     data = request.get_json()
-    success, result = virtual_evaluation_service.create_evaluation(data)
+    success, result = quiz_service.create_quiz(data)
     
     if success:
         return APIRoute.success(
-            data={"evaluation_id": result},
-            message="Evaluación virtual creada exitosamente",
+            data={"quiz_id": result},
+            message="Quiz creado exitosamente",
             status_code=201
         )
     return APIRoute.error(
@@ -108,21 +109,21 @@ def create_virtual_evaluation():
         status_code=400
     )
 
-@virtual_bp.route('/evaluation/submit', methods=['POST'])
+@quiz_bp.route('/submit', methods=['POST'])
 @APIRoute.standard(
     auth_required_flag=True,
     roles=[ROLES["STUDENT"]],
-    required_fields=['virtual_evaluation_id', 'student_id', 'answers']
+    required_fields=['quiz_id', 'student_id', 'answers']
 )
-def submit_evaluation():
-    """Envía las respuestas de una evaluación virtual"""
+def submit_quiz():
+    """Envía las respuestas de un quiz virtual"""
     data = request.get_json()
-    success, result = virtual_evaluation_service.submit_evaluation(data)
+    success, result = quiz_service.submit_quiz(data)
     
     if success:
         return APIRoute.success(
             data={"result_id": result},
-            message="Evaluación enviada exitosamente",
+            message="Quiz enviado exitosamente",
             status_code=201
         )
     return APIRoute.error(
@@ -131,13 +132,26 @@ def submit_evaluation():
         status_code=400
     )
 
-@virtual_bp.route('/student/<student_id>/results', methods=['GET'])
+@quiz_bp.route('/results/student/<student_id>', methods=['GET'])
 @APIRoute.standard(auth_required_flag=True)
-def get_student_results(student_id):
-    """Obtiene los resultados de evaluaciones de un estudiante"""
+def get_student_quiz_results(student_id):
+    """Obtiene los resultados de los quizzes para un estudiante específico"""
     module_id = request.args.get('module_id')
-    results = virtual_evaluation_service.get_student_results(student_id, module_id)
-    return APIRoute.success(data={"results": results})
+    results = quiz_service.get_student_results(student_id, module_id)
+    return APIRoute.success(data=results)
+
+@quiz_bp.route('/<quiz_id>', methods=['GET'])
+@APIRoute.standard(auth_required_flag=True)
+def get_quiz_details(quiz_id):
+    """Obtiene los detalles de un quiz específico"""
+    try:
+        quiz = quiz_service.collection.find_one({"_id": ObjectId(quiz_id)})
+        if quiz:
+            return APIRoute.success(data=quiz)
+        return APIRoute.error(ErrorCodes.NOT_FOUND, "Quiz no encontrado")
+    except Exception as e:
+        logging.error(f"Error al obtener quiz: {str(e)}")
+        return APIRoute.error(ErrorCodes.SERVER_ERROR, str(e), status_code=500)
 
 @virtual_bp.route('/generate', methods=['POST'])
 @APIRoute.standard(auth_required_flag=True, roles=[ROLES["STUDENT"], ROLES["TEACHER"]], required_fields=['class_id', 'study_plan_id'])

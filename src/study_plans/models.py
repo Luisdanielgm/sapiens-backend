@@ -348,13 +348,16 @@ class ContentTypes:
     CHALLENGE = "challenge"           # Desafíos progresivos
     
     # Contenido de Evaluación
-    QUIZ = "quiz"                     # Cuestionarios
-    EXAM = "exam"                     # Exámenes adaptados
-    PROJECT = "project"               # Proyectos
-    RUBRIC = "rubric"                 # Rúbricas personalizadas
-    FORMATIVE_TEST = "formative_test" # Tests formativos
-    PEER_REVIEW = "peer_review"       # Evaluación por pares
-    PORTFOLIO = "portfolio"           # Portfolio digital
+    # Nota: Para quizzes interactivos con lógica de backend (envío, score, resultados),
+    #       usar el módulo dedicado 'quizzes' (API /api/quizzes).
+    #       Este tipo 'QUIZ' es ideal para incrustar cuestionarios simples como contenido.
+    QUIZ = "quiz"                     # Cuestionarios (principalmente contenido embedido)
+    EXAM = "exam"                     # Exámenes adaptados (usar EvaluationService para la lógica)
+    PROJECT = "project"               # Proyectos (usar EvaluationService para la lógica)
+    RUBRIC = "rubric"                 # Rúbricas personalizadas (usar EvaluationService para la lógica)
+    FORMATIVE_TEST = "formative_test" # Tests formativos (podría ser QUIZ o un quiz dedicado)
+    PEER_REVIEW = "peer_review"       # Evaluación por pares (lógica específica requerida)
+    PORTFOLIO = "portfolio"           # Portfolio digital (lógica específica requerida)
 
     @classmethod
     def get_categories(cls):

@@ -126,8 +126,8 @@ COLLECTIONS = {
     # Virtual
     "VIRTUAL_MODULES": "virtual_modules",
     "VIRTUAL_TOPICS": "virtual_topics",
-    "VIRTUAL_EVALUATIONS": "virtual_evaluations",
-    "VIRTUAL_EVALUATION_RESULTS": "virtual_evaluation_results",
+    "QUIZZES": "quizzes",
+    "QUIZ_RESULTS": "quiz_results",
     
     # Analíticas
     "STUDENT_PERFORMANCE": "student_performance",

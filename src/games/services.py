@@ -171,6 +171,49 @@ class GameService(VerificationBaseService):
         topic_content_service = TopicContentService()
         return topic_content_service.create_content(content_data)
 
+    def toggle_evaluation_status(self, game_id: str) -> Tuple[bool, str, Optional[bool]]:
+        """
+        Cambia el estado booleano 'is_evaluation' de un juego.
+
+        Args:
+            game_id: ID del juego a modificar.
+
+        Returns:
+            Tuple[bool, str, Optional[bool]]: (Éxito, Mensaje, Nuevo estado de is_evaluation)
+        """
+        try:
+            validate_object_id(game_id)
+            game = self.collection.find_one({"_id": ObjectId(game_id)})
+            
+            if not game:
+                return False, "Juego no encontrado", None
+                
+            # Obtener el estado actual y calcular el nuevo
+            current_status = game.get("is_evaluation", False)
+            new_status = not current_status
+            
+            # Actualizar en la base de datos
+            result = self.collection.update_one(
+                {"_id": ObjectId(game_id)},
+                {"$set": {"is_evaluation": new_status, "updated_at": datetime.now()}}
+            )
+            
+            if result.modified_count > 0:
+                msg = f"Estado 'is_evaluation' cambiado a {new_status}"
+                return True, msg, new_status
+            else:
+                # Esto podría pasar si el estado ya era el deseado o hubo un error
+                return False, "No se pudo actualizar el estado del juego.", current_status
+                
+        except AppException as e:
+            return False, e.message, None
+        except Exception as e:
+            return False, f"Error inesperado: {str(e)}", None
+
+    def get_game_results(self, game_id: str, student_id: Optional[str] = None) -> Tuple[List[Dict], Optional[str]]:
+        # TODO: Implementar la lógica para obtener los resultados del juego
+        pass # Añadido para corregir IndentationError
+
 class VirtualGameService(VerificationBaseService):
     def __init__(self):
         super().__init__(collection_name="virtual_games")

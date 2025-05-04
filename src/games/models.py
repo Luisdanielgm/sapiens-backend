@@ -21,7 +21,11 @@ class Game:
                  visual_style: Optional[Dict] = None,
                  audio_enabled: bool = False,
                  accessibility_options: Optional[Dict] = None,
-                 cognitive_adaptations: Optional[Dict] = None):
+                 cognitive_adaptations: Optional[Dict] = None,
+                 is_template: bool = False,
+                 estimated_duration: int = 15,  # En minutos
+                 learning_objectives: List[str] = None,
+                 is_evaluation: bool = False):
         self.topic_id = ObjectId(topic_id)
         self.title = title
         self.description = description
@@ -36,6 +40,10 @@ class Game:
         self.audio_enabled = audio_enabled
         self.accessibility_options = accessibility_options or {}
         self.cognitive_adaptations = cognitive_adaptations or {}
+        self.is_template = is_template
+        self.estimated_duration = estimated_duration
+        self.learning_objectives = learning_objectives or []
+        self.is_evaluation = is_evaluation
         self.created_at = datetime.now()
         self.updated_at = datetime.now()
         self.status = "active"
@@ -56,6 +64,10 @@ class Game:
             "audio_enabled": self.audio_enabled,
             "accessibility_options": self.accessibility_options,
             "cognitive_adaptations": self.cognitive_adaptations,
+            "is_template": self.is_template,
+            "estimated_duration": self.estimated_duration,
+            "learning_objectives": self.learning_objectives,
+            "is_evaluation": self.is_evaluation,
             "created_at": self.created_at,
             "updated_at": self.updated_at,
             "status": self.status
