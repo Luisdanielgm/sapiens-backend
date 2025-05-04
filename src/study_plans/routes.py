@@ -113,17 +113,6 @@ def delete_study_plan(plan_id):
         message="Plan de estudios eliminado exitosamente"
     )
 
-@study_plan_bp.route('/<plan_id>/approve', methods=['PUT'])
-@APIRoute.standard(auth_required_flag=True, roles=[ROLES["INSTITUTE_ADMIN"]])
-def approve_study_plan(plan_id):
-    """Aprueba un plan de estudios"""
-    if study_plan_service.approve_study_plan(plan_id):
-        return APIRoute.success(message="Plan de estudios aprobado exitosamente")
-    return APIRoute.error(
-        ErrorCodes.UPDATE_ERROR,
-        "No se pudo aprobar el plan"
-    )
-
 # Rutas para Asignación de Planes a Clases
 @study_plan_bp.route('/assignment', methods=['POST'])
 @APIRoute.standard(auth_required_flag=True, roles=[ROLES["TEACHER"], ROLES["INSTITUTE_ADMIN"]], required_fields=['study_plan_id', 'class_id', 'subperiod_id', 'assigned_by'])

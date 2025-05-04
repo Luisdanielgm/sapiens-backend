@@ -162,22 +162,6 @@ class StudyPlanService(VerificationBaseService):
             logging.error(f"Error al listar planes: {str(e)}")
             return []
 
-    def approve_study_plan(self, plan_id: str) -> bool:
-        try:
-            result = self.collection.update_one(
-                {"_id": ObjectId(plan_id)},
-                {
-                    "$set": {
-                        "status": "approved",
-                        "approval_date": datetime.now()
-                    }
-                }
-            )
-            return result.modified_count > 0
-        except Exception as e:
-            logging.error(f"Error al aprobar plan: {str(e)}")
-            return False
-
     def get_study_plan(self, plan_id: str) -> Optional[Dict]:
         try:
             plan = self.collection.find_one({"_id": ObjectId(plan_id)})
