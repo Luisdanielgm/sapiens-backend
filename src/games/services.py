@@ -142,6 +142,34 @@ class GameService(VerificationBaseService):
             print(f"Error al eliminar todos los juegos del tema: {str(e)}")
             return 0, 0
 
+    # Helper para convertir un Game en TopicContent
+    def convert_game_to_content(self, game_id: str) -> Tuple[bool, str]:
+        """
+        Convierte un juego existente en un contenido asociado a su tema.
+        """
+        from src.study_plans.services import TopicContentService
+        from src.study_plans.models import ContentTypes
+
+        game = self.get_game(game_id)
+        if not game:
+            return False, "Juego no encontrado"
+
+        topic_id = game["topic_id"]
+        content_data = {
+            "topic_id": topic_id,
+            "content_type": ContentTypes.GAME,
+            "content": {
+                "game_id": game_id,
+                "title": game.get("title", ""),
+                "description": game.get("description", ""),
+                "metadata": game.get("metadata", {})
+            },
+            "resources": [game_id],
+            "learning_methodologies": [],
+            "status": "active"
+        }
+        topic_content_service = TopicContentService()
+        return topic_content_service.create_content(content_data)
 
 class VirtualGameService(VerificationBaseService):
     def __init__(self):

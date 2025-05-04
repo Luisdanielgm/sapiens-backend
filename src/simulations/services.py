@@ -198,6 +198,35 @@ class SimulationService(VerificationBaseService):
             logging.error(f"Error al eliminar simulaciones del tema: {str(e)}")
             return 0, 0, 0
 
+    # Helper para convertir una Simulation en TopicContent
+    def convert_simulation_to_content(self, simulation_id: str) -> Tuple[bool, str]:
+        """
+        Convierte una simulación existente en un contenido asociado a su tema.
+        """
+        from src.study_plans.services import TopicContentService
+        from src.study_plans.models import ContentTypes
+
+        simulation = self.get_simulation(simulation_id)
+        if not simulation:
+            return False, "Simulación no encontrada"
+
+        topic_id = simulation["topic_id"]
+        content_data = {
+            "topic_id": topic_id,
+            "content_type": ContentTypes.SIMULATION_GAME,
+            "content": {
+                "simulation_id": simulation_id,
+                "title": simulation.get("title", ""),
+                "description": simulation.get("description", ""),
+                "parameters": simulation.get("parameters", {})
+            },
+            "resources": [simulation_id],
+            "learning_methodologies": [],
+            "status": "active"
+        }
+        topic_content_service = TopicContentService()
+        return topic_content_service.create_content(content_data)
+
 class VirtualSimulationService(VerificationBaseService):
     def __init__(self):
         super().__init__(collection_name="virtual_simulations")
