@@ -570,9 +570,25 @@ class ModuleService(VerificationBaseService):
             module_dict = {
                 "study_plan_id": ObjectId(study_plan_id),
                 "name": module_data.get('name'),
-                "learning_outcomes": module_data.get('learning_outcomes'),
-                "evaluation_rubric": module_data.get('evaluation_rubric')
+                "learning_outcomes": module_data.get('learning_outcomes')
+                # evaluation_rubric se manejará a continuación
             }
+            
+            # ---- Inicio: Manejo de evaluation_rubric ----
+            rubric = module_data.get('evaluation_rubric')
+            if isinstance(rubric, str):
+                try:
+                    rubric = json.loads(rubric)
+                    logging.info(f"Parsed evaluation_rubric string to dict for study plan {study_plan_id}")
+                except json.JSONDecodeError:
+                    logging.warning(f"Failed to parse evaluation_rubric string for study plan {study_plan_id}. Using empty dict.")
+                    rubric = {}
+            # Asegurar que sea un dict, default a {} si es None o no es dict tras posible parseo
+            if not isinstance(rubric, dict):
+                 logging.warning(f"evaluation_rubric is not a dict for study plan {study_plan_id}. Type: {type(rubric)}. Using empty dict.")
+                 rubric = {}
+            module_dict["evaluation_rubric"] = rubric
+            # ---- Fin: Manejo de evaluation_rubric ----
             
             # Agregar parseo de date_start y date_end
             date_start = module_data.get('date_start')
@@ -608,7 +624,23 @@ class ModuleService(VerificationBaseService):
             # Convertir study_plan_id a ObjectId si se actualiza
             if 'study_plan_id' in update_data and isinstance(update_data['study_plan_id'], str):
                 update_data['study_plan_id'] = ObjectId(update_data['study_plan_id'])
-            
+
+            # ---- Inicio: Manejo de evaluation_rubric en actualización ----
+            if 'evaluation_rubric' in update_data:
+                rubric = update_data['evaluation_rubric']
+                if isinstance(rubric, str):
+                    try:
+                        update_data['evaluation_rubric'] = json.loads(rubric)
+                        logging.info(f"Parsed evaluation_rubric string to dict during update for module {module_id}")
+                    except json.JSONDecodeError:
+                        logging.warning(f"Failed to parse evaluation_rubric string during update for module {module_id}. Setting empty dict.")
+                        update_data['evaluation_rubric'] = {}
+                # Asegurar que sea un dict si no era string o tras parseo
+                elif not isinstance(rubric, dict):
+                     logging.warning(f"evaluation_rubric is not a dict during update for module {module_id}. Type: {type(rubric)}. Setting empty dict.")
+                     update_data['evaluation_rubric'] = {}
+            # ---- Fin: Manejo de evaluation_rubric en actualización ----
+
             # Manejar date_start y date_end: parsear o crear si no existen
             if 'date_start' in update_data:
                 if isinstance(update_data['date_start'], str):
