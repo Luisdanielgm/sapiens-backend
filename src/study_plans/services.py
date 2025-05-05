@@ -1146,9 +1146,23 @@ class EvaluationService(VerificationBaseService):
                 "description": evaluation_data.get("description", ""),
                 "weight": evaluation_data.get("weight", 0),
                 "criteria": evaluation_data.get("criteria", []),
-                "due_date": evaluation_data.get("due_date")
+                # due_date se manejará a continuación
             }
             
+            # ---- Inicio: Manejo de due_date ----
+            due_date_str = evaluation_data.get("due_date")
+            if isinstance(due_date_str, str):
+                try:
+                    evaluation_dict["due_date"] = datetime.fromisoformat(due_date_str)
+                except ValueError:
+                     logging.error(f"Formato de due_date inválido: {due_date_str}")
+                     return False, f"Formato de due_date inválido: {due_date_str}"
+            elif isinstance(due_date_str, datetime):
+                 evaluation_dict["due_date"] = due_date_str # Ya es datetime
+            else:
+                 return False, "due_date es requerida y debe ser string ISO 8601 o datetime"
+            # ---- Fin: Manejo de due_date ----
+
             # Crear la evaluación con parámetros exactos
             evaluation = Evaluation(**evaluation_dict)
             
@@ -1170,6 +1184,21 @@ class EvaluationService(VerificationBaseService):
             if not evaluation:
                 return False, "Evaluación no encontrada"
             
+            # ---- Inicio: Manejo de due_date en actualización ----
+            if 'due_date' in update_data:
+                due_date_str = update_data['due_date']
+                if isinstance(due_date_str, str):
+                    try:
+                        update_data['due_date'] = datetime.fromisoformat(due_date_str)
+                        logging.info(f"Parsed due_date string to datetime during update for evaluation {evaluation_id}")
+                    except ValueError:
+                        logging.error(f"Formato de due_date inválido al actualizar: {due_date_str}")
+                        return False, f"Formato de due_date inválido: {due_date_str}"
+                elif not isinstance(due_date_str, datetime):
+                    # Si no es string ni datetime, es un tipo inválido
+                    return False, f"Tipo de due_date inválido: {type(due_date_str)}"
+            # ---- Fin: Manejo de due_date en actualización ----
+
             # Actualizar timestamp
             update_data['updated_at'] = datetime.now()
             
