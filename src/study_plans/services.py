@@ -340,6 +340,15 @@ class StudyPlanAssignmentService(VerificationBaseService):
             
     def update_assignment(self, assignment_id: str, update_data: dict) -> Tuple[bool, str]:
         try:
+            # Convertir posibles IDs a ObjectId
+            if 'study_plan_id' in update_data and isinstance(update_data['study_plan_id'], str):
+                update_data['study_plan_id'] = ObjectId(update_data['study_plan_id'])
+            if 'class_id' in update_data and isinstance(update_data['class_id'], str):
+                update_data['class_id'] = ObjectId(update_data['class_id'])
+            if 'subperiod_id' in update_data and isinstance(update_data['subperiod_id'], str):
+                update_data['subperiod_id'] = ObjectId(update_data['subperiod_id'])
+            if 'assigned_by' in update_data and isinstance(update_data['assigned_by'], str):
+                update_data['assigned_by'] = ObjectId(update_data['assigned_by'])
             result = self.collection.update_one(
                 {"_id": ObjectId(assignment_id)},
                 {"$set": update_data}
@@ -1183,6 +1192,10 @@ class EvaluationService(VerificationBaseService):
             evaluation = self.collection.find_one({"_id": ObjectId(evaluation_id)})
             if not evaluation:
                 return False, "Evaluación no encontrada"
+            
+            # Convertir module_id a ObjectId si se actualiza
+            if 'module_id' in update_data and isinstance(update_data['module_id'], str):
+                update_data['module_id'] = ObjectId(update_data['module_id'])
             
             # ---- Inicio: Manejo de due_date en actualización ----
             if 'due_date' in update_data:
