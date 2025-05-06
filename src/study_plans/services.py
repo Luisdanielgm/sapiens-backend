@@ -1580,6 +1580,16 @@ class TopicContentService(VerificationBaseService):
             Tupla con estado y mensaje/ID
         """
         try:
+            # Mapear campos de frontend a los parámetros del modelo TopicContent
+            # methodology -> learning_methodologies (lista)
+            method = content_data.pop('methodology', None)
+            if method is not None:
+                content_data['learning_methodologies'] = [method]
+            # metadata -> adaptation_options
+            meta = content_data.pop('metadata', None)
+            if meta is not None:
+                content_data['adaptation_options'] = meta
+            
             # Validar que existe el tema
             topic_id = content_data.get("topic_id")
             topic = get_db().topics.find_one({"_id": ObjectId(topic_id)})
@@ -1591,8 +1601,14 @@ class TopicContentService(VerificationBaseService):
             if not self.content_type_service.get_content_type(content_type):
                 return False, f"Tipo de contenido '{content_type}' no válido"
                 
-            # Crear el contenido
-            topic_content = TopicContent(**content_data)
+            # Crear el contenido (filtrando claves no esperadas)
+            allowed_keys = [
+                "topic_id", "content", "content_type", "learning_methodologies",
+                "adaptation_options", "resources", "web_resources",
+                "generation_prompt", "ai_credits", "status"
+            ]
+            model_kwargs = {k: content_data[k] for k in allowed_keys if k in content_data}
+            topic_content = TopicContent(**model_kwargs)
             result = self.collection.insert_one(topic_content.to_dict())
             
             return True, str(result.inserted_id)
