@@ -171,14 +171,13 @@ def generate_virtual_modules():
         preferences = data.get('preferences', {})
         adaptive_options = data.get('adaptive_options', {})
         
-        # 1. Verificar que el estudiante está inscrito en la clase
-        enrollment = get_db().enrollments.find_one({
-            "student_id": ObjectId(student_id),
+        # 1. Verificar que el usuario está inscrito en la clase a través de class_members
+        member = get_db().class_members.find_one({
+            "user_id": ObjectId(student_id),
             "class_id": ObjectId(class_id),
             "status": "active"
         })
-        
-        if not enrollment:
+        if not member:
             return APIRoute.error(
                 ErrorCodes.PERMISSION_DENIED,
                 "No estás inscrito en esta clase o la inscripción no está activa",
