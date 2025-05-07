@@ -327,6 +327,7 @@ class ErrorCodes:
     
     # Errores de autenticación y autorización
     AUTHENTICATION_ERROR = "ERROR_AUTENTICACION"    # 401 - Error de autenticación
+    UNAUTHORIZED = AUTHENTICATION_ERROR             # Alias para compatibilidad con UNAUTHORIZED
     INVALID_TOKEN = "TOKEN_INVALIDO"                # 401 - Token JWT inválido o expirado
     PERMISSION_DENIED = "PERMISO_DENEGADO"          # 403 - Sin permisos para la operación
     ACCESS_DENIED = "ACCESO_DENEGADO"               # 403 - Acceso denegado al recurso

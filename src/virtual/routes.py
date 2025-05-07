@@ -180,7 +180,7 @@ def generate_virtual_modules():
         
         if not enrollment:
             return APIRoute.error(
-                ErrorCodes.UNAUTHORIZED,
+                ErrorCodes.PERMISSION_DENIED,
                 "No estás inscrito en esta clase o la inscripción no está activa",
                 status_code=403
             )
@@ -671,7 +671,7 @@ def update_module_progress(module_id):
         student_id = virtual_module.get("student_id")
         if str(student_id) != str(request.user_id) and "TEACHER" not in request.user_roles:
             return APIRoute.error(
-                ErrorCodes.UNAUTHORIZED,
+                ErrorCodes.PERMISSION_DENIED,
                 "No tienes permiso para actualizar el progreso de este módulo",
                 status_code=403
             )
