@@ -226,8 +226,12 @@ def generate_virtual_modules():
             cognitive_profile = {**cognitive_profile, **adaptive_options.get("cognitive_profile")}
             
         # 6. Comenzar generación de módulos virtuales
-        # Obtener módulos del plan de estudios
-        modules = list(get_db().modules.find({"study_plan_id": ObjectId(study_plan_id)}))
+        # Determinar módulos a generar: si viene `module_id`, filtrar solo ese;
+        # en caso contrario, generar para todo el plan de estudios
+        module_filter = {"study_plan_id": ObjectId(study_plan_id)}
+        if data.get("module_id"):
+            module_filter["_id"] = ObjectId(data.get("module_id"))
+        modules = list(get_db().modules.find(module_filter))
         
         # Crear o actualizar módulos virtuales
         created = []
@@ -244,11 +248,11 @@ def generate_virtual_modules():
                     "student_id": ObjectId(student_id)
                 })
                 
-                # Datos para crear/actualizar
+                # Datos para crear/actualizar (se permite override de nombre vía payload)
                 module_data = {
                     "module_id": module_id,
                     "student_id": student_id,
-                    "name": module.get("name"),
+                    "name": data.get("name", module.get("name")),
                     "adaptations": {
                         "cognitive_profile": cognitive_profile,
                         "preferences": preferences
@@ -289,23 +293,15 @@ def generate_virtual_modules():
                         "virtual_module_id": str(result.inserted_id)
                     })
                     
-                # Para cada módulo, procesar temas
-                await_generation = data.get('await_content_generation', False)
-                if await_generation:
-                    virtual_module_id = str(existing["_id"]) if existing else str(result.inserted_id)
-                    generate_virtual_topics(module_id, student_id, virtual_module_id, cognitive_profile, preferences)
+                # Para cada módulo, generar temas virtuales inmediatamente
+                virtual_module_id = str(existing["_id"]) if existing else str(result.inserted_id)
+                generate_virtual_topics(module_id, student_id, virtual_module_id, cognitive_profile, preferences)
                 
             except Exception as e:
                 errors.append({
                     "module_id": module_id if 'module_id' in locals() else "unknown",
                     "error": str(e)
                 })
-        
-        # 7. Iniciar generación asincrónica de temas si no se esperó por ella
-        # (esto se haría con un sistema de colas en una implementación completa)
-        if not data.get('await_content_generation', False):
-            # En una implementación real, aquí se añadiría una tarea asincrónica
-            pass
         
         return APIRoute.success(
             data={
