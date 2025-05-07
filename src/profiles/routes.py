@@ -540,7 +540,8 @@ def update_institute_admin_profile():
     # Verificar que el usuario actual tenga permisos para actualizar este perfil
     # Usar request.user_id y request.user_role establecidos por @auth_required
     current_user_id = getattr(request, 'user_id', None)
-    current_user_role = getattr(request, 'user_role', None)
+    current_user_roles_list = getattr(request, 'user_roles', [])
+    current_user_role = current_user_roles_list[0] if current_user_roles_list else None
     
     if not current_user_id or not current_user_role:
         # Esto no debería suceder si @auth_required funciona, pero es una comprobación segura
@@ -617,7 +618,8 @@ def create_institute_profile():
     # Si es INSTITUTE_ADMIN, verificar que pertenezca al instituto
     # Usar request.user_id y request.user_role establecidos por @auth_required
     current_user_id = getattr(request, 'user_id', None)
-    current_user_role = getattr(request, 'user_role', None)
+    current_user_roles_list = getattr(request, 'user_roles', [])
+    current_user_role = current_user_roles_list[0] if current_user_roles_list else None
 
     if not current_user_id or not current_user_role:
         return APIRoute.error(ErrorCodes.UNAUTHORIZED, "Usuario no autenticado.", status_code=401)
@@ -701,7 +703,8 @@ def update_institute_profile(institute_id):
     # Si es INSTITUTE_ADMIN, verificar que pertenezca al instituto
     # Usar request.user_id y request.user_role establecidos por @auth_required
     current_user_id = getattr(request, 'user_id', None)
-    current_user_role = getattr(request, 'user_role', None)
+    current_user_roles_list = getattr(request, 'user_roles', [])
+    current_user_role = current_user_roles_list[0] if current_user_roles_list else None
 
     if not current_user_id or not current_user_role:
         return APIRoute.error(ErrorCodes.UNAUTHORIZED, "Usuario no autenticado.", status_code=401)

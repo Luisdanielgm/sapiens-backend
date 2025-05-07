@@ -60,8 +60,12 @@ def auth_required(f):
                 
             # Guardar información relevante del usuario en el request
             request.user_id = user_id
-            request.user_role = user.get("role")
-            logger.info(f"Auth_required: Usuario autenticado con rol: {request.user_role}")
+            # request.user_role = user.get("role") # Comentado o eliminado
+            # logger.info(f"Auth_required: Usuario autenticado con rol: {request.user_role}") # Comentado o modificado
+            
+            user_main_role = user.get("role")
+            request.user_roles = [user_main_role] if user_main_role else [] # Establecer user_roles como lista
+            logger.info(f"Auth_required: Usuario autenticado con ID: {user_id}, Roles: {request.user_roles}")
             
             return f(*args, **kwargs)
         except Exception as e:
