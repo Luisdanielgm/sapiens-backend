@@ -199,7 +199,7 @@ def generate_virtual_modules():
             )
             
         # 3. Verificar que el plan de estudios existe
-        study_plan = get_db().study_plans.find_one({
+        study_plan = get_db().study_plans_per_subject.find_one({
             "_id": ObjectId(study_plan_id)
         })
         
