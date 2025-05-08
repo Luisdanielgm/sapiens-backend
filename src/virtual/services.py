@@ -1,6 +1,7 @@
 from typing import Tuple, List, Dict, Optional
 from bson import ObjectId
 from datetime import datetime
+import logging
 
 from src.shared.database import get_db
 from src.shared.constants import STATUS, COLLECTIONS
@@ -83,6 +84,29 @@ class VirtualModuleService(VerificationBaseService):
         except Exception as e:
             logging.error(f"Error al obtener detalles del módulo: {str(e)}")
             return None
+
+    def get_student_modules(self, study_plan_id: str, student_id: str) -> List[Dict]:
+        """
+        Obtiene todos los módulos virtuales de un estudiante para un plan de estudios dado.
+        """
+        try:
+            # Obtener IDs de módulos del plan de estudios
+            module_objs = self.db.modules.find({"study_plan_id": ObjectId(study_plan_id)}, {"_id": 1})
+            module_ids = [m["_id"] for m in module_objs]
+            # Buscar módulos virtuales del estudiante para esos módulos
+            vmods = list(self.collection.find({
+                "student_id": ObjectId(student_id),
+                "module_id": {"$in": module_ids}
+            }))
+            # Convertir ObjectId a string
+            for vm in vmods:
+                vm["_id"] = str(vm["_id"])
+                vm["module_id"] = str(vm["module_id"])
+                vm["student_id"] = str(vm["student_id"])
+            return vmods
+        except Exception as e:
+            logging.error(f"Error al listar módulos virtuales: {str(e)}")
+            return []
 
 class VirtualTopicService(VerificationBaseService):
     """

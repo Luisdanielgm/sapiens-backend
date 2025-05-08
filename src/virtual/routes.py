@@ -442,7 +442,11 @@ def get_personalized_recommendations(student_id):
                     "suggested_templates": topic_recommendations.get("diagrams", {}).get("suggested_templates", [])[:2]
                 }
         
-        return APIRoute.success(data=recommendations)
+        return APIRoute.success(data={
+            "learning_methodologies": recommendations["learning_methodologies"],
+            "content_types": recommendations["content_types"],
+            "resources": recommendations["resources"]
+        })
     except Exception as e:
         logging.error(f"Error al obtener recomendaciones personalizadas: {str(e)}")
         return APIRoute.error(
@@ -450,6 +454,22 @@ def get_personalized_recommendations(student_id):
             str(e),
             status_code=500
         )
+
+# Nuevo endpoint para listar módulos virtuales de un estudiante y plan de estudios
+@virtual_bp.route('/modules', methods=['GET'])
+@APIRoute.standard(auth_required_flag=True)
+def list_virtual_modules():
+    """Lista todos los módulos virtuales creados para un estudiante en un plan de estudios"""
+    study_plan_id = request.args.get('study_plan_id')
+    student_id = request.args.get('student_id')
+    if not study_plan_id or not student_id:
+        return APIRoute.error(
+            ErrorCodes.BAD_REQUEST,
+            "Faltan parámetros 'study_plan_id' o 'student_id'",
+            status_code=400
+        )
+    modules = virtual_module_service.get_student_modules(study_plan_id, student_id)
+    return APIRoute.success(data={"modules": modules})
 
 def generate_virtual_topics(module_id: str, student_id: str, virtual_module_id: str, cognitive_profile: dict, preferences: dict):
     """
