@@ -64,12 +64,32 @@ class VirtualModuleService(VerificationBaseService):
             if not module:
                 return None
                 
-            # Convertir ObjectId a string
+            # Convertir ObjectId a string y preparar module_id
             module["_id"] = str(module["_id"])
-            module["study_plan_id"] = str(module["study_plan_id"])
-            
+            # Campo module_id siempre presente
+            module["module_id"] = str(module.get("module_id"))
+
+            # Manejar study_plan_id faltante (módulos creados antes del parche)
+            orig_plan_oid = module.get("study_plan_id")
+            if orig_plan_oid:
+                module["study_plan_id"] = str(orig_plan_oid)
+            else:
+                # Obtener study_plan_id desde colección de módulos originales
+                orig = self.db.modules.find_one({"_id": ObjectId(module["module_id"])})
+                if orig and orig.get("study_plan_id"):
+                    module["study_plan_id"] = str(orig.get("study_plan_id"))
+
+            # Manejar description faltante
+            if not module.get("description"):
+                # Tratamiento para módulos antiguos sin campo description
+                orig = orig if 'orig' in locals() else self.db.modules.find_one({"_id": ObjectId(module["module_id"])})
+                module["description"] = orig.get("description", "") if orig else ""
+
+            # Obtener información del plan de estudios si existe study_plan_id
             # Obtener información del plan de estudios
-            study_plan = self.db.study_plans_per_subject.find_one({"_id": ObjectId(module["study_plan_id"])})
+            study_plan = None
+            if module.get("study_plan_id"):
+                study_plan = self.db.study_plans_per_subject.find_one({"_id": ObjectId(module["study_plan_id"])})
             if study_plan:
                 module["study_plan"] = {
                     "name": study_plan.get("name", ""),
