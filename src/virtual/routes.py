@@ -277,9 +277,11 @@ def generate_virtual_modules():
                 else:
                     # Crear nuevo módulo virtual
                     result = get_db().virtual_modules.insert_one({
+                        "study_plan_id": ObjectId(study_plan_id),
                         "module_id": ObjectId(module_id),
                         "student_id": ObjectId(student_id),
                         "name": module.get("name"),
+                        "description": module.get("description", ""),
                         "adaptations": module_data["adaptations"],
                         "status": "active",
                         "created_at": datetime.now(),
