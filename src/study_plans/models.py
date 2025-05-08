@@ -353,6 +353,7 @@ class ContentTypes:
     GLOSSARY = "glossary"             # Glosarios
     GUIDED_QUESTIONS = "guided_questions" # Preguntas guiadas
     EXAMPLES = "examples"             # Ejemplos prácticos
+    DOCUMENTS = "documents"           # Para PDFs y otros documentos (NUEVO)
     
     # Contenido Visual
     DIAGRAM = "diagram"               # Diagramas
@@ -396,7 +397,7 @@ class ContentTypes:
     def get_categories(cls):
         return {
             "theoretical": [cls.TEXT, cls.FEYNMAN, cls.STORY, cls.SUMMARY, cls.GLOSSARY, 
-                          cls.GUIDED_QUESTIONS, cls.EXAMPLES],
+                          cls.GUIDED_QUESTIONS, cls.EXAMPLES, cls.DOCUMENTS],
             "visual": [cls.DIAGRAM, cls.INFOGRAPHIC, cls.MINDMAP, cls.TIMELINE, 
                      cls.ILLUSTRATION, cls.CHART, cls.PICTOGRAM],
             "multimedia": [cls.VIDEO, cls.AUDIO, cls.MUSIC, cls.ANIMATION, 
