@@ -135,6 +135,21 @@ class SimulationService(VerificationBaseService):
             logging.error(f"Error al obtener simulaciones: {str(e)}")
             return []
 
+    def get_simulations_by_teacher(self, teacher_id: str) -> List[Dict]:
+        """Obtiene todas las simulaciones creadas por un docente específico."""
+        try:
+            sims = list(self.collection.find({"creator_id": ObjectId(teacher_id)}))
+            # Convertir ObjectId a string
+            for sim in sims:
+                sim["_id"] = str(sim["_id"])
+                sim["topic_id"] = str(sim["topic_id"])
+                if sim.get("creator_id"):
+                    sim["creator_id"] = str(sim["creator_id"])
+            return sims
+        except Exception as e:
+            logging.error(f"Error al obtener simulaciones por docente: {str(e)}")
+            return []
+
     def toggle_evaluation_mode(self, simulation_id: str) -> Tuple[bool, str]:
         try:
             # Obtener el estado actual

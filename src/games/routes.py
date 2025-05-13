@@ -600,13 +600,7 @@ def toggle_game_evaluation_status(game_id):
 def get_games_by_teacher(teacher_id):
     """Obtiene todos los juegos creados por un docente específico"""
     try:
-        games = list(game_service.collection.find({"creator_id": ObjectId(teacher_id)}))
-        # Convertir ObjectId a string
-        for game in games:
-            game["_id"] = str(game["_id"])
-            game["topic_id"] = str(game["topic_id"])
-            if game.get("creator_id"):
-                game["creator_id"] = str(game["creator_id"])
+        games = game_service.get_games_by_teacher(teacher_id)
         return APIRoute.success(data={"games": games})
     except Exception as e:
         logging.error(f"Error al obtener juegos por docente: {str(e)}")

@@ -212,7 +212,22 @@ class GameService(VerificationBaseService):
 
     def get_game_results(self, game_id: str, student_id: Optional[str] = None) -> Tuple[List[Dict], Optional[str]]:
         # TODO: Implementar la lógica para obtener los resultados del juego
-        pass # Añadido para corregir IndentationError
+        pass
+
+    def get_games_by_teacher(self, teacher_id: str) -> List[Dict]:
+        """Obtiene todos los juegos creados por un docente específico."""
+        try:
+            games = list(self.collection.find({"creator_id": ObjectId(teacher_id)}))
+            # Convertir ObjectId a string
+            for game in games:
+                game["_id"] = str(game["_id"])
+                game["topic_id"] = str(game["topic_id"])
+                if game.get("creator_id"):
+                    game["creator_id"] = str(game["creator_id"])
+            return games
+        except Exception as e:
+            logging.error(f"Error al obtener juegos por docente: {str(e)}")
+            return []
 
 class VirtualGameService(VerificationBaseService):
     def __init__(self):

@@ -495,13 +495,7 @@ def convert_simulation_to_content(simulation_id):
 def get_simulations_by_teacher(teacher_id):
     """Obtiene todas las simulaciones creadas por un docente específico"""
     try:
-        sims = list(simulation_service.collection.find({"creator_id": ObjectId(teacher_id)}))
-        # Convertir ObjectId a string
-        for sim in sims:
-            sim["_id"] = str(sim["_id"])
-            sim["topic_id"] = str(sim["topic_id"])
-            if sim.get("creator_id"):
-                sim["creator_id"] = str(sim["creator_id"])
+        sims = simulation_service.get_simulations_by_teacher(teacher_id)
         return APIRoute.success(data={"simulations": sims})
     except Exception as e:
         logging.error(f"Error al obtener simulaciones por docente: {str(e)}")
