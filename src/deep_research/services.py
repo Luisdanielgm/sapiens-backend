@@ -110,13 +110,21 @@ class DeepResearchService(VerificationBaseService):
         Returns:
             Tupla (éxito, resultados)
         """
-        params = {
-            "provider": provider,
-            "q": query,
-            **kwargs
-        }
-        
-        return self._call_deepresearch_api("/search/unified", method="GET", params=params)
+        # Rotación de proveedores si falla uno
+        providers = ["duckduckgo", "google"]
+        # Cadena de intento: inicial y luego los demás
+        chain = [provider.lower()] + [p for p in providers if p != provider.lower()]
+        last_results = {}
+        for prov in chain:
+            log_info(f"Intentando búsqueda unificada con proveedor: {prov}", "deep_research.services")
+            params = {"provider": prov, "q": query, **kwargs}
+            success, results = self._call_deepresearch_api("/search/unified", method="GET", params=params)
+            if success:
+                return True, results
+            log_info(f"Proveedor {prov} falló; intentando siguiente", "deep_research.services")
+            last_results = results
+        # Si todos fallan, retornar último error
+        return False, last_results
     
     def extract_content(self, url: str) -> Tuple[bool, Dict]:
         """
