@@ -488,3 +488,21 @@ def convert_simulation_to_content(simulation_id):
         content_id,
         status_code=400
     )
+
+# Nuevo endpoint para obtener simulaciones de un docente por su ID
+@simulations_bp.route('/teacher/<teacher_id>', methods=['GET'])
+@APIRoute.standard(auth_required_flag=True, roles=[ROLES["TEACHER"]])
+def get_simulations_by_teacher(teacher_id):
+    """Obtiene todas las simulaciones creadas por un docente específico"""
+    try:
+        sims = list(simulation_service.collection.find({"creator_id": ObjectId(teacher_id)}))
+        # Convertir ObjectId a string
+        for sim in sims:
+            sim["_id"] = str(sim["_id"])
+            sim["topic_id"] = str(sim["topic_id"])
+            if sim.get("creator_id"):
+                sim["creator_id"] = str(sim["creator_id"])
+        return APIRoute.success(data={"simulations": sims})
+    except Exception as e:
+        logging.error(f"Error al obtener simulaciones por docente: {str(e)}")
+        return APIRoute.error(ErrorCodes.SERVER_ERROR, str(e), status_code=500)
