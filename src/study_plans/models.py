@@ -354,6 +354,8 @@ class ContentTypes:
     GUIDED_QUESTIONS = "guided_questions" # Preguntas guiadas
     EXAMPLES = "examples"             # Ejemplos prácticos
     DOCUMENTS = "documents"           # Para PDFs y otros documentos (NUEVO)
+    SLIDES = "slides"                 # Diapositivas/Presentaciones
+    IMAGE = "image"                   # Imagen estática
     
     # Contenido Visual
     DIAGRAM = "diagram"               # Diagramas
@@ -399,7 +401,7 @@ class ContentTypes:
             "theoretical": [cls.TEXT, cls.FEYNMAN, cls.STORY, cls.SUMMARY, cls.GLOSSARY, 
                           cls.GUIDED_QUESTIONS, cls.EXAMPLES, cls.DOCUMENTS],
             "visual": [cls.DIAGRAM, cls.INFOGRAPHIC, cls.MINDMAP, cls.TIMELINE, 
-                     cls.ILLUSTRATION, cls.CHART, cls.PICTOGRAM],
+                     cls.ILLUSTRATION, cls.CHART, cls.PICTOGRAM, cls.IMAGE, cls.SLIDES],
             "multimedia": [cls.VIDEO, cls.AUDIO, cls.MUSIC, cls.ANIMATION, 
                          cls.SCREENCAST, cls.NARRATED_PRESENTATION],
             "interactive": [cls.GAME, cls.SIMULATION, cls.VIRTUAL_LAB, cls.AR, 
