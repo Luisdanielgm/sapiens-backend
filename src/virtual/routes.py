@@ -613,17 +613,23 @@ def generate_personalized_content(topic_id: str, virtual_topic_id: str, cognitiv
         }))
         
         # Usar contenido existente o generar nuevo
-        for content_type in content_types[:3]:  # Limitamos a 3 tipos principales
+        for content_type in content_types[:5]:  # Limitamos a 5 tipos principales
             # Buscar si ya existe este tipo de contenido
             matching_content = next((c for c in existing_contents if c.get("content_type") == content_type), None)
             
-            # Si es un diagrama y ya existe, eliminamos su documento y relación anteriores
-            if content_type == ContentTypes.DIAGRAM and matching_content:
-                get_db().virtual_topic_contents.delete_many({"virtual_topic_id": ObjectId(virtual_topic_id), "content_id": matching_content["_id"]})
-                get_db().topic_contents.delete_one({"_id": matching_content["_id"]})
-                matching_content = None
-            
-            # Ahora matching_content es None, caerá en creación de nuevo
+            # Manejo especial para diagramas: solo vincular si existe y no crear nuevos
+            if content_type == ContentTypes.DIAGRAM:
+                if matching_content:
+                    # Vincular contenido existente al tema virtual
+                    get_db().virtual_topic_contents.insert_one({
+                        "virtual_topic_id": ObjectId(virtual_topic_id),
+                        "content_id": matching_content["_id"],
+                        "created_at": datetime.now(),
+                        "access_count": 0,
+                        "last_accessed": None
+                    })
+                continue
+
             if matching_content:
                 # Vincular contenido existente al tema virtual
                 get_db().virtual_topic_contents.insert_one({
