@@ -293,8 +293,8 @@ class QuizService(VerificationBaseService):
             )
             
             result_id = self.results_collection.insert_one(result_model.to_dict()).inserted_id
-            # Propagar nota de quiz a evaluación sumativa vinculada
-            evaluation = get_db().evaluations.find_one({"linked_quiz_id": ObjectId(quiz_id)})
+            # Propagar nota solo si la evaluación usa quiz como nota
+            evaluation = get_db().evaluations.find_one({"linked_quiz_id": ObjectId(quiz_id), "use_quiz_score": True})
             if evaluation:
                 from src.study_plans.services import EvaluationService
                 EvaluationService().record_result({

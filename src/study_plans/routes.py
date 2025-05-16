@@ -1428,6 +1428,10 @@ def upload_evaluation_submission(evaluation_id):
         if not evaluation:
             return APIRoute.error(ErrorCodes.NOT_FOUND, "Evaluación no encontrada", status_code=404)
 
+        # 1.b Validar que la evaluación requiere entregable
+        if not evaluation.get("requires_submission", False):
+            return APIRoute.error(ErrorCodes.PERMISSION_DENIED, "La evaluación no acepta entregables", status_code=403)
+
         # 2. Validar que se envió un archivo
         if 'file' not in request.files:
             return APIRoute.error(ErrorCodes.MISSING_FIELD, "No se encontró el archivo en la solicitud", status_code=400)
