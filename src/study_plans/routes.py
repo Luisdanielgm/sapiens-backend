@@ -1392,7 +1392,7 @@ def get_evaluation_resources_route(evaluation_id):
         return APIRoute.error(ErrorCodes.SERVER_ERROR, str(e), status_code=500)
 
 @study_plan_bp.route('/evaluations/<evaluation_id>/resources/<resource_id>', methods=['DELETE'])
-@APIRoute.standard(auth_required_flag=True, roles=[ROLES["TEACHER"], ROLES["STUDENT"], ROLES["ADMIN"]) # Solo el profesor puede desvincular
+@APIRoute.standard(auth_required_flag=True, roles=[ROLES["TEACHER"], ROLES["STUDENT"], ROLES["ADMIN"]])
 def remove_resource_from_evaluation_route(evaluation_id, resource_id):
     """Elimina la vinculación entre una evaluación y un recurso."""
     try:
