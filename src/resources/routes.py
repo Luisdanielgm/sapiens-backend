@@ -124,7 +124,7 @@ def create_resource_handler():
     # Para POST, usar el handler con autenticación
     return create_resource()
 
-@APIRoute.standard(auth_required_flag=True, roles=[ROLES["TEACHER"], ROLES["STUDENT"], ROLES["ADMIN"], ROLES["STUDENT_ADMIN"]])
+@APIRoute.standard(auth_required_flag=True, roles=[ROLES["TEACHER"], ROLES["STUDENT"], ROLES["ADMIN"], ROLES["INSTITUTE_ADMIN"]])
 def create_resource():
     """
     Crea un nuevo recurso a través del endpoint /teacher.
@@ -397,7 +397,7 @@ def delete_resource_handler(resource_id):
     # Para DELETE, usar el handler con autenticación
     return delete_resource(resource_id)
 
-@APIRoute.standard(auth_required_flag=True, roles=[ROLES["TEACHER"], ROLES["STUDENT"], ROLES["ADMIN"], ROLES["STUDENT_ADMIN"]])
+@APIRoute.standard(auth_required_flag=True, roles=[ROLES["TEACHER"], ROLES["STUDENT"], ROLES["ADMIN"], ROLES["INSTITUTE_ADMIN"]])
 def delete_resource(resource_id):
     """
     Elimina un recurso específico por su ID.
@@ -756,7 +756,7 @@ def create_resource_direct_handler():
     # Para POST, usar el handler con autenticación
     return create_resource_direct()
 
-@APIRoute.standard(auth_required_flag=True, roles=[ROLES["TEACHER"], ROLES["STUDENT"], ROLES["ADMIN"], ROLES["STUDENT_ADMIN"]])
+@APIRoute.standard(auth_required_flag=True, roles=[ROLES["TEACHER"], ROLES["STUDENT"], ROLES["ADMIN"], ROLES["INSTITUTE_ADMIN"]])
 def create_resource_direct():
     """
     Endpoint directo para crear un nuevo recurso.
