@@ -1158,6 +1158,12 @@ class EvaluationService(VerificationBaseService):
                 # due_date se manejará a continuación
             }
             
+            # Opciones de evaluación avanzada
+            evaluation_dict["use_quiz_score"] = evaluation_data.get("use_quiz_score", False)
+            evaluation_dict["requires_submission"] = evaluation_data.get("requires_submission", False)
+            if "linked_quiz_id" in evaluation_data:
+                evaluation_dict["linked_quiz_id"] = evaluation_data.get("linked_quiz_id")
+            
             # ---- Inicio: Manejo de due_date ----
             due_date_str = evaluation_data.get("due_date")
             if isinstance(due_date_str, str):
@@ -1197,6 +1203,10 @@ class EvaluationService(VerificationBaseService):
             if 'module_id' in update_data and isinstance(update_data['module_id'], str):
                 update_data['module_id'] = ObjectId(update_data['module_id'])
             
+            # Manejo de linked_quiz_id para actualización de evaluación
+            if 'linked_quiz_id' in update_data and isinstance(update_data['linked_quiz_id'], str):
+                update_data['linked_quiz_id'] = ObjectId(update_data['linked_quiz_id'])
+
             # ---- Inicio: Manejo de due_date en actualización ----
             if 'due_date' in update_data:
                 due_date_str = update_data['due_date']

@@ -121,13 +121,19 @@ class Evaluation:
                  description: str,
                  weight: float,
                  criteria: List[Dict],
-                 due_date: datetime):
+                 due_date: datetime,
+                 use_quiz_score: bool = False,
+                 requires_submission: bool = False,
+                 linked_quiz_id: Optional[str] = None):
         self.module_id = ObjectId(module_id)
         self.title = title
         self.description = description
         self.weight = weight
         self.criteria = criteria
         self.due_date = due_date
+        self.use_quiz_score = use_quiz_score
+        self.requires_submission = requires_submission
+        self.linked_quiz_id = ObjectId(linked_quiz_id) if linked_quiz_id else None
         self.created_at = datetime.now()
         self.status = "pending"
 
@@ -140,7 +146,10 @@ class Evaluation:
             "criteria": self.criteria,
             "due_date": self.due_date,
             "created_at": self.created_at,
-            "status": self.status
+            "status": self.status,
+            "use_quiz_score": self.use_quiz_score,
+            "requires_submission": self.requires_submission,
+            "linked_quiz_id": self.linked_quiz_id
         }
 
 class EvaluationResult:
