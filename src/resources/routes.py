@@ -124,7 +124,7 @@ def create_resource_handler():
     # Para POST, usar el handler con autenticación
     return create_resource()
 
-@APIRoute.standard(auth_required_flag=True, roles=[ROLES["TEACHER"]])
+@APIRoute.standard(auth_required_flag=True, roles=[ROLES["TEACHER"], ROLES["STUDENT"], ROLES["ADMIN"], ROLES["STUDENT_ADMIN"]])
 def create_resource():
     """
     Crea un nuevo recurso a través del endpoint /teacher.
