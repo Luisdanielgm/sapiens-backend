@@ -1126,15 +1126,27 @@ class TopicService(VerificationBaseService):
     def delete_topic_theory_content(self, topic_id: str) -> Tuple[bool, str]:
         """
         Elimina el contenido teórico de un tema.
-        
-        Args:
-            topic_id: ID del tema
-            
-        Returns:
-            Tupla con estado y mensaje
         """
         # Reutilizamos el método delete_theory_content
         return self.delete_theory_content(topic_id)
+
+    def get_topic_content_by_type(self, topic_id: str, content_type: str) -> Optional[List[Dict]]:
+        """
+        Obtiene todos los contenidos de un tema según su tipo.
+        """
+        try:
+            contents = list(self.collection.find({
+                "topic_id": ObjectId(topic_id),
+                "content_type": content_type
+            }))
+            # Convertir ObjectId a str para serialización
+            for content in contents:
+                content["_id"] = str(content["_id"])
+                content["topic_id"] = str(content["topic_id"])
+            return contents
+        except Exception as e:
+            logging.error(f"Error al obtener contenidos por tipo: {str(e)}")
+            return None
 
 class EvaluationService(VerificationBaseService):
     def __init__(self):
@@ -1736,35 +1748,22 @@ class TopicContentService(VerificationBaseService):
             logging.error(f"Error al eliminar contenido: {str(e)}")
             return False, str(e)
             
-    def get_topic_content_by_type(self, topic_id: str, content_type: str) -> Optional[Dict]:
+    def get_topic_content_by_type(self, topic_id: str, content_type: str) -> Optional[List[Dict]]:
         """
-        Obtiene un contenido específico de un tema según su tipo.
-        
-        Args:
-            topic_id: ID del tema
-            content_type: Tipo de contenido a buscar
-            
-        Returns:
-            Diccionario con datos del contenido o None si no existe
+        Obtiene todos los contenidos de un tema según su tipo.
         """
         try:
-            content = self.collection.find_one({
+            contents = list(self.collection.find({
                 "topic_id": ObjectId(topic_id),
                 "content_type": content_type
-            })
-            
-            if not content:
-                return None
-                
+            }))
             # Convertir ObjectId a str para serialización
-            if "_id" in content:
+            for content in contents:
                 content["_id"] = str(content["_id"])
-            if "topic_id" in content:
                 content["topic_id"] = str(content["topic_id"])
-                
-            return content
+            return contents
         except Exception as e:
-            logging.error(f"Error al obtener contenido por tipo: {str(e)}")
+            logging.error(f"Error al obtener contenidos por tipo: {str(e)}")
             return None
 
     def adapt_content_to_methodology(self, content_id: str, methodology_code: str) -> Tuple[bool, Dict]:

@@ -991,18 +991,16 @@ def get_topic_contents(topic_id):
 @study_plan_bp.route('/topic/<topic_id>/content/<content_type>', methods=['GET'])
 @APIRoute.standard(auth_required_flag=True)
 def get_topic_content_by_type(topic_id, content_type):
-    """Obtiene un contenido específico de un tema según su tipo"""
+    """Obtiene todos los contenidos de un tema según su tipo"""
     try:
-        content = topic_content_service.get_topic_content_by_type(topic_id, content_type)
-        
-        if not content:
+        contents = topic_content_service.get_topic_content_by_type(topic_id, content_type)
+        if contents is None:
             return APIRoute.error(
-                ErrorCodes.NOT_FOUND,
-                f"Contenido de tipo '{content_type}' no encontrado para este tema",
-                status_code=404
+                ErrorCodes.SERVER_ERROR,
+                f"Error al obtener contenidos de tipo '{content_type}' para este tema",
+                status_code=500
             )
-            
-        return APIRoute.success(data=content)
+        return APIRoute.success(data=contents)
     except Exception as e:
         logging.error(f"Error al obtener contenido por tipo: {str(e)}")
         return APIRoute.error(
