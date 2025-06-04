@@ -122,12 +122,19 @@ COLLECTIONS = {
     "STUDY_PLANS": "study_plans_per_subject",
     "MODULES": "modules",
     "TOPICS": "topics",
+    "TOPIC_CONTENTS": "topic_contents",  # Actualizado para sistema unificado
     
     # Virtual
     "VIRTUAL_MODULES": "virtual_modules",
     "VIRTUAL_TOPICS": "virtual_topics",
-    "QUIZZES": "quizzes",
-    "QUIZ_RESULTS": "quiz_results",
+    "VIRTUAL_TOPIC_CONTENTS": "virtual_topic_contents",  # Nueva - contenido personalizado
+    "QUIZZES": "quizzes",  # Legacy - mantener durante transición
+    "QUIZ_RESULTS": "quiz_results",  # Legacy - mantener durante transición
+    
+    # Sistema de contenido unificado (NUEVO)
+    "CONTENT_TYPES": "content_types",
+    "CONTENT_RESULTS": "content_results", 
+    "CONTENT_TEMPLATES": "content_templates",
     
     # Analíticas
     "STUDENT_PERFORMANCE": "student_performance",

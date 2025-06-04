@@ -39,11 +39,10 @@ from src.dashboards.routes import dashboards_bp
 from src.indigenous_languages.routes import indigenous_languages_bp
 from src.profiles.routes import profiles_bp
 from src.student_individual_content.routes import student_individual_content_bp
-from src.games.routes import games_bp
-from src.simulations.routes import simulations_bp
 from src.resources.routes import resources_bp
 from src.deep_research.routes import deep_research_bp
 from src.topic_resources.routes import topic_resources_bp
+from src.content.routes import content_bp  # Sistema de contenido unificado
 
 def create_app(config_object=active_config):
     """
@@ -208,8 +207,11 @@ def create_app(config_object=active_config):
     app.register_blueprint(indigenous_languages_bp, url_prefix='/api/translations')
     app.register_blueprint(profiles_bp, url_prefix='/api/profiles')
     app.register_blueprint(student_individual_content_bp, url_prefix='/api/student-content')
-    app.register_blueprint(games_bp, url_prefix='/api/games')
-    app.register_blueprint(simulations_bp, url_prefix='/api/simulations')
+    
+    # Sistema de contenido unificado (REEMPLAZA games, simulations, quizzes)
+    app.register_blueprint(content_bp)  # Ya incluye url_prefix='/api/content'
+    
+    # Otros sistemas especializados
     app.register_blueprint(resources_bp, url_prefix='/api/resources')
     app.register_blueprint(deep_research_bp, url_prefix='/api/deep-research')
     app.register_blueprint(topic_resources_bp, url_prefix='/api/topic-resources')
