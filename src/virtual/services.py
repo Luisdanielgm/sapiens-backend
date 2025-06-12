@@ -7,6 +7,7 @@ from src.shared.database import get_db
 from src.shared.constants import STATUS, COLLECTIONS
 from src.shared.standardization import BaseService, VerificationBaseService
 from src.shared.exceptions import AppException
+from src.shared.validators import validate_object_id
 from .models import (
     VirtualModule,
     VirtualTopic,
@@ -127,6 +128,46 @@ class VirtualModuleService(VerificationBaseService):
         except Exception as e:
             logging.error(f"Error al listar módulos virtuales: {str(e)}")
             return []
+
+    def incremental_update(self, virtual_module_id: str, update_data: dict) -> Dict:
+        """
+        Aplica una actualización incremental a un módulo virtual, registrando en el subdocumento 'updates'.
+        """
+        # Validar ID
+        validate_object_id(virtual_module_id, "ID de módulo virtual")
+        vm = self.collection.find_one({"_id": ObjectId(virtual_module_id)})
+        if not vm:
+            raise AppException("Módulo virtual no encontrado", AppException.NOT_FOUND)
+        # Validar campo 'type' obligatorio
+        t_type = update_data.get("type")
+        if not t_type:
+            raise AppException("El campo 'type' es obligatorio", AppException.MISSING_FIELD)
+        # Construir objeto de actualización con _id para seguimiento
+        new_id = ObjectId()
+        update_obj = {
+            "_id": new_id,
+            "type": t_type,
+            "status": update_data.get("status", "pending"),
+            "created_at": datetime.now(),
+            "updated_at": datetime.now()
+        }
+        # Opcionales
+        if "metadata" in update_data and isinstance(update_data["metadata"], dict):
+            update_obj.update(update_data["metadata"])
+        # Insertar en array 'updates'
+        result = self.collection.update_one(
+            {"_id": ObjectId(virtual_module_id)},
+            {
+                "$push": {"updates": update_obj},
+                "$set": {"updated_at": datetime.now()}
+            }
+        )
+        # Verificar que el módulo exista (matched_count)
+        if result.matched_count == 0:
+            raise AppException("Módulo virtual no encontrado", AppException.NOT_FOUND)
+        # Retornar el ID de la actualización insertada y datos adicionales
+        update_obj["_id"] = str(new_id)
+        return update_obj
 
 class VirtualTopicService(VerificationBaseService):
     """

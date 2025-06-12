@@ -64,13 +64,23 @@ class Module:
                  learning_outcomes: List[str],
                  evaluation_rubric: Dict[str, any],
                  date_start: datetime,
-                 date_end: datetime):
+                 date_end: datetime,
+                 ready_for_virtualization: bool = False,
+                 content_completeness_score: int = 0,
+                 virtualization_requirements: Optional[Dict] = None,
+                 last_content_update: Optional[datetime] = None,
+                 content_versions: Optional[List[Dict]] = None):
         self.study_plan_id = ObjectId(study_plan_id)
         self.name = name
         self.learning_outcomes = learning_outcomes
         self.evaluation_rubric = evaluation_rubric
         self.date_start = date_start
         self.date_end = date_end
+        self.ready_for_virtualization = ready_for_virtualization
+        self.content_completeness_score = content_completeness_score
+        self.virtualization_requirements = virtualization_requirements or {}
+        self.last_content_update = last_content_update or datetime.now()
+        self.content_versions = content_versions or []
         self.created_at = datetime.now()
 
     def to_dict(self) -> dict:
@@ -81,6 +91,11 @@ class Module:
             "evaluation_rubric": self.evaluation_rubric,
             "date_start": self.date_start,
             "date_end": self.date_end,
+            "ready_for_virtualization": self.ready_for_virtualization,
+            "content_completeness_score": self.content_completeness_score,
+            "virtualization_requirements": self.virtualization_requirements,
+            "last_content_update": self.last_content_update,
+            "content_versions": self.content_versions,
             "created_at": self.created_at
         }
 

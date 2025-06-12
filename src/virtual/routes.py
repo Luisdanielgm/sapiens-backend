@@ -323,6 +323,72 @@ def generate_virtual_modules():
             status_code=500
         )
 
+@virtual_bp.route('/progressive-generation', methods=['POST'])
+@APIRoute.standard(auth_required_flag=True, roles=[ROLES['STUDENT'], ROLES['TEACHER']], required_fields=['class_id', 'study_plan_id'])
+def progressive_generation():
+    """Inicializa la generación progresiva de módulos virtuales"""
+    return generate_virtual_modules()
+
+@virtual_bp.route('/trigger-next-generation', methods=['POST'])
+@APIRoute.standard(auth_required_flag=True, roles=[ROLES['STUDENT'], ROLES['TEACHER']])
+def trigger_next_generation():
+    """Dispara la generación del siguiente módulo al superar el umbral de progreso"""
+    data = request.get_json()
+    current_module_id = data.get('current_module_id')
+    current_progress = data.get('current_progress')
+    class_id = data.get('class_id')
+    study_plan_id = data.get('study_plan_id')
+    if current_module_id is None or current_progress is None:
+        return APIRoute.error(ErrorCodes.MISSING_FIELD, 'current_module_id y current_progress son requeridos', status_code=400)
+    # Umbral por defecto al 80%
+    if float(current_progress) < 0.8:
+        return APIRoute.error(ErrorCodes.BAD_REQUEST, 'Progreso insuficiente para disparar siguiente generación', status_code=400)
+    # Obtener lista de módulos habilitados
+    modules = list(get_db().modules.find({
+        'study_plan_id': ObjectId(study_plan_id),
+        'ready_for_virtualization': True
+    }).sort('date_start', 1))
+    # Encontrar índice del módulo actual
+    module_ids = [str(m['_id']) for m in modules]
+    try:
+        idx = module_ids.index(current_module_id)
+        next_module_id = module_ids[idx + 1]
+    except (ValueError, IndexError):
+        return APIRoute.error(ErrorCodes.NOT_FOUND, 'No hay más módulos para generar', status_code=404)
+    # Reutilizar la lógica de generación para el módulo siguiente
+    # Construir payload similar al de progressive
+    payload = {
+        'class_id': class_id,
+        'study_plan_id': study_plan_id,
+        'module_id': next_module_id,
+        'preferences': data.get('preferences', {}),
+        'adaptive_options': data.get('adaptive_options', {})
+    }
+    # Simular nueva solicitud
+    original_json = request.get_json
+    request.get_json = lambda: payload
+    response = generate_virtual_modules()
+    request.get_json = original_json
+    return response
+
+@virtual_bp.route('/modules/<virtual_module_id>/incremental-update', methods=['PUT'])
+@APIRoute.standard(auth_required_flag=True, roles=[ROLES['TEACHER'], ROLES['STUDENT']], required_fields=['type'])
+def incremental_update(virtual_module_id):
+    """Aplica una actualización incremental a un módulo virtual existente"""
+    data = request.get_json()
+    try:
+        # Validar existencia y autorización
+        vm = get_db().virtual_modules.find_one({"_id": ObjectId(virtual_module_id)})
+        if not vm:
+            return APIRoute.error(ErrorCodes.NOT_FOUND, "Módulo virtual no encontrado", status_code=404)
+        # Solo el propietario (estudiante) o un profesor puede actualizar
+        if "TEACHER" not in request.user_roles and str(vm.get("student_id")) != request.user_id:
+            return APIRoute.error(ErrorCodes.PERMISSION_DENIED, "No autorizado para actualizar este módulo", status_code=403)
+        update_obj = virtual_module_service.incremental_update(virtual_module_id, data)
+        return APIRoute.success(data={'update': update_obj}, message='Actualización incremental registrada')
+    except Exception as e:
+        return APIRoute.error(ErrorCodes.SERVER_ERROR, str(e), status_code=getattr(e, 'code', 500))
+
 @virtual_bp.route('/student/<student_id>/recommendations', methods=['GET'])
 @APIRoute.standard(auth_required_flag=True)
 def get_personalized_recommendations(student_id):

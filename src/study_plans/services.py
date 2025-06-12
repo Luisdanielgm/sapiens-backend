@@ -724,6 +724,70 @@ class ModuleService(VerificationBaseService):
         except Exception as e:
             return None
 
+    def get_virtualization_readiness(self, module_id: str) -> Dict:
+        """
+        Verifica requisitos para virtualización y sugiere acciones.
+        """
+        validate_object_id(module_id, "ID de módulo")
+        module = self.collection.find_one({"_id": ObjectId(module_id)})
+        if not module:
+            raise AppException("Módulo no encontrado", AppException.NOT_FOUND)
+        db = get_db()
+        # Obtener temas del módulo
+        topics = list(db.topics.find({"module_id": ObjectId(module_id)}))
+        total_topics = len(topics)
+        missing_theory = [t for t in topics if not t.get("theory_content")]
+        # Normalizar resources a lista para evitar errores si es None u otro tipo
+        missing_resources = [t for t in topics if len(list(t.get("resources") or [])) == 0]
+        # Contar evaluaciones asociadas
+        eval_count = db.evaluations.count_documents({"module_id": ObjectId(module_id)})
+        # Preparar detalles de cheques (flag almacenado separado)
+        checks = {
+            "stored_ready_flag": module.get("ready_for_virtualization", False),
+            "total_topics": total_topics,
+            "missing_theory_count": len(missing_theory),
+            "missing_resources_count": len(missing_resources),
+            "evaluations_count": eval_count
+        }
+        suggestions = []
+        if not checks["stored_ready_flag"]:
+            suggestions.append("Habilitar la virtualización del módulo")
+        if total_topics == 0:
+            suggestions.append("Agregar al menos un tema al módulo")
+        else:
+            if checks["missing_theory_count"] > 0:
+                suggestions.append(f"{checks['missing_theory_count']} temas sin contenido teórico")
+            if checks["missing_resources_count"] > 0:
+                suggestions.append(f"{checks['missing_resources_count']} temas sin recursos asociados")
+        if eval_count == 0:
+            suggestions.append("Agregar al menos una evaluación al módulo")
+        # Computar readiness dinámico (sin usar el flag almacenado)
+        ready = (len(missing_theory) == 0 and len(missing_resources) == 0 and eval_count > 0)
+        return {"ready": ready, "checks": checks, "suggestions": suggestions}
+
+    def update_virtualization_settings(self, module_id: str, settings: dict) -> None:
+        """
+        Actualiza configuración de virtualización de un módulo.
+        """
+        validate_object_id(module_id, "ID de módulo")
+        module = self.collection.find_one({"_id": ObjectId(module_id)})
+        if not module:
+            raise AppException("Módulo no encontrado", AppException.NOT_FOUND)
+        update_data = {}
+        if "ready_for_virtualization" in settings:
+            update_data["ready_for_virtualization"] = bool(settings["ready_for_virtualization"])
+        if "virtualization_requirements" in settings:
+            if not isinstance(settings["virtualization_requirements"], dict):
+                raise AppException("Requisitos inválidos", AppException.BAD_REQUEST)
+            update_data["virtualization_requirements"] = settings["virtualization_requirements"]
+        update_data["last_content_update"] = datetime.now()
+        update_data["updated_at"] = datetime.now()
+        result = self.collection.update_one({"_id": ObjectId(module_id)}, {"$set": update_data})
+        # Verificar que el módulo existe (matched_count)
+        if result.matched_count == 0:
+            raise AppException("Módulo no encontrado", AppException.NOT_FOUND)
+        # Si matched_count > 0, la operación fue reconocida; no fallar si modified_count == 0 (sin cambios)
+
 class TopicService(VerificationBaseService):
     def __init__(self):
         super().__init__(collection_name="topics")
