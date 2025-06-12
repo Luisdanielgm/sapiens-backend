@@ -216,6 +216,21 @@ def create_app(config_object=active_config):
     app.register_blueprint(deep_research_bp, url_prefix='/api/deep-research')
     app.register_blueprint(topic_resources_bp, url_prefix='/api/topic-resources')
 
+    # Alias para rutas de módulos (virtualización) bajo /api/modules para compatibilidad con frontend
+    from src.study_plans.routes import get_virtualization_readiness, update_virtualization_settings
+    app.add_url_rule(
+        '/api/modules/<module_id>/virtualization-readiness',
+        endpoint='get_virtualization_readiness_alias',
+        view_func=get_virtualization_readiness,
+        methods=['GET', 'OPTIONS']
+    )
+    app.add_url_rule(
+        '/api/modules/<module_id>/virtualization-settings',
+        endpoint='update_virtualization_settings_alias',
+        view_func=update_virtualization_settings,
+        methods=['PUT', 'OPTIONS']
+    )
+
     @app.route('/')
     def health_check():
         """Endpoint para verificar la salud de la aplicación"""
