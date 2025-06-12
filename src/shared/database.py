@@ -121,7 +121,32 @@ def setup_database_indexes():
         
         # Índices de programas educativos
         db.educational_programs.create_index([("institute_id", ASCENDING)])
-        db.educational_programs.create_index([("name", TEXT)]) 
+        db.educational_programs.create_index([("name", TEXT)])
+        
+        # Índices de planes de estudio
+        # Eliminar índice antiguo si existe para evitar conflictos y warnings
+        existing_indexes = db.study_plans_per_subject.index_information()
+        if "idx_study_plans_subject_id" in existing_indexes:
+            db.study_plans_per_subject.drop_index("idx_study_plans_subject_id")
+        
+        # Índices de planes de estudio
+        db.study_plans_per_subject.create_index([("subject_id", ASCENDING)])
+        
+        # Índices de planes de estudio
+        # Eliminar índice antiguo de modules si existe para evitar conflictos y warnings
+        existing_indexes = db.modules.index_information()
+        if "idx_modules_study_plan_id" in existing_indexes:
+            db.modules.drop_index("idx_modules_study_plan_id")
+        # Crear índice de modules
+        db.modules.create_index([("study_plan_id", ASCENDING)])
+        
+        # Índices de planes de estudio
+        # Eliminar índice antiguo de topics si existe para evitar conflictos y warnings
+        existing_indexes = db.topics.index_information()
+        if "idx_topics_module_id" in existing_indexes:
+            db.topics.drop_index("idx_topics_module_id")
+        # Crear índice de topics
+        db.topics.create_index([("module_id", ASCENDING)])
         
         # Índices académicos
         db.academic_periods.create_index([("institute_id", ASCENDING)])
@@ -192,11 +217,6 @@ def setup_database_indexes():
         
         # Índices de contenido individual de estudiantes
         db.student_individual_content.create_index([("student_id", ASCENDING), ("class_id", ASCENDING)])
-        
-        # Índices de planes de estudio
-        db.study_plans_per_subject.create_index([("subject_id", ASCENDING)])
-        db.modules.create_index([("study_plan_id", ASCENDING)])
-        db.topics.create_index([("module_id", ASCENDING)])
         
         # Índices para recursos por tema
         db.topic_resources.create_index([("topic_id", ASCENDING), ("status", ASCENDING)], background=True)
