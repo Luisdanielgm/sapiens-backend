@@ -737,20 +737,19 @@ class ModuleService(VerificationBaseService):
         topics = list(db.topics.find({"module_id": ObjectId(module_id)}))
         total_topics = len(topics)
         missing_theory = [t for t in topics if not t.get("theory_content")]
-        # Normalizar resources a lista para evitar errores si es None u otro tipo
-        missing_resources = [t for t in topics if len(list(t.get("resources") or [])) == 0]
+        missing_resources = [t for t in topics if not t.get("resources") or len(t.get("resources")) == 0]
         # Contar evaluaciones asociadas
         eval_count = db.evaluations.count_documents({"module_id": ObjectId(module_id)})
-        # Preparar detalles de cheques (flag almacenado separado)
+        # Preparar detalles de cheques
         checks = {
-            "stored_ready_flag": module.get("ready_for_virtualization", False),
+            "ready_for_virtualization": module.get("ready_for_virtualization", False),
             "total_topics": total_topics,
             "missing_theory_count": len(missing_theory),
             "missing_resources_count": len(missing_resources),
             "evaluations_count": eval_count
         }
         suggestions = []
-        if not checks["stored_ready_flag"]:
+        if not checks["ready_for_virtualization"]:
             suggestions.append("Habilitar la virtualización del módulo")
         if total_topics == 0:
             suggestions.append("Agregar al menos un tema al módulo")
@@ -761,8 +760,12 @@ class ModuleService(VerificationBaseService):
                 suggestions.append(f"{checks['missing_resources_count']} temas sin recursos asociados")
         if eval_count == 0:
             suggestions.append("Agregar al menos una evaluación al módulo")
-        # Computar readiness dinámico (sin usar el flag almacenado)
-        ready = (len(missing_theory) == 0 and len(missing_resources) == 0 and eval_count > 0)
+        ready = all([
+            checks["ready_for_virtualization"],
+            checks["missing_theory_count"] == 0,
+            checks["missing_resources_count"] == 0,
+            eval_count > 0
+        ])
         return {"ready": ready, "checks": checks, "suggestions": suggestions}
 
     def update_virtualization_settings(self, module_id: str, settings: dict) -> None:
@@ -783,10 +786,8 @@ class ModuleService(VerificationBaseService):
         update_data["last_content_update"] = datetime.now()
         update_data["updated_at"] = datetime.now()
         result = self.collection.update_one({"_id": ObjectId(module_id)}, {"$set": update_data})
-        # Verificar que el módulo existe (matched_count)
-        if result.matched_count == 0:
-            raise AppException("Módulo no encontrado", AppException.NOT_FOUND)
-        # Si matched_count > 0, la operación fue reconocida; no fallar si modified_count == 0 (sin cambios)
+        if result.modified_count == 0:
+            raise AppException("No se pudo actualizar configuración", AppException.BAD_REQUEST)
 
 class TopicService(VerificationBaseService):
     def __init__(self):

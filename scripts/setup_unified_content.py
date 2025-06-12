@@ -284,13 +284,8 @@ def init_content_types():
             )
         else:
             print(f"✓ Creando tipo '{ct_data['code']}'...")
-            # Insertar directamente el diccionario de datos para evitar errores de validación de modelo
-            doc = {
-                **ct_data,
-                "created_at": datetime.now(),
-                "updated_at": datetime.now()
-            }
-            content_types_collection.insert_one(doc)
+            content_type = ContentType(**ct_data)
+            content_types_collection.insert_one(content_type.to_dict())
     
     print(f"✅ {len(content_types)} tipos de contenido inicializados")
 
@@ -354,13 +349,13 @@ def verify_system():
         content_service = ContentService()
         
         # Verificar que se pueden obtener tipos de contenido
-        types = content_type_service.list_content_types()
+        types = content_type_service.get_content_types()
         print(f"✓ {len(types)} tipos de contenido disponibles")
         
         # Verificar categorías
-        static_types = content_type_service.list_content_types(category="static")
-        interactive_types = content_type_service.list_content_types(category="interactive")
-        immersive_types = content_type_service.list_content_types(category="immersive")
+        static_types = content_type_service.get_content_types(category="static")
+        interactive_types = content_type_service.get_content_types(category="interactive")
+        immersive_types = content_type_service.get_content_types(category="immersive")
         
         print(f"✓ Contenido estático: {len(static_types)} tipos")
         print(f"✓ Contenido interactivo: {len(interactive_types)} tipos") 

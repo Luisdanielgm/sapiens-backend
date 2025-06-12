@@ -194,45 +194,9 @@ def setup_database_indexes():
         db.student_individual_content.create_index([("student_id", ASCENDING), ("class_id", ASCENDING)])
         
         # Índices de planes de estudio
-        db.study_plans_per_subject.create_index(
-            [("subject_id", ASCENDING)],
-            background=True,
-            name="idx_study_plans_subject_id"
-        )
-        db.modules.create_index(
-            [("study_plan_id", ASCENDING)],
-            background=True,
-            name="idx_modules_study_plan_id"
-        )
-        # Índice para filtrar módulos listos para virtualización
-        try:
-            db.modules.create_index(
-                [("ready_for_virtualization", ASCENDING), ("study_plan_id", ASCENDING)],
-                background=True,
-                name="idx_modules_ready_for_virtualization_plan_id"
-            )
-        except Exception as e:
-            logger.warning(f"No se pudo crear índice ready_for_virtualization: {str(e)}")
-        db.topics.create_index(
-            [("module_id", ASCENDING)],
-            background=True,
-            name="idx_topics_module_id"
-        )
-        
-        # Índices de módulos virtuales
-        try:
-            db.virtual_modules.create_index(
-                [("module_id", ASCENDING), ("student_id", ASCENDING)],
-                background=True,
-                name="idx_virtual_modules_module_student"
-            )
-            db.virtual_modules.create_index(
-                [("status", ASCENDING)],
-                background=True,
-                name="idx_virtual_modules_status"
-            )
-        except Exception as e:
-            logger.warning(f"No se pudo crear índices en virtual_modules: {str(e)}")
+        db.study_plans_per_subject.create_index([("subject_id", ASCENDING)])
+        db.modules.create_index([("study_plan_id", ASCENDING)])
+        db.topics.create_index([("module_id", ASCENDING)])
         
         # Índices para recursos por tema
         db.topic_resources.create_index([("topic_id", ASCENDING), ("status", ASCENDING)], background=True)
