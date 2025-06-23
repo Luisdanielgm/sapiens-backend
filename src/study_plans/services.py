@@ -740,13 +740,34 @@ class ModuleService(VerificationBaseService):
         missing_resources = [t for t in topics if not t.get("resources") or len(t.get("resources")) == 0]
         # Contar evaluaciones asociadas
         eval_count = db.evaluations.count_documents({"module_id": ObjectId(module_id)})
+        
+        # Calcular content_completeness_score
+        content_completeness_score = 0
+        if total_topics > 0:
+            topics_with_content = total_topics - len(missing_theory)
+            content_completeness_score = int((topics_with_content / total_topics) * 100)
+            
+            # Actualizar el score en el módulo si ha cambiado
+            current_score = module.get("content_completeness_score", 0)
+            if current_score != content_completeness_score:
+                self.collection.update_one(
+                    {"_id": ObjectId(module_id)},
+                    {
+                        "$set": {
+                            "content_completeness_score": content_completeness_score,
+                            "last_content_update": datetime.now()
+                        }
+                    }
+                )
+        
         # Preparar detalles de cheques
         checks = {
             "ready_for_virtualization": module.get("ready_for_virtualization", False),
             "total_topics": total_topics,
             "missing_theory_count": len(missing_theory),
             "missing_resources_count": len(missing_resources),
-            "evaluations_count": eval_count
+            "evaluations_count": eval_count,
+            "content_completeness_score": content_completeness_score
         }
         suggestions = []
         if not checks["ready_for_virtualization"]:

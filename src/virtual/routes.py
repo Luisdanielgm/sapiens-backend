@@ -6,7 +6,7 @@ from bson import ObjectId
 from datetime import datetime
 import logging
 
-from .services import VirtualModuleService, VirtualTopicService, QuizService
+from .services import VirtualModuleService, VirtualTopicService, QuizService, ServerlessQueueService, FastVirtualModuleGenerator, ContentChangeDetector
 from src.study_plans.models import ContentTypes, LearningMethodologyTypes
 
 virtual_bp = APIBlueprint('virtual', __name__)
@@ -15,6 +15,9 @@ quiz_bp = APIBlueprint('quizzes', __name__, url_prefix='/api/quizzes')
 virtual_module_service = VirtualModuleService()
 virtual_topic_service = VirtualTopicService()
 quiz_service = QuizService()
+queue_service = ServerlessQueueService()
+fast_generator = FastVirtualModuleGenerator()
+change_detector = ContentChangeDetector()
 
 # Rutas para Módulos Virtuales
 @virtual_bp.route('/module', methods=['POST'])
@@ -792,6 +795,565 @@ def update_module_progress(module_id):
         )
     except Exception as e:
         logging.error(f"Error al actualizar progreso del módulo: {str(e)}")
+        return APIRoute.error(
+            ErrorCodes.SERVER_ERROR,
+            str(e),
+            status_code=500
+        )
+
+# ========== NUEVOS ENDPOINTS PARA GENERACIÓN PROGRESIVA ==========
+
+@virtual_bp.route('/progressive-generation', methods=['POST'])
+@APIRoute.standard(auth_required_flag=True, required_fields=['student_id', 'plan_id'])
+def initialize_progressive_generation():
+    """
+    Inicializa la generación progresiva encolando los primeros módulos.
+    Optimizado para límites serverless de 1 minuto.
+    """
+    try:
+        data = request.get_json()
+        student_id = data.get('student_id')
+        plan_id = data.get('plan_id')
+        class_id = data.get('class_id')  # Opcional para validaciones adicionales
+        
+        # 1. Validar que el estudiante existe
+        student = get_db().users.find_one({"_id": ObjectId(student_id)})
+        if not student:
+            return APIRoute.error(
+                ErrorCodes.NOT_FOUND,
+                "Estudiante no encontrado",
+                status_code=404
+            )
+        
+        # 2. Validar que el plan de estudios existe
+        study_plan = get_db().study_plans_per_subject.find_one({"_id": ObjectId(plan_id)})
+        if not study_plan:
+            return APIRoute.error(
+                ErrorCodes.NOT_FOUND,
+                "Plan de estudios no encontrado",
+                status_code=404
+            )
+        
+        # 3. Obtener módulos del plan que estén habilitados para virtualización
+        enabled_modules = list(get_db().modules.find({
+            "study_plan_id": ObjectId(plan_id),
+            "ready_for_virtualization": True
+        }))
+        
+        if not enabled_modules:
+            return APIRoute.error(
+                ErrorCodes.BAD_REQUEST,
+                "No hay módulos habilitados para virtualización en este plan",
+                status_code=400
+            )
+        
+        # 4. Filtrar módulos que no han sido generados
+        already_generated = list(get_db().virtual_modules.find({
+            "student_id": ObjectId(student_id),
+            "module_id": {"$in": [m["_id"] for m in enabled_modules]}
+        }))
+        
+        generated_module_ids = [vm["module_id"] for vm in already_generated]
+        pending_modules = [m for m in enabled_modules if m["_id"] not in generated_module_ids]
+        
+        # 5. Encolar los primeros 2-3 módulos para generación
+        batch_size = min(3, len(pending_modules))
+        enqueued_tasks = []
+        errors = []
+        
+        for i, module in enumerate(pending_modules[:batch_size]):
+            module_id = str(module["_id"])
+            priority = i + 1  # Prioridad ascendente
+            
+            success, task_id = queue_service.enqueue_generation_task(
+                student_id=student_id,
+                module_id=module_id,
+                task_type="generate",
+                priority=priority,
+                payload={
+                    "plan_id": plan_id,
+                    "class_id": class_id,
+                    "batch_initialization": True
+                }
+            )
+            
+            if success:
+                enqueued_tasks.append({
+                    "task_id": task_id,
+                    "module_id": module_id,
+                    "module_name": module.get("name", ""),
+                    "priority": priority
+                })
+            else:
+                errors.append({
+                    "module_id": module_id,
+                    "error": task_id
+                })
+        
+        # 6. Procesar inmediatamente la primera tarea si hay tiempo
+        immediate_result = None
+        if enqueued_tasks:
+            first_task = enqueued_tasks[0]
+            success, result = fast_generator.generate_single_module(
+                student_id=student_id,
+                module_id=first_task["module_id"],
+                timeout=35  # Dejar margen para el resto de la respuesta
+            )
+            
+            if success:
+                # Marcar tarea como completada
+                queue_service.complete_task(
+                    first_task["task_id"],
+                    {"virtual_module_id": result, "generated_immediately": True}
+                )
+                
+                immediate_result = {
+                    "virtual_module_id": result,
+                    "module_id": first_task["module_id"]
+                }
+        
+        # 7. Obtener estado actual de la cola
+        queue_status = queue_service.get_student_queue_status(student_id)
+        
+        return APIRoute.success(
+            data={
+                "enqueued_tasks": enqueued_tasks,
+                "immediate_result": immediate_result,
+                "errors": errors,
+                "queue_status": queue_status,
+                "total_enabled_modules": len(enabled_modules),
+                "total_pending_modules": len(pending_modules),
+                "batch_size": batch_size
+            },
+            message="Generación progresiva inicializada exitosamente",
+            status_code=201
+        )
+        
+    except Exception as e:
+        logging.error(f"Error en inicialización progresiva: {str(e)}")
+        return APIRoute.error(
+            ErrorCodes.SERVER_ERROR,
+            str(e),
+            status_code=500
+        )
+
+@virtual_bp.route('/trigger-next-generation', methods=['POST'])
+@APIRoute.standard(auth_required_flag=True, required_fields=['current_module_id', 'student_id', 'progress'])
+def trigger_next_generation():
+    """
+    Disparado cuando el progreso de un módulo supera el 80%.
+    Encola el siguiente módulo disponible para generación.
+    """
+    try:
+        data = request.get_json()
+        current_module_id = data.get('current_module_id')
+        student_id = data.get('student_id')
+        progress = data.get('progress', 0)
+        
+        # 1. Validar progreso mínimo
+        if progress < 80:
+            return APIRoute.error(
+                ErrorCodes.BAD_REQUEST,
+                "El progreso debe ser mayor al 80% para activar siguiente generación",
+                status_code=400
+            )
+        
+        # 2. Obtener información del módulo actual
+        current_module = get_db().modules.find_one({"_id": ObjectId(current_module_id)})
+        if not current_module:
+            return APIRoute.error(
+                ErrorCodes.NOT_FOUND,
+                "Módulo actual no encontrado",
+                status_code=404
+            )
+        
+        plan_id = current_module["study_plan_id"]
+        
+        # 3. Buscar siguiente módulo habilitado no generado
+        all_enabled_modules = list(get_db().modules.find({
+            "study_plan_id": plan_id,
+            "ready_for_virtualization": True
+        }).sort("created_at", 1))  # Ordenar por fecha de creación
+        
+        # Obtener módulos ya generados
+        generated_modules = list(get_db().virtual_modules.find({
+            "student_id": ObjectId(student_id),
+            "module_id": {"$in": [m["_id"] for m in all_enabled_modules]}
+        }))
+        
+        generated_module_ids = [vm["module_id"] for vm in generated_modules]
+        
+        # Encontrar el siguiente módulo no generado
+        next_module = None
+        for module in all_enabled_modules:
+            if module["_id"] not in generated_module_ids:
+                next_module = module
+                break
+        
+        if not next_module:
+            return APIRoute.success(
+                data={
+                    "message": "No hay más módulos disponibles para generar",
+                    "has_next": False
+                },
+                message="Generación progresiva completada"
+            )
+        
+        # 4. Encolar el siguiente módulo
+        next_module_id = str(next_module["_id"])
+        success, task_id = queue_service.enqueue_generation_task(
+            student_id=student_id,
+            module_id=next_module_id,
+            task_type="generate",
+            priority=2,  # Prioridad alta para módulos activados por progreso
+            payload={
+                "triggered_by_progress": True,
+                "trigger_module_id": current_module_id,
+                "trigger_progress": progress
+            }
+        )
+        
+        if not success:
+            return APIRoute.error(
+                ErrorCodes.OPERATION_FAILED,
+                f"Error al encolar siguiente módulo: {task_id}",
+                status_code=500
+            )
+        
+        # 5. Obtener estado actualizado de la cola
+        queue_status = queue_service.get_student_queue_status(student_id)
+        
+        return APIRoute.success(
+            data={
+                "next_module": {
+                    "id": next_module_id,
+                    "name": next_module.get("name", ""),
+                    "task_id": task_id
+                },
+                "queue_status": queue_status,
+                "has_next": True
+            },
+            message="Siguiente módulo encolado para generación"
+        )
+        
+    except Exception as e:
+        logging.error(f"Error al activar siguiente generación: {str(e)}")
+        return APIRoute.error(
+            ErrorCodes.SERVER_ERROR,
+            str(e),
+            status_code=500
+        )
+
+@virtual_bp.route('/process-queue', methods=['POST'])
+@APIRoute.standard(auth_required_flag=True, roles=[ROLES.get("TEACHER", "TEACHER"), "SYSTEM"])
+def process_generation_queue():
+    """
+    Procesa tareas pendientes de la cola de generación.
+    Diseñado para ser llamado por webhooks externos.
+    Procesa máximo 1-2 tareas por ejecución para respetar límite de tiempo.
+    """
+    try:
+        # 1. Obtener tareas a procesar
+        tasks_to_process = queue_service.get_next_tasks(limit=2, max_duration=45)
+        
+        if not tasks_to_process:
+            return APIRoute.success(
+                data={
+                    "processed_tasks": 0,
+                    "message": "No hay tareas pendientes"
+                },
+                message="Cola procesada"
+            )
+        
+        processed_tasks = []
+        failed_tasks = []
+        
+        # 2. Procesar cada tarea
+        for task in tasks_to_process:
+            task_id = task["_id"]
+            student_id = task["student_id"]
+            module_id = task["module_id"]
+            task_type = task["task_type"]
+            
+            # Marcar como procesando
+            if not queue_service.mark_task_processing(task_id):
+                continue
+            
+            try:
+                # Procesar según tipo de tarea
+                if task_type == "generate":
+                    success, result = fast_generator.generate_single_module(
+                        student_id=student_id,
+                        module_id=module_id,
+                        timeout=40
+                    )
+                    
+                    if success:
+                        queue_service.complete_task(
+                            task_id, 
+                            {"virtual_module_id": result}
+                        )
+                        processed_tasks.append({
+                            "task_id": task_id,
+                            "module_id": module_id,
+                            "virtual_module_id": result,
+                            "type": task_type
+                        })
+                    else:
+                        queue_service.fail_task(task_id, result)
+                        failed_tasks.append({
+                            "task_id": task_id,
+                            "module_id": module_id,
+                            "error": result
+                        })
+                
+                elif task_type == "update":
+                    # Implementar lógica de actualización incremental
+                    # Por ahora marcar como completada
+                    queue_service.complete_task(task_id, {"updated": True})
+                    processed_tasks.append({
+                        "task_id": task_id,
+                        "module_id": module_id,
+                        "type": task_type
+                    })
+                
+            except Exception as task_error:
+                logging.error(f"Error procesando tarea {task_id}: {str(task_error)}")
+                queue_service.fail_task(task_id, str(task_error))
+                failed_tasks.append({
+                    "task_id": task_id,
+                    "module_id": module_id,
+                    "error": str(task_error)
+                })
+        
+        # 3. Limpiar tareas antiguas ocasionalmente
+        import random
+        if random.randint(1, 10) == 1:  # 10% de probabilidad
+            cleaned = queue_service.cleanup_old_tasks(days_old=3)
+            logging.info(f"Limpiadas {cleaned} tareas antiguas")
+        
+        return APIRoute.success(
+            data={
+                "processed_tasks": len(processed_tasks),
+                "failed_tasks": len(failed_tasks),
+                "task_details": {
+                    "processed": processed_tasks,
+                    "failed": failed_tasks
+                }
+            },
+            message=f"Procesadas {len(processed_tasks)} tareas exitosamente"
+        )
+        
+    except Exception as e:
+        logging.error(f"Error procesando cola: {str(e)}")
+        return APIRoute.error(
+            ErrorCodes.SERVER_ERROR,
+            str(e),
+            status_code=500
+        )
+
+@virtual_bp.route('/generation-status/<student_id>', methods=['GET'])
+@APIRoute.standard(auth_required_flag=True)
+def get_generation_status(student_id):
+    """
+    Obtiene el estado actual de generación para un estudiante.
+    """
+    try:
+        # 1. Validar estudiante
+        student = get_db().users.find_one({"_id": ObjectId(student_id)})
+        if not student:
+            return APIRoute.error(
+                ErrorCodes.NOT_FOUND,
+                "Estudiante no encontrado",
+                status_code=404
+            )
+        
+        # 2. Obtener estado de la cola
+        queue_status = queue_service.get_student_queue_status(student_id)
+        
+        # 3. Obtener módulos virtuales generados
+        generated_modules = list(get_db().virtual_modules.find({
+            "student_id": ObjectId(student_id)
+        }))
+        
+        # Procesar información de módulos generados
+        modules_info = []
+        for vm in generated_modules:
+            module_info = {
+                "virtual_module_id": str(vm["_id"]),
+                "module_id": str(vm.get("module_id", "")),
+                "name": vm.get("name", ""),
+                "generation_status": vm.get("generation_status", "unknown"),
+                "generation_progress": vm.get("generation_progress", 0),
+                "created_at": vm.get("created_at")
+            }
+            
+            # Obtener información del módulo original
+            if vm.get("module_id"):
+                original = get_db().modules.find_one({"_id": vm["module_id"]})
+                if original:
+                    module_info["original_name"] = original.get("name", "")
+                    module_info["study_plan_id"] = str(original.get("study_plan_id", ""))
+            
+            modules_info.append(module_info)
+        
+        # 4. Obtener tareas activas
+        active_tasks = list(get_db().virtual_generation_tasks.find({
+            "student_id": ObjectId(student_id),
+            "status": {"$in": ["pending", "processing"]}
+        }))
+        
+        # Procesar información de tareas activas
+        tasks_info = []
+        for task in active_tasks:
+            task_info = {
+                "task_id": str(task["_id"]),
+                "module_id": str(task["module_id"]),
+                "task_type": task.get("task_type", ""),
+                "status": task.get("status", ""),
+                "priority": task.get("priority", 5),
+                "created_at": task.get("created_at"),
+                "attempts": task.get("attempts", 0)
+            }
+            
+            # Obtener nombre del módulo
+            module = get_db().modules.find_one({"_id": task["module_id"]})
+            if module:
+                task_info["module_name"] = module.get("name", "")
+            
+            tasks_info.append(task_info)
+        
+        return APIRoute.success(
+            data={
+                "queue_status": queue_status,
+                "generated_modules": modules_info,
+                "active_tasks": tasks_info,
+                "summary": {
+                    "total_generated": len(modules_info),
+                    "total_pending": queue_status["pending"],
+                    "total_processing": queue_status["processing"],
+                    "generation_active": queue_status["pending"] > 0 or queue_status["processing"] > 0
+                }
+            },
+            message="Estado de generación obtenido exitosamente"
+        )
+        
+    except Exception as e:
+        logging.error(f"Error obteniendo estado de generación: {str(e)}")
+        return APIRoute.error(
+            ErrorCodes.SERVER_ERROR,
+            str(e),
+            status_code=500
+        )
+
+@virtual_bp.route('/modules/<virtual_module_id>/incremental-update', methods=['PUT'])
+@APIRoute.standard(auth_required_flag=True, roles=[ROLES.get("TEACHER", "TEACHER")])
+def incremental_update_virtual_module(virtual_module_id):
+    """
+    Aplica actualización incremental a un módulo virtual.
+    Placeholder para lógica de actualización basada en cambios detectados.
+    """
+    try:
+        data = request.get_json()
+        update_type = data.get('update_type', 'content')  # content, structure, settings
+        changes = data.get('changes', {})
+        
+        # 1. Verificar que el módulo virtual existe
+        virtual_module = get_db().virtual_modules.find_one({
+            "_id": ObjectId(virtual_module_id)
+        })
+        
+        if not virtual_module:
+            return APIRoute.error(
+                ErrorCodes.NOT_FOUND,
+                "Módulo virtual no encontrado",
+                status_code=404
+            )
+        
+        # 2. Crear registro de actualización
+        update_record = {
+            "type": update_type,
+            "status": "applied",
+            "changes": changes,
+            "created_at": datetime.now(),
+            "updated_at": datetime.now()
+        }
+        
+        # 3. Aplicar actualización al módulo virtual
+        result = get_db().virtual_modules.update_one(
+            {"_id": ObjectId(virtual_module_id)},
+            {
+                "$push": {"updates": update_record},
+                "$set": {"updated_at": datetime.now()}
+            }
+        )
+        
+        if result.modified_count == 0:
+            return APIRoute.error(
+                ErrorCodes.OPERATION_FAILED,
+                "No se pudo aplicar la actualización",
+                status_code=500
+            )
+        
+        return APIRoute.success(
+            data={
+                "virtual_module_id": virtual_module_id,
+                "update_type": update_type,
+                "update_record": update_record
+            },
+            message="Actualización incremental aplicada exitosamente"
+        )
+        
+    except Exception as e:
+        logging.error(f"Error en actualización incremental: {str(e)}")
+        return APIRoute.error(
+            ErrorCodes.SERVER_ERROR,
+            str(e),
+            status_code=500
+        )
+
+@virtual_bp.route('/modules/<module_id>/detect-changes', methods=['POST'])
+@APIRoute.standard(auth_required_flag=True, roles=[ROLES.get("TEACHER", "TEACHER"), "SYSTEM"])
+def detect_module_changes(module_id):
+    """
+    Detecta cambios en un módulo y programa actualizaciones incrementales.
+    Diseñado para ser llamado manualmente o por webhooks.
+    """
+    try:
+        # 1. Detectar cambios en el módulo
+        change_info = change_detector.detect_changes(module_id)
+        
+        if change_info.get("error"):
+            return APIRoute.error(
+                ErrorCodes.SERVER_ERROR,
+                f"Error detectando cambios: {change_info['error']}",
+                status_code=500
+            )
+        
+        # 2. Si hay cambios, programar actualizaciones incrementales
+        if change_info.get("has_changes"):
+            task_ids = change_detector.schedule_incremental_updates(module_id, change_info)
+            
+            return APIRoute.success(
+                data={
+                    "changes_detected": True,
+                    "change_info": change_info,
+                    "scheduled_updates": len(task_ids),
+                    "task_ids": task_ids
+                },
+                message=f"Cambios detectados. {len(task_ids)} actualizaciones programadas."
+            )
+        else:
+            return APIRoute.success(
+                data={
+                    "changes_detected": False,
+                    "change_info": change_info
+                },
+                message="No se detectaron cambios en el módulo."
+            )
+        
+    except Exception as e:
+        logging.error(f"Error en detección de cambios: {str(e)}")
         return APIRoute.error(
             ErrorCodes.SERVER_ERROR,
             str(e),
