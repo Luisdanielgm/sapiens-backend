@@ -236,6 +236,28 @@ def setup_database_indexes():
         db.resource_folders.create_index([("parent_id", ASCENDING)])
         db.resource_folders.create_index([("name", TEXT)])
         
+        # Índices para sistema de monitoreo de IA
+        
+        # Índices de llamadas a APIs de IA
+        db.ai_api_calls.create_index([("call_id", ASCENDING)], unique=True, background=True)
+        db.ai_api_calls.create_index([("timestamp", DESCENDING)], background=True)
+        db.ai_api_calls.create_index([("provider", ASCENDING)], background=True)
+        db.ai_api_calls.create_index([("model_name", ASCENDING)], background=True)
+        db.ai_api_calls.create_index([("user_id", ASCENDING)], background=True)
+        db.ai_api_calls.create_index([("success", ASCENDING)], background=True)
+        db.ai_api_calls.create_index([("feature", ASCENDING)], background=True)
+        db.ai_api_calls.create_index([("user_type", ASCENDING)], background=True)
+        # Índice compuesto para consultas frecuentes
+        db.ai_api_calls.create_index([("timestamp", DESCENDING), ("success", ASCENDING), ("provider", ASCENDING)], background=True)
+        
+        # Índices de alertas de monitoreo
+        db.ai_monitoring_alerts.create_index([("alert_id", ASCENDING)], unique=True, background=True)
+        db.ai_monitoring_alerts.create_index([("triggered", ASCENDING), ("dismissed", ASCENDING)], background=True)
+        db.ai_monitoring_alerts.create_index([("type", ASCENDING)], background=True)
+        db.ai_monitoring_alerts.create_index([("created_at", DESCENDING)], background=True)
+        db.ai_monitoring_alerts.create_index([("provider", ASCENDING)], background=True)
+        db.ai_monitoring_alerts.create_index([("user_id", ASCENDING)], background=True)
+        
         # Índices para la base de datos de lenguas indígenas
         
         # Índices para traducciones

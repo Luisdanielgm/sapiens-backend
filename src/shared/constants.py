@@ -143,5 +143,10 @@ COLLECTIONS = {
     
     # Recursos
     "RESOURCES": "resources",
-    "RESOURCE_FOLDERS": "resource_folders"
+    "RESOURCE_FOLDERS": "resource_folders",
+    
+    # Sistema de monitoreo de IA
+    "AI_API_CALLS": "ai_api_calls",
+    "AI_MONITORING_CONFIG": "ai_monitoring_config",
+    "AI_MONITORING_ALERTS": "ai_monitoring_alerts"
 }

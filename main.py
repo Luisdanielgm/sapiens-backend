@@ -43,6 +43,7 @@ from src.resources.routes import resources_bp
 from src.deep_research.routes import deep_research_bp
 from src.topic_resources.routes import topic_resources_bp
 from src.content.routes import content_bp  # Sistema de contenido unificado
+from src.ai_monitoring.routes import ai_monitoring_bp  # Sistema de monitoreo de IA
 
 def create_app(config_object=active_config):
     """
@@ -215,6 +216,9 @@ def create_app(config_object=active_config):
     app.register_blueprint(resources_bp, url_prefix='/api/resources')
     app.register_blueprint(deep_research_bp, url_prefix='/api/deep-research')
     app.register_blueprint(topic_resources_bp, url_prefix='/api/topic-resources')
+    
+    # Sistema de monitoreo de IA
+    app.register_blueprint(ai_monitoring_bp, url_prefix='/api/ai-monitoring')
 
     # Alias para rutas de módulos (virtualización) bajo /api/modules para compatibilidad con frontend
     from src.study_plans.routes import get_virtualization_readiness, update_virtualization_settings
