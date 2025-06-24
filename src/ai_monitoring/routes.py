@@ -13,6 +13,63 @@ from src.shared.logging import log_error, log_info
 ai_monitoring_bp = APIBlueprint('ai_monitoring', __name__)
 ai_monitoring_service = AIMonitoringService()
 
+@ai_monitoring_bp.route('/health', methods=['GET'])
+@APIRoute.standard(auth_required_flag=True, roles=[ROLES["ADMIN"]])
+def health_check():
+    """
+    Endpoint de verificación del sistema de monitoreo de IA.
+    Permite al frontend verificar que todo está funcionando correctamente.
+    Solo administradores pueden acceder.
+    """
+    try:
+        # Verificar conexión a la base de datos
+        config = ai_monitoring_service.get_monitoring_config()
+        database_connected = config is not None
+        
+        # Verificar configuración cargada
+        config_loaded = bool(config and config.get('daily_budget'))
+        
+        # Contar endpoints disponibles
+        endpoints_available = 9  # Total de endpoints implementados
+        
+        # Verificar estadísticas básicas
+        stats = ai_monitoring_service.get_statistics()
+        stats_working = isinstance(stats, dict)
+        
+        # Determinar estado general
+        all_healthy = database_connected and config_loaded and stats_working
+        
+        return APIRoute.success(
+            data={
+                "status": "healthy" if all_healthy else "degraded",
+                "database_connected": database_connected,
+                "config_loaded": config_loaded,
+                "stats_working": stats_working,
+                "endpoints_available": endpoints_available,
+                "current_config": {
+                    "daily_budget": config.get('daily_budget') if config else None,
+                    "weekly_budget": config.get('weekly_budget') if config else None,
+                    "monthly_budget": config.get('monthly_budget') if config else None,
+                    "alert_thresholds": config.get('alert_thresholds') if config else None
+                } if config else None,
+                "system_info": {
+                    "total_calls": stats.get('total_calls', 0) if stats else 0,
+                    "total_cost": stats.get('total_cost', 0) if stats else 0,
+                    "success_rate": stats.get('success_rate', 0) if stats else 0
+                }
+            },
+            message="Sistema de monitoreo de IA operativo" if all_healthy else "Sistema funcionando con limitaciones"
+        )
+        
+    except Exception as e:
+        log_error(f"Error en health check: {str(e)}", "ai_monitoring.routes")
+        return APIRoute.error(
+            ErrorCodes.SERVER_ERROR,
+            "Error verificando estado del sistema",
+            details={"error": str(e)},
+            status_code=500
+        )
+
 @ai_monitoring_bp.route('/calls', methods=['POST'])
 @APIRoute.standard(auth_required_flag=True, roles=[ROLES["ADMIN"]], required_fields=['call_id', 'provider', 'model_name', 'prompt_tokens'])
 def register_call():
