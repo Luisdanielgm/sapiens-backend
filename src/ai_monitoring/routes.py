@@ -71,11 +71,11 @@ def health_check():
         )
 
 @ai_monitoring_bp.route('/calls', methods=['POST'])
-@APIRoute.standard(auth_required_flag=True, roles=[ROLES["ADMIN"]], required_fields=['call_id', 'provider', 'model_name', 'prompt_tokens'])
+@APIRoute.standard(auth_required_flag=True, required_fields=['call_id', 'provider', 'model_name', 'prompt_tokens'])
 def register_call():
     """
     Registra una nueva llamada a API de IA.
-    Solo administradores pueden registrar llamadas.
+    Cualquier usuario autenticado puede registrar sus llamadas.
     
     Body:
         call_id: ID único de la llamada
@@ -123,32 +123,72 @@ def register_call():
         )
 
 @ai_monitoring_bp.route('/calls/<call_id>', methods=['PUT'])
-@APIRoute.standard(auth_required_flag=True, roles=[ROLES["ADMIN"]])
+@APIRoute.standard(auth_required_flag=True)
 def update_call(call_id):
     """
     Actualiza una llamada existente con los resultados.
-    Solo administradores pueden actualizar llamadas.
+    Cualquier usuario autenticado puede actualizar sus llamadas.
+    
+    SEGURIDAD:
+    - Usuarios normales: Solo pueden actualizar tokens, success, response_time, error_message
+    - Administradores: Pueden actualizar campos de costo manualmente (override)
+    - Los costos se calculan automáticamente del lado del servidor para usuarios normales
     
     Args:
         call_id: ID de la llamada
         
-    Body:
+    Body para usuarios normales:
         completion_tokens: Tokens de salida (opcional)
         response_time: Tiempo de respuesta en ms (opcional)
         success: Si la llamada fue exitosa (opcional)
-        input_cost: Costo por tokens de entrada (opcional)
-        output_cost: Costo por tokens de salida (opcional)
-        total_cost: Costo total (opcional)
         total_tokens: Total de tokens (opcional)
         error_message: Mensaje de error si falló (opcional)
+        
+    Body adicional para administradores:
+        input_cost: Costo por tokens de entrada (opcional, override manual)
+        output_cost: Costo por tokens de salida (opcional, override manual)
+        total_cost: Costo total (opcional, override manual)
     """
     try:
         data = request.get_json() or {}
         
-        success, result = ai_monitoring_service.update_call(call_id, data)
+        # Obtener información del usuario autenticado
+        user_id = getattr(request, 'user_id', None)
+        user_role = getattr(request, 'user_role', None)
+        
+        # Verificar si es administrador
+        is_admin = user_role == ROLES["ADMIN"]
+        
+        # Definir campos de costo sensibles
+        cost_fields = ['input_cost', 'output_cost', 'total_cost']
+        
+        # Verificar si usuario no-admin intenta actualizar campos de costo
+        if not is_admin:
+            cost_fields_in_request = [field for field in cost_fields if field in data]
+            if cost_fields_in_request:
+                return APIRoute.error(
+                    ErrorCodes.PERMISSION_DENIED,
+                    f"Solo administradores pueden actualizar campos de costo: {', '.join(cost_fields_in_request)}",
+                    details={
+                        "restricted_fields": cost_fields_in_request,
+                        "user_role": user_role,
+                        "allowed_fields": ["completion_tokens", "response_time", "success", "total_tokens", "error_message"]
+                    },
+                    status_code=403
+                )
+        
+        # Procesar actualización con controles de seguridad
+        success, result = ai_monitoring_service.update_call_secure(call_id, data, is_admin)
         
         if success:
-            return APIRoute.success(message=result)
+            return APIRoute.success(
+                message=result,
+                data={
+                    "call_id": call_id,
+                    "updated_by_admin": is_admin,
+                    "auto_calculated_costs": not is_admin
+                }
+            )
         else:
             return APIRoute.error(
                 ErrorCodes.BAD_REQUEST,
@@ -169,7 +209,7 @@ def update_call(call_id):
 def get_statistics():
     """
     Obtiene estadísticas generales del monitoreo.
-    Solo administradores pueden acceder a las estadísticas.
+    Solo administradores pueden ver estadísticas globales del sistema.
     
     Query Parameters (opcionales):
         start_date: Fecha de inicio en formato ISO
@@ -230,8 +270,8 @@ def get_statistics():
 @APIRoute.standard(auth_required_flag=True, roles=[ROLES["ADMIN"]])
 def get_alerts():
     """
-    Obtiene las alertas activas.
-    Solo administradores pueden ver las alertas.
+    Obtiene las alertas activas del sistema.
+    Solo administradores pueden ver alertas de presupuesto global.
     """
     try:
         alerts = ai_monitoring_service.get_active_alerts()
@@ -254,7 +294,7 @@ def get_alerts():
 def get_config():
     """
     Obtiene la configuración actual del monitoreo.
-    Solo administradores pueden ver la configuración.
+    Solo administradores pueden ver configuración de límites y presupuestos.
     """
     try:
         config = ai_monitoring_service.get_monitoring_config()
@@ -284,7 +324,7 @@ def get_config():
 def update_config():
     """
     Actualiza la configuración del monitoreo.
-    Solo administradores pueden actualizar la configuración.
+    Solo administradores pueden modificar límites de presupuesto del sistema.
     
     Body:
         daily_budget: Límite diario global (opcional)
@@ -332,7 +372,7 @@ def update_config():
 def get_calls():
     """
     Obtiene lista paginada de llamadas para auditoría.
-    Solo administradores pueden ver las llamadas.
+    Solo administradores pueden ver todas las llamadas del sistema.
     
     Query Parameters:
         page: Número de página (default: 1)
@@ -413,7 +453,7 @@ def get_calls():
 def cleanup_data():
     """
     Limpia datos antiguos del sistema.
-    Solo administradores pueden realizar limpieza.
+    Solo administradores pueden ejecutar limpieza de datos históricos.
     
     Body:
         days_to_keep: Días a mantener
@@ -459,7 +499,7 @@ def cleanup_data():
 def export_data():
     """
     Exporta datos del monitoreo.
-    Solo administradores pueden exportar datos.
+    Solo administradores pueden exportar reportes del sistema.
     
     Query Parameters:
         start_date: Fecha de inicio en formato ISO (opcional)

@@ -111,9 +111,26 @@ class AIMonitoringService(VerificationBaseService):
         """
         Actualiza una llamada existente con los resultados.
         
+        DEPRECADO: Use update_call_secure() para mayor seguridad.
+        
         Args:
             call_id: ID de la llamada
             update_data: Datos a actualizar
+            
+        Returns:
+            Tuple[bool, str]: (success, message/error)
+        """
+        # Redireccionar al método seguro como admin para mantener compatibilidad
+        return self.update_call_secure(call_id, update_data, is_admin=True)
+    
+    def update_call_secure(self, call_id: str, update_data: Dict, is_admin: bool = False) -> Tuple[bool, str]:
+        """
+        Actualiza una llamada existente con los resultados aplicando controles de seguridad.
+        
+        Args:
+            call_id: ID de la llamada
+            update_data: Datos a actualizar
+            is_admin: Si el usuario es administrador (puede actualizar costos manualmente)
             
         Returns:
             Tuple[bool, str]: (success, message/error)
@@ -129,11 +146,31 @@ class AIMonitoringService(VerificationBaseService):
                 "updated_at": datetime.now()
             }
             
-            # Actualizar campos si están presentes
-            for field in ["completion_tokens", "response_time", "success", 
-                         "input_cost", "output_cost", "total_cost", "total_tokens", "error_message"]:
+            # Campos seguros que cualquier usuario puede actualizar
+            safe_fields = ["completion_tokens", "response_time", "success", "total_tokens", "error_message"]
+            
+            # Campos de costo sensibles (solo admins)
+            cost_fields = ["input_cost", "output_cost", "total_cost"]
+            
+            # Procesar campos seguros
+            for field in safe_fields:
                 if field in update_data:
                     update_fields[field] = update_data[field]
+            
+            # Procesar campos de costo según permisos
+            if is_admin:
+                # Administradores pueden actualizar costos manualmente
+                for field in cost_fields:
+                    if field in update_data:
+                        update_fields[field] = update_data[field]
+                        
+                logging.info(f"Admin actualizando llamada {call_id} con override manual de costos")
+            else:
+                # Usuarios normales: calcular costos automáticamente del lado del servidor
+                calculated_costs = self._calculate_costs_server_side(call, update_data)
+                update_fields.update(calculated_costs)
+                
+                logging.info(f"Usuario normal actualizando llamada {call_id} con costos calculados automáticamente")
             
             # Actualizar en la base de datos
             result = self.collection.update_one(
@@ -154,6 +191,88 @@ class AIMonitoringService(VerificationBaseService):
         except Exception as e:
             logging.error(f"Error al actualizar llamada: {str(e)}")
             return False, str(e)
+    
+    def _calculate_costs_server_side(self, call: Dict, update_data: Dict) -> Dict:
+        """
+        Calcula los costos del lado del servidor para usuarios no-admin.
+        
+        Args:
+            call: Documento de la llamada original
+            update_data: Datos de actualización del usuario
+            
+        Returns:
+            Dict: Campos de costo calculados
+        """
+        try:
+            # Obtener tokens actualizados o usar los originales
+            prompt_tokens = call.get("prompt_tokens", 0)
+            completion_tokens = update_data.get("completion_tokens", call.get("completion_tokens", 0))
+            
+            # Solo calcular si tenemos tokens válidos
+            if prompt_tokens > 0 or completion_tokens > 0:
+                provider = call.get("provider", "")
+                model_name = call.get("model_name", "")
+                
+                # Calcular costos usando la función existente
+                total_estimated_cost = self._estimate_cost(provider, model_name, prompt_tokens)
+                
+                # Si tenemos completion_tokens, calcular costos más precisos
+                if completion_tokens > 0:
+                    # Obtener precios específicos del modelo
+                    prices = self._get_model_prices()
+                    provider_prices = prices.get(provider, {})
+                    model_prices = provider_prices.get(model_name, {"input": 0.001, "output": 0.002})
+                    
+                    # Calcular costos precisos
+                    input_cost = (prompt_tokens / 1000) * model_prices["input"]
+                    output_cost = (completion_tokens / 1000) * model_prices["output"]
+                    total_cost = input_cost + output_cost
+                    
+                    return {
+                        "input_cost": round(input_cost, 6),
+                        "output_cost": round(output_cost, 6),
+                        "total_cost": round(total_cost, 6),
+                        "total_tokens": prompt_tokens + completion_tokens
+                    }
+                else:
+                    # Solo estimación basada en prompt_tokens
+                    return {
+                        "total_cost": round(total_estimated_cost, 6)
+                    }
+            
+            return {}
+            
+        except Exception as e:
+            logging.error(f"Error al calcular costos del servidor: {str(e)}")
+            return {}
+    
+    def _get_model_prices(self) -> Dict:
+        """
+        Obtiene los precios actualizados de los modelos.
+        En el futuro, esto podría venir de una base de datos o API externa.
+        
+        Returns:
+            Dict: Estructura de precios por proveedor y modelo
+        """
+        return {
+            "gemini": {
+                "gemini-1.5-flash": {"input": 0.000075, "output": 0.0003},
+                "gemini-1.5-flash-002": {"input": 0.000075, "output": 0.0003},
+                "gemini-2.0-flash": {"input": 0.00015, "output": 0.0006},
+                "gemini-1.5-pro": {"input": 0.0035, "output": 0.0105}
+            },
+            "openai": {
+                "gpt-4": {"input": 0.03, "output": 0.06},
+                "gpt-4-turbo": {"input": 0.01, "output": 0.03},
+                "gpt-3.5-turbo": {"input": 0.0015, "output": 0.002},
+                "gpt-4o": {"input": 0.005, "output": 0.015}
+            },
+            "claude": {
+                "claude-3-opus": {"input": 0.015, "output": 0.075},
+                "claude-3-sonnet": {"input": 0.003, "output": 0.015},
+                "claude-3-haiku": {"input": 0.00025, "output": 0.00125}
+            }
+        }
     
     def get_statistics(self, filters: Dict = None) -> Dict:
         """
