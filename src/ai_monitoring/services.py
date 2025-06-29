@@ -94,6 +94,7 @@ class AIMonitoringService(VerificationBaseService):
                 session_id=call_data.get("session_id"),
                 feature=call_data.get("feature"),
                 user_type=call_data.get("user_type"),
+                origin=call_data.get("origin"),
                 endpoint=call_data.get("endpoint"),
                 success=False  # Inicialmente False hasta que se complete
             )
