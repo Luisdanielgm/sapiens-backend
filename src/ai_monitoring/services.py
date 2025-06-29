@@ -277,6 +277,7 @@ class AIMonitoringService(VerificationBaseService):
                 "gemini-2.0-flash": {"input": 0.00015, "output": 0.0006},
                 "gemini-2.0-flash-preview": {"input": 0.00015, "output": 0.0006},
                 "gemini-2.0-flash-lite": {"input": 0.000075, "output": 0.0003},
+                "gemini-2.0-flash-thinking-exp-01-21": {"input": 0.00015, "output": 0.0030}, # Precio de salida elevado por "thinking"
                 
                 # Gemini 1.5 models (legacy but still supported)
                 "gemini-1.5-flash": {"input": 0.000075, "output": 0.0003},
@@ -284,6 +285,7 @@ class AIMonitoringService(VerificationBaseService):
                 "gemini-1.5-flash-8b": {"input": 0.0000375, "output": 0.00015},
                 "gemini-1.5-pro": {"input": 0.00125, "output": 0.005},
                 "gemini-1.5-pro-002": {"input": 0.00125, "output": 0.005},
+                "gemini-2.5-flash-preview-native-audio-dialog": {"input": 0.0005, "output": 0.002}, # Precios de texto para modelo de audio
             },
             "openai": {
                 # GPT-4 family
@@ -300,6 +302,12 @@ class AIMonitoringService(VerificationBaseService):
                 # O1 reasoning models
                 "o1-preview": {"input": 0.015, "output": 0.06},
                 "o1-mini": {"input": 0.003, "output": 0.012},
+            },
+            "openrouter": {
+                "openai/o3-mini-high": {"input": 0.0011, "output": 0.0044},
+            },
+            "requesty": {
+                "cline/o3-mini": {"input": 0.0011, "output": 0.0044},
             },
             "claude": {
                 # Claude 3.5 family
