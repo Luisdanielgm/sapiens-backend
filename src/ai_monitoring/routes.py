@@ -30,7 +30,7 @@ def health_check():
         config_loaded = bool(config and config.get('daily_budget'))
         
         # Contar endpoints disponibles
-        endpoints_available = 9  # Total de endpoints implementados
+        endpoints_available = 10  # Total de endpoints implementados
         
         # Verificar estadísticas básicas
         stats = ai_monitoring_service.get_statistics()
