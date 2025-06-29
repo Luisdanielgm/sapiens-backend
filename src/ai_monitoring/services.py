@@ -243,25 +243,187 @@ class AIMonitoringService(VerificationBaseService):
         Returns:
             Dict: Estructura de precios por proveedor y modelo
         """
+        # Precios base desde configuración
+        base_prices = self._get_base_model_prices()
+        
+        # Buscar precios personalizados en configuración (si existen)
+        custom_prices = self._get_custom_model_prices()
+        
+        # Combinar precios base con personalizados
+        return self._merge_model_prices(base_prices, custom_prices)
+    
+    def _get_base_model_prices(self) -> Dict:
+        """
+        Obtiene los precios base de modelos desde configuración estática.
+        """
         return {
             "gemini": {
+                # Gemini 2.5 models (latest)
+                "gemini-2.5-pro": {"input": 0.00125, "output": 0.01},  # <=200K tokens
+                "gemini-2.5-pro-preview": {"input": 0.00125, "output": 0.01},
+                "gemini-2.5-pro-preview-05-06": {"input": 0.00125, "output": 0.01},
+                "gemini-2.5-flash": {"input": 0.0003, "output": 0.0025},
+                "gemini-2.5-flash-preview": {"input": 0.0003, "output": 0.0025},
+                "gemini-2.5-flash-preview-04-17": {"input": 0.0003, "output": 0.0025},
+                "google/gemini-2.5-flash-preview": {"input": 0.0003, "output": 0.0025},
+                "gemini-2.5-flash-lite": {"input": 0.0001, "output": 0.0004},
+                "gemini-2.5-flash-lite-preview": {"input": 0.0001, "output": 0.0004},
+                
+                # Gemini 2.0 models 
+                "gemini-2.0-flash": {"input": 0.00015, "output": 0.0006},
+                "gemini-2.0-flash-preview": {"input": 0.00015, "output": 0.0006},
+                "gemini-2.0-flash-lite": {"input": 0.000075, "output": 0.0003},
+                
+                # Gemini 1.5 models (legacy but still supported)
                 "gemini-1.5-flash": {"input": 0.000075, "output": 0.0003},
                 "gemini-1.5-flash-002": {"input": 0.000075, "output": 0.0003},
-                "gemini-2.0-flash": {"input": 0.00015, "output": 0.0006},
-                "gemini-1.5-pro": {"input": 0.0035, "output": 0.0105}
+                "gemini-1.5-flash-8b": {"input": 0.0000375, "output": 0.00015},
+                "gemini-1.5-pro": {"input": 0.00125, "output": 0.005},
+                "gemini-1.5-pro-002": {"input": 0.00125, "output": 0.005},
             },
             "openai": {
+                # GPT-4 family
                 "gpt-4": {"input": 0.03, "output": 0.06},
                 "gpt-4-turbo": {"input": 0.01, "output": 0.03},
+                "gpt-4-turbo-preview": {"input": 0.01, "output": 0.03},
+                "gpt-4o": {"input": 0.005, "output": 0.015},
+                "gpt-4o-mini": {"input": 0.00015, "output": 0.0006},
+                
+                # GPT-3.5 family
                 "gpt-3.5-turbo": {"input": 0.0015, "output": 0.002},
-                "gpt-4o": {"input": 0.005, "output": 0.015}
+                "gpt-3.5-turbo-16k": {"input": 0.003, "output": 0.004},
+                
+                # O1 reasoning models
+                "o1-preview": {"input": 0.015, "output": 0.06},
+                "o1-mini": {"input": 0.003, "output": 0.012},
             },
             "claude": {
-                "claude-3-opus": {"input": 0.015, "output": 0.075},
-                "claude-3-sonnet": {"input": 0.003, "output": 0.015},
-                "claude-3-haiku": {"input": 0.00025, "output": 0.00125}
+                # Claude 3.5 family
+                "claude-3-5-sonnet-20241022": {"input": 0.003, "output": 0.015},
+                "claude-3-5-sonnet-20240620": {"input": 0.003, "output": 0.015},
+                "claude-3-5-haiku-20241022": {"input": 0.0008, "output": 0.004},
+                
+                # Claude 3 family
+                "claude-3-opus-20240229": {"input": 0.015, "output": 0.075},
+                "claude-3-sonnet-20240229": {"input": 0.003, "output": 0.015},
+                "claude-3-haiku-20240307": {"input": 0.00025, "output": 0.00125},
+                
+                # Legacy
+                "claude-2": {"input": 0.008, "output": 0.024},
+                "claude-instant-1.2": {"input": 0.00163, "output": 0.00551},
             }
         }
+    
+    def _get_custom_model_prices(self) -> Dict:
+        """
+        Obtiene precios personalizados desde la configuración de MongoDB.
+        Permite sobrescribir precios base o agregar nuevos modelos.
+        """
+        try:
+            config = self.config_collection.find_one()
+            if config and "custom_model_prices" in config:
+                return config["custom_model_prices"]
+        except Exception as e:
+            logging.warning(f"No se pudieron cargar precios personalizados: {str(e)}")
+        
+        return {}
+    
+    def _merge_model_prices(self, base_prices: Dict, custom_prices: Dict) -> Dict:
+        """
+        Combina precios base con precios personalizados.
+        Los precios personalizados tienen prioridad.
+        """
+        merged_prices = base_prices.copy()
+        
+        for provider, models in custom_prices.items():
+            if provider not in merged_prices:
+                merged_prices[provider] = {}
+            
+            for model_name, pricing in models.items():
+                merged_prices[provider][model_name] = pricing
+                
+        return merged_prices
+    
+    def add_custom_model_pricing(self, provider: str, model_name: str, input_price: float, output_price: float) -> Tuple[bool, str]:
+        """
+        Agrega o actualiza precios de un modelo específico en la configuración.
+        
+        Args:
+            provider: Proveedor del modelo ('gemini', 'openai', 'claude')
+            model_name: Nombre del modelo
+            input_price: Precio por 1K tokens de entrada (USD)
+            output_price: Precio por 1K tokens de salida (USD)
+            
+        Returns:
+            Tuple[bool, str]: (success, message)
+        """
+        try:
+            # Validar precios
+            if input_price < 0 or output_price < 0:
+                return False, "Los precios no pueden ser negativos"
+                
+            # Buscar configuración actual
+            config = self.config_collection.find_one()
+            if not config:
+                return False, "Configuración de monitoreo no encontrada"
+            
+            # Inicializar estructura si no existe
+            if "custom_model_prices" not in config:
+                config["custom_model_prices"] = {}
+            
+            if provider not in config["custom_model_prices"]:
+                config["custom_model_prices"][provider] = {}
+            
+            # Agregar/actualizar precio del modelo
+            config["custom_model_prices"][provider][model_name] = {
+                "input": input_price,
+                "output": output_price,
+                "updated_at": datetime.now().isoformat(),
+                "added_by": "system"  # En el futuro podríamos rastrear quién agregó el modelo
+            }
+            
+            # Guardar en base de datos
+            result = self.config_collection.update_one(
+                {"_id": config["_id"]},
+                {"$set": {"custom_model_prices": config["custom_model_prices"]}}
+            )
+            
+            if result.modified_count > 0:
+                logging.info(f"Precio agregado para modelo {provider}/{model_name}: input=${input_price}, output=${output_price}")
+                return True, f"Precio agregado exitosamente para {provider}/{model_name}"
+            else:
+                return False, "No se pudo guardar el precio del modelo"
+                
+        except Exception as e:
+            logging.error(f"Error al agregar precio de modelo: {str(e)}")
+            return False, str(e)
+    
+    def get_supported_models(self) -> Dict:
+        """
+        Obtiene la lista completa de modelos soportados con sus precios.
+        
+        Returns:
+            Dict: Modelos organizados por proveedor con precios
+        """
+        try:
+            all_prices = self._get_model_prices()
+            supported_models = {}
+            
+            for provider, models in all_prices.items():
+                supported_models[provider] = []
+                for model_name, pricing in models.items():
+                    supported_models[provider].append({
+                        "model_name": model_name,
+                        "input_price_per_1k": pricing["input"],
+                        "output_price_per_1k": pricing["output"],
+                        "status": "supported"
+                    })
+            
+            return supported_models
+            
+        except Exception as e:
+            logging.error(f"Error al obtener modelos soportados: {str(e)}")
+            return {}
     
     def get_statistics(self, filters: Dict = None) -> Dict:
         """

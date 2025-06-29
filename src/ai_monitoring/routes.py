@@ -519,15 +519,12 @@ def export_data():
                     status_code=400
                 )
         
-        # Por ahora, simplemente retornamos la información para generar el archivo
-        # En una implementación completa, se podría generar el archivo y subirlo a un servicio de almacenamiento
-        filename = f"ai-monitoring-export-{datetime.now().strftime('%Y%m%d')}.{format_type}"
-        
+        # Por ahora, retornar un placeholder de exportación
         return APIRoute.success(
             data={
-                "download_url": f"#",  # En implementación real, aquí iría la URL del archivo generado
+                "download_url": "#",  # En el futuro, generar URL real
                 "format": format_type,
-                "filename": filename,
+                "filename": f"ai-monitoring-export-{datetime.now().strftime('%Y%m%d')}.{format_type}",
                 "generated_at": datetime.now().isoformat()
             },
             message="Solicitud de exportación procesada. El archivo estará disponible en breve."
@@ -535,6 +532,171 @@ def export_data():
         
     except Exception as e:
         log_error(f"Error en exportación: {str(e)}", "ai_monitoring.routes")
+        return APIRoute.error(
+            ErrorCodes.SERVER_ERROR,
+            str(e),
+            status_code=500
+        )
+
+@ai_monitoring_bp.route('/models', methods=['GET'])
+@APIRoute.standard(auth_required_flag=True, roles=[ROLES["ADMIN"]])
+def get_supported_models():
+    """
+    Obtiene la lista completa de modelos soportados con sus precios.
+    Solo administradores pueden ver la lista completa de modelos.
+    """
+    try:
+        models = ai_monitoring_service.get_supported_models()
+        
+        return APIRoute.success(
+            data={"supported_models": models},
+            message=f"Se encontraron modelos para {len(models)} proveedores"
+        )
+        
+    except Exception as e:
+        log_error(f"Error al obtener modelos soportados: {str(e)}", "ai_monitoring.routes")
+        return APIRoute.error(
+            ErrorCodes.SERVER_ERROR,
+            str(e),
+            status_code=500
+        )
+
+@ai_monitoring_bp.route('/models', methods=['POST'])
+@APIRoute.standard(auth_required_flag=True, roles=[ROLES["ADMIN"]], required_fields=['provider', 'model_name', 'input_price', 'output_price'])
+def add_model_pricing():
+    """
+    Agrega o actualiza precios de un modelo específico.
+    Solo administradores pueden agregar nuevos modelos al sistema.
+    
+    Body:
+        provider: Proveedor del modelo ('gemini', 'openai', 'claude')
+        model_name: Nombre del modelo
+        input_price: Precio por 1K tokens de entrada (USD)
+        output_price: Precio por 1K tokens de salida (USD)
+    """
+    try:
+        data = request.get_json()
+        
+        provider = data.get('provider')
+        model_name = data.get('model_name')
+        input_price = data.get('input_price')
+        output_price = data.get('output_price')
+        
+        # Validar proveedor
+        valid_providers = ['gemini', 'openai', 'claude']
+        if provider not in valid_providers:
+            return APIRoute.error(
+                ErrorCodes.INVALID_DATA,
+                f"Proveedor debe ser uno de: {', '.join(valid_providers)}",
+                status_code=400
+            )
+        
+        # Validar precios
+        try:
+            input_price = float(input_price)
+            output_price = float(output_price)
+        except (ValueError, TypeError):
+            return APIRoute.error(
+                ErrorCodes.INVALID_DATA,
+                "Los precios deben ser números válidos",
+                status_code=400
+            )
+        
+        if input_price < 0 or output_price < 0:
+            return APIRoute.error(
+                ErrorCodes.INVALID_DATA,
+                "Los precios no pueden ser negativos",
+                status_code=400
+            )
+        
+        # Agregar el modelo
+        success, message = ai_monitoring_service.add_custom_model_pricing(
+            provider, model_name, input_price, output_price
+        )
+        
+        if success:
+            return APIRoute.success(
+                data={
+                    "provider": provider,
+                    "model_name": model_name,
+                    "input_price": input_price,
+                    "output_price": output_price
+                },
+                message=message,
+                status_code=201
+            )
+        else:
+            return APIRoute.error(
+                ErrorCodes.OPERATION_FAILED,
+                message,
+                status_code=400
+            )
+            
+    except Exception as e:
+        log_error(f"Error al agregar modelo: {str(e)}", "ai_monitoring.routes")
+        return APIRoute.error(
+            ErrorCodes.SERVER_ERROR,
+            str(e),
+            status_code=500
+        )
+
+@ai_monitoring_bp.route('/models/check', methods=['POST'])
+@APIRoute.standard(auth_required_flag=True, required_fields=['provider', 'model_name'])
+def check_model_support():
+    """
+    Verifica si un modelo específico está soportado.
+    Cualquier usuario autenticado puede verificar soporte de modelos.
+    
+    Body:
+        provider: Proveedor del modelo
+        model_name: Nombre del modelo
+    """
+    try:
+        data = request.get_json()
+        
+        provider = data.get('provider')
+        model_name = data.get('model_name')
+        
+        # Obtener precios actuales
+        prices = ai_monitoring_service._get_model_prices()
+        
+        # Verificar si el modelo está soportado
+        is_supported = (
+            provider in prices and 
+            model_name in prices[provider]
+        )
+        
+        response_data = {
+            "provider": provider,
+            "model_name": model_name,
+            "is_supported": is_supported
+        }
+        
+        if is_supported:
+            model_pricing = prices[provider][model_name]
+            response_data.update({
+                "pricing": {
+                    "input_price_per_1k": model_pricing["input"],
+                    "output_price_per_1k": model_pricing["output"]
+                }
+            })
+            message = f"Modelo {provider}/{model_name} está soportado"
+        else:
+            response_data.update({
+                "fallback_pricing": {
+                    "input_price_per_1k": 0.001,
+                    "output_price_per_1k": 0.002
+                }
+            })
+            message = f"Modelo {provider}/{model_name} NO está soportado, se usarán precios por defecto"
+        
+        return APIRoute.success(
+            data=response_data,
+            message=message
+        )
+        
+    except Exception as e:
+        log_error(f"Error al verificar modelo: {str(e)}", "ai_monitoring.routes")
         return APIRoute.error(
             ErrorCodes.SERVER_ERROR,
             str(e),
