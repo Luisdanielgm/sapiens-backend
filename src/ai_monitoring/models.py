@@ -221,6 +221,7 @@ class AICall(BaseModel):
     success: Optional[bool] = Field(None, description="Indicates if the call was successful")
     error_message: Optional[str] = Field(None, description="Error message if the call failed")
     feature: Optional[str] = Field(None, description="Feature or module using the AI (e.g., 'chat', 'summarization')")
+    origin: Optional[str] = Field(None, description="The specific origin of the call (e.g., 'CognitiveProfileEnrichment')")
     user_type: Optional[str] = Field(None, description="Type of user (e.g., 'student', 'teacher', 'admin')")
     
     class Config:
@@ -243,6 +244,7 @@ class AICall(BaseModel):
                 "success": True,
                 "error_message": None,
                 "feature": "chat",
+                "origin": "CognitiveProfileEnrichment",
                 "user_type": "student"
             }
         }
@@ -276,6 +278,7 @@ class AICallCreate(BaseModel):
     user_id: Optional[str] = None
     session_id: Optional[str] = None
     feature: Optional[str] = None
+    origin: Optional[str] = None
     user_type: Optional[str] = None
     endpoint: Optional[str] = None
     success: Optional[bool] = None
@@ -289,6 +292,7 @@ class AICallCreate(BaseModel):
                 "prompt_tokens": 100,
                 "user_id": "user123",
                 "feature": "chat",
+                "origin": "CognitiveProfileEnrichment",
                 "user_type": "student"
             }
         }
