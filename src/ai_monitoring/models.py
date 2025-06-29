@@ -305,6 +305,7 @@ class AIStat(BaseModel):
     by_model: dict
     by_user_type: dict
     by_feature: dict
+    by_origin: dict
     by_provider: dict
 
 class Alert(BaseModel):

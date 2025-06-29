@@ -523,6 +523,18 @@ class AIMonitoringService(VerificationBaseService):
                             }
                         ],
                         
+                        # Por origen de llamada
+                        "by_origin": [
+                            {
+                                "$group": {
+                                    "_id": "$origin",
+                                    "calls": {"$sum": 1},
+                                    "tokens": {"$sum": "$total_tokens"},
+                                    "cost": {"$sum": "$total_cost"}
+                                }
+                            }
+                        ],
+                        
                         # Tendencias diarias
                         "daily_trends": [
                             {
@@ -578,6 +590,12 @@ class AIMonitoringService(VerificationBaseService):
                 "tokens": item["tokens"],
                 "cost": round(item["cost"], 4)
             } for item in result["by_user_type"] if item["_id"]}
+            
+            stats["by_origin"] = {item["_id"]: {
+                "calls": item["calls"],
+                "tokens": item["tokens"],
+                "cost": round(item["cost"], 4)
+            } for item in result["by_origin"] if item["_id"]}
             
             stats["daily_trends"] = [{
                 "date": item["_id"],
