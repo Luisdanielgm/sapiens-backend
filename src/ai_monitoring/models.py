@@ -1,6 +1,7 @@
 from typing import Optional, Dict, List
 from bson import ObjectId
 from datetime import datetime
+from pydantic import BaseModel, Field
 
 class AIApiCall:
     """
@@ -182,4 +183,154 @@ class AIMonitoringAlert:
             "dismissed": self.dismissed,
             "dismissed_at": self.dismissed_at,
             "created_at": self.created_at
+        }
+
+class AIModelPricing(BaseModel):
+    model_name: str = Field(..., description="The name of the AI model")
+    provider: str = Field(..., description="The provider of the AI model (e.g., 'google', 'openai')")
+    input_price_per_1k: float = Field(..., description="Price per 1000 input tokens")
+    output_price_per_1k: float = Field(..., description="Price per 1000 output tokens")
+    source: str = Field(..., description="Source of the pricing data ('local' or 'db')")
+    notes: Optional[str] = Field(None, description="Additional notes about the pricing")
+
+class AddAIModelRequest(BaseModel):
+    model_name: str
+    provider: str
+    input_price_per_1k: float
+    output_price_per_1k: float
+    notes: Optional[str] = None
+
+class CheckModelRequest(BaseModel):
+    model_name: str
+
+class AICall(BaseModel):
+    call_id: str = Field(..., description="Unique identifier for the API call")
+    timestamp: datetime = Field(default_factory=datetime.utcnow, description="Timestamp of the API call")
+    provider: str = Field(..., description="AI provider (e.g., 'gemini', 'openai', 'claude')")
+    model_name: str = Field(..., description="Specific model used for the call")
+    user_id: Optional[str] = Field(None, description="Identifier of the user making the call")
+    session_id: Optional[str] = Field(None, description="Session ID for tracking related calls")
+    prompt_tokens: Optional[int] = Field(None, description="Number of tokens in the prompt")
+    completion_tokens: Optional[int] = Field(None, description="Number of tokens in the completion")
+    total_tokens: Optional[int] = Field(None, description="Total tokens used in the call")
+    input_cost: Optional[float] = Field(None, description="Cost of the prompt tokens")
+    output_cost: Optional[float] = Field(None, description="Cost of the completion tokens")
+    total_cost: Optional[float] = Field(None, description="Total cost of the API call")
+    endpoint: Optional[str] = Field(None, description="API endpoint used for the call")
+    response_time: Optional[int] = Field(None, description="Response time in milliseconds")
+    success: Optional[bool] = Field(None, description="Indicates if the call was successful")
+    error_message: Optional[str] = Field(None, description="Error message if the call failed")
+    feature: Optional[str] = Field(None, description="Feature or module using the AI (e.g., 'chat', 'summarization')")
+    user_type: Optional[str] = Field(None, description="Type of user (e.g., 'student', 'teacher', 'admin')")
+    
+    class Config:
+        schema_extra = {
+            "example": {
+                "call_id": "1234567890",
+                "timestamp": "2024-04-15T12:00:00",
+                "provider": "gemini",
+                "model_name": "gemini-1.5-flash",
+                "user_id": "user123",
+                "session_id": "session123",
+                "prompt_tokens": 100,
+                "completion_tokens": 50,
+                "total_tokens": 150,
+                "input_cost": 0.001,
+                "output_cost": 0.0005,
+                "total_cost": 0.0015,
+                "endpoint": "/api/v1/chat",
+                "response_time": 1000,
+                "success": True,
+                "error_message": None,
+                "feature": "chat",
+                "user_type": "student"
+            }
+        }
+
+class AICallUpdate(BaseModel):
+    completion_tokens: Optional[int] = None
+    total_tokens: Optional[int] = None
+    input_cost: Optional[float] = None
+    output_cost: Optional[float] = None
+    total_cost: Optional[float] = None
+    response_time: Optional[int] = None
+    success: Optional[bool] = None
+    error_message: Optional[str] = None
+    
+    class Config:
+        schema_extra = {
+            "example": {
+                "completion_tokens": 50,
+                "total_tokens": 150,
+                "response_time": 1000,
+                "success": True,
+                "error_message": None
+            }
+        }
+
+class AICallCreate(BaseModel):
+    call_id: str
+    provider: str
+    model_name: str
+    prompt_tokens: Optional[int] = None
+    user_id: Optional[str] = None
+    session_id: Optional[str] = None
+    feature: Optional[str] = None
+    user_type: Optional[str] = None
+    endpoint: Optional[str] = None
+    success: Optional[bool] = None
+
+    class Config:
+        schema_extra = {
+            "example": {
+                "call_id": "1234567890",
+                "provider": "gemini",
+                "model_name": "gemini-1.5-flash",
+                "prompt_tokens": 100,
+                "user_id": "user123",
+                "feature": "chat",
+                "user_type": "student"
+            }
+        }
+
+class AIStat(BaseModel):
+    total_calls: int
+    total_tokens: int
+    total_cost: float
+    average_response_time: Optional[float]
+    by_model: dict
+    by_user_type: dict
+    by_feature: dict
+    by_provider: dict
+
+class Alert(BaseModel):
+    id: str = Field(alias="_id")
+    type: str
+    message: str
+    level: str
+    timestamp: datetime
+    metadata: dict
+
+class AIConfig(BaseModel):
+    daily_budget: float
+    weekly_budget: float
+    monthly_budget: float
+    per_user_daily_budget: float
+    alert_thresholds: List[int]
+    enable_detailed_logging: bool
+    admins: List[str]
+    default_provider: str
+    
+    class Config:
+        schema_extra = {
+            "example": {
+                "daily_budget": 50.0,
+                "weekly_budget": 300.0,
+                "monthly_budget": 1000.0,
+                "per_user_daily_budget": 5.0,
+                "alert_thresholds": [50, 80, 95],
+                "enable_detailed_logging": True,
+                "admins": ["admin@sapiens.com"],
+                "default_provider": "gemini"
+            }
         } 

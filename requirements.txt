@@ -21,3 +21,4 @@ chardet==5.2.0
 charset-normalizer==3.3.2
 idna==3.6
 soupsieve==2.5
+pydantic
