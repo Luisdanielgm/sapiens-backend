@@ -125,12 +125,13 @@ class AIMonitoringService(VerificationBaseService):
     
     def update_call_secure(self, call_id: str, update_data: Dict, is_admin: bool = False) -> Tuple[bool, str]:
         """
-        Actualiza una llamada existente con los resultados aplicando controles de seguridad.
+        Actualiza una llamada existente con los resultados.
+        Los costos se calculan automáticamente en el servidor para TODOS los usuarios.
         
         Args:
             call_id: ID de la llamada
-            update_data: Datos a actualizar
-            is_admin: Si el usuario es administrador (puede actualizar costos manualmente)
+            update_data: Datos a actualizar (NO incluir campos de costo)
+            is_admin: Si el usuario es administrador (parámetro mantenido para compatibilidad)
             
         Returns:
             Tuple[bool, str]: (success, message/error)
@@ -149,28 +150,16 @@ class AIMonitoringService(VerificationBaseService):
             # Campos seguros que cualquier usuario puede actualizar
             safe_fields = ["completion_tokens", "response_time", "success", "total_tokens", "error_message"]
             
-            # Campos de costo sensibles (solo admins)
-            cost_fields = ["input_cost", "output_cost", "total_cost"]
-            
-            # Procesar campos seguros
+            # Procesar solo campos seguros (sin campos de costo)
             for field in safe_fields:
                 if field in update_data:
                     update_fields[field] = update_data[field]
             
-            # Procesar campos de costo según permisos
-            if is_admin:
-                # Administradores pueden actualizar costos manualmente
-                for field in cost_fields:
-                    if field in update_data:
-                        update_fields[field] = update_data[field]
-                        
-                logging.info(f"Admin actualizando llamada {call_id} con override manual de costos")
-            else:
-                # Usuarios normales: calcular costos automáticamente del lado del servidor
-                calculated_costs = self._calculate_costs_server_side(call, update_data)
-                update_fields.update(calculated_costs)
-                
-                logging.info(f"Usuario normal actualizando llamada {call_id} con costos calculados automáticamente")
+            # SIEMPRE calcular costos automáticamente del lado del servidor
+            calculated_costs = self._calculate_costs_server_side(call, update_data)
+            update_fields.update(calculated_costs)
+            
+            logging.info(f"Llamada {call_id} actualizada con costos calculados automáticamente")
             
             # Actualizar en la base de datos
             result = self.collection.update_one(
@@ -668,22 +657,15 @@ class AIMonitoringService(VerificationBaseService):
         Returns:
             float: Costo estimado
         """
-        # Precios estimados por 1K tokens (estos deberían estar en configuración)
-        prices = {
-            "gemini": {
-                "gemini-1.5-flash": {"input": 0.000075, "output": 0.0003},
-                "gemini-1.5-flash-002": {"input": 0.000075, "output": 0.0003},
-                "gemini-2.0-flash": {"input": 0.00015, "output": 0.0006}
-            },
-            "openai": {
-                "gpt-4": {"input": 0.03, "output": 0.06},
-                "gpt-4-turbo": {"input": 0.01, "output": 0.03},
-                "gpt-3.5-turbo": {"input": 0.0015, "output": 0.002}
-            }
-        }
+        # Obtenemos los precios desde la fuente única de verdad
+        prices = self._get_model_prices()
         
         provider_prices = prices.get(provider, {})
-        model_prices = provider_prices.get(model_name, {"input": 0.001, "output": 0.002})
+        model_prices = provider_prices.get(model_name)
+
+        if not model_prices:
+            logging.warning(f"No se encontraron precios para el modelo '{model_name}' del proveedor '{provider}'. Usando precios por defecto.")
+            model_prices = {"input": 0.001, "output": 0.002}
         
         # Estimar costo de entrada + salida estimada (asumimos 1.5x los tokens de entrada)
         input_cost = (prompt_tokens / 1000) * model_prices["input"]

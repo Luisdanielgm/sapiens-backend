@@ -128,26 +128,22 @@ def update_call(call_id):
     """
     Actualiza una llamada existente con los resultados.
     Cualquier usuario autenticado puede actualizar sus llamadas.
+    Los costos se calculan automáticamente en el servidor.
     
-    SEGURIDAD:
-    - Usuarios normales: Solo pueden actualizar tokens, success, response_time, error_message
-    - Administradores: Pueden actualizar campos de costo manualmente (override)
-    - Los costos se calculan automáticamente del lado del servidor para usuarios normales
+    IMPORTANTE: NO enviar campos de costo - se calculan automáticamente.
     
     Args:
         call_id: ID de la llamada
         
-    Body para usuarios normales:
+    Body:
         completion_tokens: Tokens de salida (opcional)
         response_time: Tiempo de respuesta en ms (opcional)
         success: Si la llamada fue exitosa (opcional)
         total_tokens: Total de tokens (opcional)
         error_message: Mensaje de error si falló (opcional)
         
-    Body adicional para administradores:
-        input_cost: Costo por tokens de entrada (opcional, override manual)
-        output_cost: Costo por tokens de salida (opcional, override manual)
-        total_cost: Costo total (opcional, override manual)
+    NOTA: Los campos input_cost, output_cost, total_cost se calculan automáticamente
+    y NO deben ser enviados por el cliente.
     """
     try:
         data = request.get_json() or {}
@@ -156,28 +152,10 @@ def update_call(call_id):
         user_id = getattr(request, 'user_id', None)
         user_role = getattr(request, 'user_role', None)
         
-        # Verificar si es administrador
+        # Verificar si es administrador (mantenido para compatibilidad)
         is_admin = user_role == ROLES["ADMIN"]
         
-        # Definir campos de costo sensibles
-        cost_fields = ['input_cost', 'output_cost', 'total_cost']
-        
-        # Verificar si usuario no-admin intenta actualizar campos de costo
-        if not is_admin:
-            cost_fields_in_request = [field for field in cost_fields if field in data]
-            if cost_fields_in_request:
-                return APIRoute.error(
-                    ErrorCodes.PERMISSION_DENIED,
-                    f"Solo administradores pueden actualizar campos de costo: {', '.join(cost_fields_in_request)}",
-                    details={
-                        "restricted_fields": cost_fields_in_request,
-                        "user_role": user_role,
-                        "allowed_fields": ["completion_tokens", "response_time", "success", "total_tokens", "error_message"]
-                    },
-                    status_code=403
-                )
-        
-        # Procesar actualización con controles de seguridad
+        # Procesar actualización - los costos se calculan automáticamente
         success, result = ai_monitoring_service.update_call_secure(call_id, data, is_admin)
         
         if success:
@@ -185,8 +163,7 @@ def update_call(call_id):
                 message=result,
                 data={
                     "call_id": call_id,
-                    "updated_by_admin": is_admin,
-                    "auto_calculated_costs": not is_admin
+                    "costs_calculated_automatically": True
                 }
             )
         else:
