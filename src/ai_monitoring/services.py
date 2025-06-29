@@ -6,7 +6,7 @@ import logging
 from src.shared.database import get_db
 from src.shared.standardization import VerificationBaseService, ErrorCodes
 from src.shared.exceptions import AppException
-from .models import AIApiCall, AIMonitoringConfig, AIMonitoringAlert
+from .models import AICall, AIMonitoringConfig, AIMonitoringAlert, AIApiCall
 
 class AIMonitoringService(VerificationBaseService):
     """
@@ -85,21 +85,24 @@ class AIMonitoringService(VerificationBaseService):
                     return False, "Límite diario del usuario excedido"
             
             # Crear llamada con success=False inicialmente
-            ai_call = AIApiCall(
-                call_id=call_data["call_id"],
-                provider=call_data["provider"],
-                model_name=call_data["model_name"],
-                prompt_tokens=call_data["prompt_tokens"],
-                user_id=call_data.get("user_id"),
-                session_id=call_data.get("session_id"),
-                feature=call_data.get("feature"),
-                user_type=call_data.get("user_type"),
-                origin=call_data.get("origin"),
-                endpoint=call_data.get("endpoint"),
-                success=False  # Inicialmente False hasta que se complete
-            )
+            ai_call_data = {
+                "call_id": call_data["call_id"],
+                "provider": call_data["provider"],
+                "model_name": call_data["model_name"],
+                "prompt_tokens": call_data.get("prompt_tokens"),
+                "user_id": call_data.get("user_id"),
+                "session_id": call_data.get("session_id"),
+                "feature": call_data.get("feature"),
+                "user_type": call_data.get("user_type"),
+                "origin": call_data.get("origin"),
+                "endpoint": call_data.get("endpoint"),
+                "success": None  # Usar None para estado pendiente
+            }
             
-            result = self.collection.insert_one(ai_call.to_dict())
+            # Usar el modelo Pydantic para validar y crear el diccionario
+            ai_call = AICall(**ai_call_data)
+            
+            result = self.collection.insert_one(ai_call.model_dump())
             
             logging.info(f"Llamada registrada: {call_data['call_id']}")
             return True, call_data["call_id"]
