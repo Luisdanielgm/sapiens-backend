@@ -12,8 +12,7 @@ from src.shared.database import get_db
 from src.classes.services import ClassService
 from src.study_plans.models import (
     StudyPlanPerSubject, StudyPlanAssignment, Module, Topic, Evaluation, 
-    EvaluationResult, EvaluationResource, TopicResource, 
-    TopicContent, ContentTypeDefinition
+    EvaluationResult, EvaluationResource, TopicContent, ContentTypeDefinition
 )
 from src.resources.services import ResourceService, ResourceFolderService
 from src.topic_resources.services import TopicResourceService
