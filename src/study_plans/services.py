@@ -12,10 +12,10 @@ from src.shared.database import get_db
 from src.classes.services import ClassService
 from src.study_plans.models import (
     StudyPlanPerSubject, StudyPlanAssignment, Module, Topic, Evaluation, 
-    EvaluationResult, EvaluationResource, TopicContent, ContentTypeDefinition
+    EvaluationResource, TopicContent, ContentTypeDefinition, ContentTypes
 )
 from src.resources.services import ResourceService, ResourceFolderService
-from src.topic_resources.services import TopicResourceService
+from src.content.services import ContentResultService, ContentService
 from src.shared.logging import log_error
 
 class StudyPlanService(VerificationBaseService):
@@ -688,6 +688,12 @@ class ModuleService(VerificationBaseService):
             topic_service = TopicService()
             topics = topic_service.get_module_topics(module_id)
             for topic in topics:
+                # Al eliminar un tema, también se deben eliminar sus contenidos asociados
+                contents = get_db().topic_contents.find({"topic_id": ObjectId(topic['_id'])})
+                content_ids_to_delete = [c['_id'] for c in contents]
+                if content_ids_to_delete:
+                    get_db().topic_contents.delete_many({"_id": {"$in": content_ids_to_delete}})
+                
                 topic_service.delete_topic(topic['_id'])
             
             # Eliminar el módulo
@@ -735,6 +741,10 @@ class ModuleService(VerificationBaseService):
         # Obtener temas del módulo
         topics = list(db.topics.find({"module_id": ObjectId(module_id)}))
         total_topics = len(topics)
+        # Conteo de temas publicados/no publicados
+        published_topics = list(db.topics.find({"module_id": ObjectId(module_id), "published": True}))
+        published_topics_count = len(published_topics)
+        unpublished_topics_count = total_topics - published_topics_count
         missing_theory = [t for t in topics if not t.get("theory_content")]
         missing_resources = [t for t in topics if not t.get("resources") or len(t.get("resources")) == 0]
         # Contar evaluaciones asociadas
@@ -763,6 +773,8 @@ class ModuleService(VerificationBaseService):
         checks = {
             "ready_for_virtualization": module.get("ready_for_virtualization", False),
             "total_topics": total_topics,
+            "published_topics_count": published_topics_count,
+            "unpublished_topics_count": unpublished_topics_count,
             "missing_theory_count": len(missing_theory),
             "missing_resources_count": len(missing_resources),
             "evaluations_count": eval_count,
@@ -771,6 +783,9 @@ class ModuleService(VerificationBaseService):
         suggestions = []
         if not checks["ready_for_virtualization"]:
             suggestions.append("Habilitar la virtualización del módulo")
+        # Sugerencia de publicar temas restantes
+        if unpublished_topics_count > 0:
+            suggestions.append(f"{unpublished_topics_count} temas sin publicar")
         if total_topics == 0:
             suggestions.append("Agregar al menos un tema al módulo")
         else:
@@ -782,6 +797,7 @@ class ModuleService(VerificationBaseService):
             suggestions.append("Agregar al menos una evaluación al módulo")
         ready = all([
             checks["ready_for_virtualization"],
+            checks["published_topics_count"] > 0,
             checks["missing_theory_count"] == 0,
             checks["missing_resources_count"] == 0,
             eval_count > 0
@@ -799,6 +815,15 @@ class ModuleService(VerificationBaseService):
         update_data = {}
         if "ready_for_virtualization" in settings:
             update_data["ready_for_virtualization"] = bool(settings["ready_for_virtualization"])
+
+            # Si se activa, detectar cambios para posible sincronización
+            if settings["ready_for_virtualization"]:
+                from src.virtual.services import ContentChangeDetector
+                change_detector = ContentChangeDetector()
+                change_info = change_detector.detect_changes(module_id)
+                if change_info.get("has_changes"):
+                    change_detector.schedule_incremental_updates(module_id, change_info)
+        
         if "virtualization_requirements" in settings:
             if not isinstance(settings["virtualization_requirements"], dict):
                 raise AppException("Requisitos inválidos", AppException.BAD_REQUEST)
@@ -812,8 +837,8 @@ class ModuleService(VerificationBaseService):
 class TopicService(VerificationBaseService):
     def __init__(self):
         super().__init__(collection_name="topics")
-        # Usar el nuevo servicio de topic_resources
-        self.topic_resource_service = TopicResourceService()
+        # El servicio de vinculación de recursos de temas ya no es necesario
+        # self.topic_resource_service = TopicResourceService()
 
     def create_topic(self, topic_data: dict) -> Tuple[bool, str]:
         try:
@@ -823,172 +848,56 @@ class TopicService(VerificationBaseService):
             if not module:
                 return False, "Módulo no encontrado"
             
-            # Extraer recursos externos si existen
+            # Extraer recursos externos si existen para procesarlos después
             external_resources = topic_data.pop('resources', [])
             
-            # Crear una copia con los datos necesarios para el constructor
-            topic_dict = {
-                "module_id": ObjectId(module_id),
-                "name": topic_data.get("name"),
-                "difficulty": topic_data.get("difficulty"),
-                "theory_content": topic_data.get("theory_content", "")
-            }
+            # Crear el tema con los datos restantes
+            topic = Topic(
+                module_id=module_id,
+                name=topic_data.get("name"),
+                difficulty=topic_data.get("difficulty"),
+                date_start=datetime.fromisoformat(topic_data.get('date_start')) if isinstance(topic_data.get('date_start'), str) else topic_data.get('date_start'),
+                date_end=datetime.fromisoformat(topic_data.get('date_end')) if isinstance(topic_data.get('date_end'), str) else topic_data.get('date_end'),
+                theory_content=topic_data.get("theory_content", ""),
+                published=topic_data.get("published", False)
+            )
             
-            # Agregar parseo de date_start y date_end
-            date_start = topic_data.get('date_start')
-            if isinstance(date_start, str):
-                date_start = datetime.fromisoformat(date_start)
-            date_end = topic_data.get('date_end')
-            if isinstance(date_end, str):
-                date_end = datetime.fromisoformat(date_end)
-            topic_dict['date_start'] = date_start
-            topic_dict['date_end'] = date_end
-            
-            # Crear el tema con parámetros exactos
-            topic = Topic(**topic_dict)
-            
-            # Obtener el diccionario y agregar timestamps
             topic_to_insert = topic.to_dict()
-            topic_to_insert['created_at'] = datetime.now()
             topic_to_insert['updated_at'] = datetime.now()
             
             result = self.collection.insert_one(topic_to_insert)
             topic_id = str(result.inserted_id)
             
-            # Procesar recursos externos si existen
-            if external_resources and len(external_resources) > 0:
-                # Primero necesitamos obtener el ID del creador (profesor) del plan de estudios
-                # El módulo pertenece a un plan de estudios
+            # Procesar recursos externos como TopicContent
+            if external_resources:
+                topic_content_service = TopicContentService()
+                
+                # Obtener el creator_id del plan de estudio para asignarlo a los contenidos
+                creator_id = None
                 study_plan = get_db().study_plans_per_subject.find_one({"_id": module.get("study_plan_id")})
                 if study_plan:
-                    creator_id = study_plan.get("author_id")
-                    if creator_id:
-                        # Buscar el email del creador para obtener su nombre de usuario
-                        creator = get_db().users.find_one({"_id": ObjectId(creator_id)})
-                        if creator and "email" in creator:
-                            # Extraer el nombre de usuario del email (parte antes del @)
-                            email = creator.get("email")
-                            user_name = email.split('@')[0] if email else 'user'
-                            
-                            # Inicializar servicios
-                            folder_service = ResourceFolderService()
-                            
-                            # 1. Verificar si existe una carpeta raíz con el nombre del usuario
-                            root_folder = None
-                            folders = get_db().resource_folders.find({
-                                "created_by": ObjectId(creator_id),
-                                "name": user_name,
-                                "parent_id": None
-                            })
-                            
-                            folders_list = list(folders)
-                            if folders_list:
-                                root_folder = folders_list[0]
-                            
-                            # Si no existe la carpeta raíz, crearla
-                            if not root_folder:
-                                root_folder_data = {
-                                    "name": user_name,
-                                    "created_by": str(creator_id),
-                                    "description": "Carpeta personal del usuario"
-                                }
-                                success, root_folder_id = folder_service.create_folder(root_folder_data)
-                                if not success:
-                                    logging.error(f"Error al crear carpeta raíz del usuario: {root_folder_id}")
-                                    root_folder_id = None
-                            else:
-                                root_folder_id = str(root_folder["_id"])
-                            
-                            # 2. Ahora buscar/crear la subcarpeta "Recursos de Clases"
-                            class_resources_folder = None
-                            
-                            if root_folder_id:
-                                # Buscar subcarpeta "Recursos de Clases" dentro de la carpeta raíz
-                                folders = get_db().resource_folders.find({
-                                    "created_by": ObjectId(creator_id),
-                                    "name": "Recursos de Clases",
-                                    "parent_id": ObjectId(root_folder_id)
-                                })
-                                
-                                folders_list = list(folders)
-                                if folders_list:
-                                    class_resources_folder = folders_list[0]
-                            
-                            # Si no existe la carpeta de recursos, crearla como subcarpeta
-                            if not class_resources_folder and root_folder_id:
-                                folder_data = {
-                                    "name": "Recursos de Clases",
-                                    "created_by": str(creator_id),
-                                    "description": "Recursos utilizados en clases y temas",
-                                    "parent_id": root_folder_id
-                                }
-                                success, folder_id = folder_service.create_folder(folder_data)
-                                if success:
-                                    class_resources_folder_id = folder_id
-                                else:
-                                    logging.error(f"Error al crear carpeta de recursos: {folder_id}")
-                                    class_resources_folder_id = None
-                            elif class_resources_folder:
-                                class_resources_folder_id = str(class_resources_folder["_id"])
-                            else:
-                                # Si no hay carpeta raíz, crear la carpeta de recursos directamente
-                                folder_data = {
-                                    "name": "Recursos de Clases",
-                                    "created_by": str(creator_id),
-                                    "description": "Recursos utilizados en clases y temas"
-                                }
-                                success, folder_id = folder_service.create_folder(folder_data)
-                                if success:
-                                    class_resources_folder_id = folder_id
-                                else:
-                                    logging.error(f"Error al crear carpeta de recursos: {folder_id}")
-                                    class_resources_folder_id = None
-                            
-                            # Crear recursos y vincularlos al tema
-                            resource_service = ResourceService()
-                            topic_resource_service = TopicResourceService()
-                            
-                            for resource_data in external_resources:
-                                # Preparar datos del recurso (asegurarse de que created_by esté presente)
-                                resource_to_create = {
-                                    "name": resource_data.get("title", "Recurso sin título"),
-                                    "type": resource_data.get("resource_type", "link"),
-                                    "url": resource_data.get("url", ""),
-                                    "description": resource_data.get("description", ""),
-                                    "tags": resource_data.get("tags", []),
-                                    "created_by": str(creator_id) # Esencial para get_or_create
-                                }
-                                
-                                # Añadir la carpeta por defecto si existe
-                                if class_resources_folder_id:
-                                    resource_to_create["folder_id"] = class_resources_folder_id
-                                
-                                # Obtener o crear el recurso externo
-                                success, resource_id_or_msg, existed = resource_service.get_or_create_external_resource(resource_to_create)
-                                
-                                if success:
-                                    resource_id = resource_id_or_msg
-                                    if existed:
-                                        logging.info(f"Recurso externo existente encontrado (URL: {resource_data.get('url')}), ID: {resource_id}")
-                                    else:
-                                        logging.info(f"Nuevo recurso externo creado (URL: {resource_data.get('url')}), ID: {resource_id}")
-                                        
-                                    # Vincular recurso (nuevo o existente) al tema
-                                    link_success, link_result = topic_resource_service.link_resource_to_topic(
-                                        topic_id=topic_id,
-                                        resource_id=resource_id,
-                                        relevance_score=resource_data.get("relevance_score", 0.7),
-                                        recommended_for=resource_data.get("recommended_for", []),
-                                        usage_context=resource_data.get("usage_context", "primary"),
-                                        content_types=resource_data.get("content_types", ["multimedia"]),
-                                        created_by=str(creator_id)
-                                    )
-                                    if not link_success:
-                                        logging.error(f"Error al vincular recurso {resource_id} al tema {topic_id}: {link_result}")
-                                else:
-                                    # Falló la obtención o creación del recurso
-                                    logging.error(f"Error al obtener/crear recurso externo (URL: {resource_data.get('url')}): {resource_id_or_msg}")
-            
+                    creator_id = str(study_plan.get("author_id"))
+
+                for resource in external_resources:
+                    content_type = resource.get("resource_type", "link").lower()
+                    if content_type not in [ContentTypes.LINK, ContentTypes.DOCUMENTS, ContentTypes.IMAGE]:
+                        content_type = ContentTypes.LINK # Default a link
+
+                    content_data = {
+                        "topic_id": topic_id,
+                        "content_type": content_type,
+                        "title": resource.get("title", "Recurso"),
+                        "description": resource.get("description", ""),
+                        "content_data": {"url": resource.get("url", "")},
+                        "tags": resource.get("tags", []),
+                        "status": "active",
+                        "creator_id": creator_id
+                    }
+                    try:
+                        topic_content_service.create_content(content_data)
+                    except Exception as e_content:
+                        logging.error(f"Error creando TopicContent para el recurso '{resource.get('title')}': {e_content}")
+
             return True, topic_id
         except Exception as e:
             logging.error(f"Error al crear topic: {str(e)}")
@@ -1028,6 +937,18 @@ class TopicService(VerificationBaseService):
             )
             
             if result.modified_count > 0:
+                # Disparar detección de cambios y encolar actualizaciones
+                module_id = str(topic.get("module_id"))
+                if module_id:
+                    try:
+                        change_detector = ContentChangeDetector()
+                        change_info = change_detector.detect_changes(module_id)
+                        if change_info.get("has_changes"):
+                            change_detector.schedule_incremental_updates(module_id, change_info)
+                            logging.info(f"Cambios detectados en el módulo {module_id} tras actualizar el tema {topic_id}. Actualizaciones encoladas.")
+                    except Exception as e:
+                        logging.error(f"Error en el proceso de detección de cambios para el módulo {module_id}: {e}")
+
                 return True, "Tema actualizado exitosamente"
             return False, "No se pudo actualizar el tema"
         except Exception as e:
@@ -1047,45 +968,19 @@ class TopicService(VerificationBaseService):
             if not topic:
                 return False, "Tema no encontrado"
 
-            # Obtener todos los resource_id vinculados a este tema
-            topic_resource_links = list(get_db().topic_resources.find({"_id": topic_id_obj}))
-            resource_ids_to_check = [link["resource_id"] for link in topic_resource_links]
-
-            # Eliminar las vinculaciones de este tema
-            deleted_links_count = get_db().topic_resources.delete_many({"_id": topic_id_obj}).deleted_count
-            logging.info(f"Eliminadas {deleted_links_count} vinculaciones para el tema {topic_id}")
-
-            # Verificar y eliminar recursos huérfanos
-            resources_deleted_count = 0
-            resource_service = ResourceService()
-            for resource_id in resource_ids_to_check:
-                # Contar cuántas *otras* vinculaciones activas tiene este recurso
-                other_links_count = get_db().topic_resources.count_documents({
-                    "resource_id": resource_id,
-                    "$ne": topic_id_obj, # Excluir el topic actual
-                    "status": "active" # Asegurarse de contar solo links activos
-                })
-
-                if other_links_count == 0:
-                    # Si no hay otras vinculaciones, eliminar el recurso
-                    logging.info(f"El recurso {resource_id} quedó huérfano tras eliminar el tema {topic_id}. Procediendo a eliminar el recurso.")
-                    success, msg = resource_service.delete_resource(str(resource_id))
-                    if success:
-                        resources_deleted_count += 1
-                    else:
-                        logging.error(f"Error al intentar eliminar el recurso huérfano {resource_id}: {msg}")
+            # Eliminar todos los TopicContent asociados a este tema
+            content_result = get_db().topic_contents.delete_many({"topic_id": topic_id_obj})
+            logging.info(f"Eliminados {content_result.deleted_count} contenidos asociados al tema {topic_id}")
             
             # Finalmente, eliminar el tema en sí
             result = self.collection.delete_one({"_id": topic_id_obj})
             
             if result.deleted_count > 0:
-                msg = f"Tema eliminado exitosamente. {deleted_links_count} vinculaciones eliminadas."
-                if resources_deleted_count > 0:
-                    msg += f" {resources_deleted_count} recursos huérfanos eliminados."
+                msg = f"Tema y {content_result.deleted_count} contenidos asociados eliminados exitosamente."
                 return True, msg
             
             # Si llegamos aquí, el tema no se eliminó por alguna razón
-            return False, "No se pudo eliminar el tema después de procesar vinculaciones"
+            return False, "No se pudo eliminar el tema después de procesar sus contenidos"
 
         except Exception as e:
             logging.error(f"Error al eliminar el tema {topic_id}: {str(e)}")
@@ -1368,115 +1263,129 @@ class EvaluationService(VerificationBaseService):
             return None
     
     def record_result(self, result_data: dict) -> Tuple[bool, str]:
+        """
+        Registra la calificación de una evaluación.
+        Utiliza el servicio unificado de ContentResult.
+        """
         try:
-            # Validar que la evaluación existe
-            evaluation_id = result_data.get('evaluation_id')
-            evaluation = self.collection.find_one({"_id": ObjectId(evaluation_id)})
-            if not evaluation:
+            # Validaciones
+            evaluation_id = result_data.get("evaluation_id")
+            student_id = result_data.get("student_id")
+            graded_by = result_data.get("graded_by")
+
+            if not self.check_evaluation_exists(evaluation_id):
                 return False, "Evaluación no encontrada"
-            
-            # Validar que el estudiante existe
-            student_id = result_data.get('student_id')
-            student = get_db().users.find_one({"_id": ObjectId(student_id)})
-            if not student:
+            if not self.check_student_exists(student_id):
                 return False, "Estudiante no encontrado"
+            if not self.check_teacher_exists(graded_by):
+                return False, "Evaluador no encontrado"
+
+            # Preparar datos para ContentResult
+            unified_result_data = {
+                "evaluation_id": evaluation_id,
+                "student_id": student_id,
+                "graded_by": graded_by,
+                "score": result_data.get("score"),
+                "feedback": result_data.get("feedback"),
+                "session_type": "assessment"
+            }
             
-            # Verificar si ya existe un resultado para esta evaluación y estudiante
-            existing_result = get_db().evaluation_results.find_one({
-                "evaluation_id": ObjectId(evaluation_id),
-                "student_id": ObjectId(student_id)
-            })
-            
-            result_data['evaluation_id'] = ObjectId(evaluation_id)
-            result_data['student_id'] = ObjectId(student_id)
-            result_data['recorded_at'] = datetime.now()
-            
-            evaluation_result = EvaluationResult(**result_data)
-            
-            if existing_result:
-                # Actualizar resultado existente
-                result = get_db().evaluation_results.update_one(
-                    {"_id": existing_result["_id"]},
-                    {"$set": evaluation_result.to_dict()}
-                )
-                return True, str(existing_result["_id"])
-            else:
-                # Crear nuevo resultado
-                result = get_db().evaluation_results.insert_one(evaluation_result.to_dict())
-                return True, str(result.inserted_id)
+            # Usar el servicio unificado
+            content_result_service = ContentResultService()
+            success, result_id_or_msg = content_result_service.record_result(unified_result_data)
+
+            return success, result_id_or_msg
+
         except Exception as e:
+            logging.error(f"Error registrando resultado de evaluación: {str(e)}")
             return False, str(e)
-    
+
     def update_result(self, result_id: str, update_data: dict) -> Tuple[bool, str]:
+        """Actualiza un resultado de evaluación existente en la colección de ContentResult."""
         try:
-            # Actualizar timestamp
-            update_data['recorded_at'] = datetime.now()
+            # El result_id ahora corresponde a un _id en content_results
+            content_result_service = ContentResultService()
             
-            # Actualizar el resultado
-            result = get_db().evaluation_results.update_one(
+            # Asegurarse de que el update_data no cambie el student_id o evaluation_id
+            update_data.pop("student_id", None)
+            update_data.pop("evaluation_id", None)
+            
+            result = content_result_service.collection.update_one(
                 {"_id": ObjectId(result_id)},
                 {"$set": update_data}
             )
-            
+
             if result.modified_count > 0:
                 return True, "Resultado actualizado exitosamente"
-            return False, "No se pudo actualizar el resultado"
+            
+            return False, "No se encontró el resultado o no hubo cambios"
         except Exception as e:
             return False, str(e)
-    
+
     def delete_result(self, result_id: str) -> Tuple[bool, str]:
+        """Elimina un resultado de la colección de ContentResult."""
         try:
-            # Eliminar el resultado
-            result = get_db().evaluation_results.delete_one({"_id": ObjectId(result_id)})
-            
+            content_result_service = ContentResultService()
+            result = content_result_service.collection.delete_one({"_id": ObjectId(result_id)})
             if result.deleted_count > 0:
                 return True, "Resultado eliminado exitosamente"
-            return False, "No se pudo eliminar el resultado"
+            return False, "No se encontró el resultado"
         except Exception as e:
             return False, str(e)
-    
-    def get_student_results(self, student_id: str) -> List[Dict]:
-        try:
-            # Obtener resultados del estudiante
-            results = list(get_db().evaluation_results.find({"student_id": ObjectId(student_id)}))
-            
-            # Enriquecer con datos de evaluaciones
-            enriched_results = []
-            for result in results:
-                # Convertir ObjectId a string
-                result['_id'] = str(result['_id'])
-                result['evaluation_id'] = str(result['evaluation_id'])
-                result['student_id'] = str(result['student_id'])
-                
-                # Obtener detalles de la evaluación
-                evaluation = self.collection.find_one({"_id": ObjectId(result['evaluation_id'])})
-                if evaluation:
-                    result['evaluation'] = {
-                        "title": evaluation.get("title", ""),
-                        "description": evaluation.get("description", ""),
-                        "weight": evaluation.get("weight", 0),
-                        "module_id": str(evaluation.get("module_id", ""))
-                    }
-                    
-                    # Obtener detalles del módulo
-                    module = get_db().modules.find_one({"_id": evaluation.get("module_id")})
-                    if module:
-                        result['module'] = {
-                            "name": module.get("name", ""),
-                            "study_plan_id": str(module.get("study_plan_id", ""))
-                        }
-                
-                enriched_results.append(result)
-            
-            return enriched_results
-        except Exception as e:
-            return []
 
-# Nuevos servicios para gestión de contenido
+    def get_student_results(self, student_id: str, module_id: str = None) -> List[Dict]:
+        """
+        Obtiene los resultados de las evaluaciones de un estudiante para un módulo.
+        Utiliza el servicio unificado de ContentResult.
+        """
+        try:
+            # Primero, obtener todas las evaluaciones del módulo
+            if not module_id:
+                raise ValueError("Se requiere un module_id para buscar resultados de evaluación.")
+
+            evaluations = list(self.collection.find({"module_id": ObjectId(module_id)}))
+            evaluation_ids = [str(e["_id"]) for e in evaluations]
+
+            if not evaluation_ids:
+                return []
+
+            # Usar ContentResultService para obtener los resultados
+            content_result_service = ContentResultService()
+            all_results = []
+            
+            # Buscar un resultado para cada evaluación
+            for eval_id in evaluation_ids:
+                results_for_eval = content_result_service.get_student_results(
+                    student_id=student_id,
+                    evaluation_id=eval_id
+                )
+                all_results.extend(results_for_eval)
+
+            return all_results
+        except Exception as e:
+            logging.error(f"Error obteniendo resultados del estudiante: {str(e)}")
+            return []
+    
+    def check_student_exists(self, student_id: str) -> bool:
+        """Verifica si un estudiante existe."""
+        try:
+            student = get_db().users.find_one({"_id": ObjectId(student_id), "role": "STUDENT"})
+            return student is not None
+        except Exception:
+            return False
+
+    def check_teacher_exists(self, teacher_id: str) -> bool:
+        """Verifica si un profesor existe."""
+        try:
+            teacher = get_db().users.find_one({"_id": ObjectId(teacher_id)})
+            return teacher is not None
+        except Exception:
+            return False
+
 
 class ContentTypeService(VerificationBaseService):
     """
-    Servicio para gestionar los tipos de contenido disponibles en el sistema.
+    Servicio para gestionar los tipos de contenido del sistema.
     """
     def __init__(self):
         super().__init__(collection_name="content_types")
@@ -1786,25 +1695,36 @@ class TopicContentService(VerificationBaseService):
             Tupla con estado y mensaje
         """
         try:
-            # Verificar que el contenido existe
             content = self.collection.find_one({"_id": ObjectId(content_id)})
             if not content:
                 return False, "Contenido no encontrado"
-                
-            # Actualizar timestamp
-            update_data["updated_at"] = datetime.now()
+
+            update_data['updated_at'] = datetime.now()
             
-            # Actualizar el contenido
             result = self.collection.update_one(
                 {"_id": ObjectId(content_id)},
                 {"$set": update_data}
             )
             
             if result.modified_count > 0:
+                # Disparar detección de cambios y encolar actualizaciones
+                topic_id = str(content.get("topic_id"))
+                topic = get_db().topics.find_one({"_id": ObjectId(topic_id)})
+                if topic:
+                    module_id = str(topic.get("module_id"))
+                    try:
+                        change_detector = ContentChangeDetector()
+                        change_info = change_detector.detect_changes(module_id)
+                        if change_info.get("has_changes"):
+                            change_detector.schedule_incremental_updates(module_id, change_info)
+                            logging.info(f"Cambios detectados en el módulo {module_id} tras actualizar el contenido {content_id}. Actualizaciones encoladas.")
+                    except Exception as e:
+                        logging.error(f"Error en el proceso de detección de cambios para el módulo {module_id}: {e}")
+
                 return True, "Contenido actualizado exitosamente"
-            return False, "No se realizaron cambios"
+            else:
+                return False, "No se encontró el contenido o no hubo cambios"
         except Exception as e:
-            logging.error(f"Error al actualizar contenido: {str(e)}")
             return False, str(e)
             
     def delete_content(self, content_id: str) -> Tuple[bool, str]:

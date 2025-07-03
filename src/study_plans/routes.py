@@ -10,8 +10,7 @@ from .services import (
     TopicService,
     ContentTypeService,
     LearningMethodologyService,
-    TopicContentService,
-    TopicResourceService,
+    ContentService,
     EvaluationResourceService
 )
 from src.resources.services import ResourceService, ResourceFolderService
@@ -36,9 +35,8 @@ evaluation_service = EvaluationService()
 topic_service = TopicService()
 content_type_service = ContentTypeService()
 methodology_service = LearningMethodologyService()
-topic_content_service = TopicContentService()
+topic_content_service = ContentService()
 resource_service = ResourceService()
-topic_resource_service = TopicResourceService()
 evaluation_resource_service = EvaluationResourceService()
 folder_service = ResourceFolderService()
 
@@ -402,6 +400,36 @@ def delete_topic(topic_id):
             status_code=500
         )
 
+@study_plan_bp.route('/topic/<topic_id>/publish', methods=['PUT'])
+@APIRoute.standard(auth_required_flag=True, roles=[ROLES["TEACHER"]])
+def toggle_topic_publication(topic_id):
+    """Cambia el estado de publicación de un tema"""
+    try:
+        data = request.get_json()
+        published = data.get('published', True)  # Por defecto publicar
+        
+        # Actualizar el estado de publicación
+        success, message = topic_service.update_topic(topic_id, {"published": published})
+        
+        if success:
+            action = "publicado" if published else "despublicado"
+            return APIRoute.success(
+                data={"topic_id": topic_id, "published": published},
+                message=f"Tema {action} exitosamente"
+            )
+        else:
+            return APIRoute.error(
+                ErrorCodes.UPDATE_ERROR,
+                message
+            )
+    except Exception as e:
+        print(f"Error al cambiar estado de publicación del tema: {str(e)}")
+        return APIRoute.error(
+            ErrorCodes.SERVER_ERROR,
+            str(e),
+            status_code=500
+        )
+
 @study_plan_bp.route('/module/<module_id>/topics', methods=['GET'])
 @APIRoute.standard(auth_required_flag=True)
 def get_module_topics(module_id):
@@ -410,6 +438,194 @@ def get_module_topics(module_id):
     # Asegurar que sea serializable
     topics = ensure_json_serializable(topics)
     return APIRoute.success(data=topics)
+
+@study_plan_bp.route('/module/<module_id>/topics/publication-status', methods=['GET'])
+@APIRoute.standard(auth_required_flag=True)
+def get_module_topics_publication_status(module_id):
+    """Obtiene el estado de publicación de todos los temas de un módulo"""
+    try:
+        topics = topic_service.get_topics_by_module(module_id)
+        
+        # Calcular estadísticas de publicación
+        total_topics = len(topics)
+        published_topics = [t for t in topics if t.get('published', False)]
+        unpublished_topics = [t for t in topics if not t.get('published', False)]
+        
+        publication_status = {
+            "module_id": module_id,
+            "total_topics": total_topics,
+            "published_count": len(published_topics),
+            "unpublished_count": len(unpublished_topics),
+            "publication_percentage": round((len(published_topics) / total_topics * 100), 1) if total_topics > 0 else 0,
+            "topics": [
+                {
+                    "id": str(t["_id"]),
+                    "name": t.get("name", ""),
+                    "published": t.get("published", False),
+                    "difficulty": t.get("difficulty", ""),
+                    "theory_content_available": bool(t.get("theory_content", "").strip()),
+                    "created_at": t.get("created_at"),
+                    "order": i + 1
+                }
+                for i, t in enumerate(topics)
+            ]
+        }
+        
+        return APIRoute.success(data=publication_status)
+    except Exception as e:
+        logging.error(f"Error al obtener estado de publicación de temas: {str(e)}")
+        return APIRoute.error(
+            ErrorCodes.SERVER_ERROR,
+            str(e),
+            status_code=500
+        )
+
+@study_plan_bp.route('/module/<module_id>/topics/publish-batch', methods=['PUT'])
+@APIRoute.standard(auth_required_flag=True, roles=[ROLES["TEACHER"]])
+def publish_topics_batch(module_id):
+    """Publica o despublica múltiples temas en lote"""
+    try:
+        data = request.get_json()
+        topic_ids = data.get('topic_ids', [])
+        published = data.get('published', True)
+        
+        if not topic_ids:
+            return APIRoute.error(
+                ErrorCodes.BAD_REQUEST,
+                "Se requiere una lista de topic_ids",
+                status_code=400
+            )
+        
+        # Verificar que todos los temas pertenecen al módulo
+        topics_in_module = topic_service.get_topics_by_module(module_id)
+        valid_topic_ids = {str(t["_id"]) for t in topics_in_module}
+        
+        invalid_topics = [tid for tid in topic_ids if tid not in valid_topic_ids]
+        if invalid_topics:
+            return APIRoute.error(
+                ErrorCodes.BAD_REQUEST,
+                f"Los siguientes topic_ids no pertenecen al módulo: {invalid_topics}",
+                status_code=400
+            )
+        
+        # Actualizar estado de publicación en lote
+        updated_topics = []
+        errors = []
+        
+        for topic_id in topic_ids:
+            try:
+                success, message = topic_service.update_topic(topic_id, {"published": published})
+                if success:
+                    updated_topics.append(topic_id)
+                else:
+                    errors.append({"topic_id": topic_id, "error": message})
+            except Exception as e:
+                errors.append({"topic_id": topic_id, "error": str(e)})
+        
+        action = "publicados" if published else "despublicados"
+        
+        # Si hay cambios, detectar cambios en el módulo para sincronización automática
+        if updated_topics:
+            try:
+                from src.virtual.services import ContentChangeDetector
+                change_detector = ContentChangeDetector()
+                change_info = change_detector.detect_changes(module_id)
+                
+                if change_info.get("has_changes"):
+                    task_ids = change_detector.schedule_incremental_updates(module_id, change_info)
+                    logging.info(f"Actualizaciones incrementales programadas: {len(task_ids)} tareas")
+            except Exception as sync_error:
+                logging.warning(f"Error programando sincronización automática: {sync_error}")
+        
+        return APIRoute.success(
+            data={
+                "updated_topics": updated_topics,
+                "total_updated": len(updated_topics),
+                "errors": errors,
+                "published": published
+            },
+            message=f"{len(updated_topics)} temas {action} exitosamente"
+        )
+        
+    except Exception as e:
+        logging.error(f"Error en publicación por lotes: {str(e)}")
+        return APIRoute.error(
+            ErrorCodes.SERVER_ERROR,
+            str(e),
+            status_code=500
+        )
+
+@study_plan_bp.route('/module/<module_id>/topics/auto-publish', methods=['POST'])
+@APIRoute.standard(auth_required_flag=True, roles=[ROLES["TEACHER"]])
+def auto_publish_ready_topics(module_id):
+    """Publica automáticamente todos los temas que tienen contenido teórico"""
+    try:
+        topics = topic_service.get_topics_by_module(module_id)
+        
+        # Filtrar temas que tienen contenido y no están publicados
+        topics_to_publish = [
+            t for t in topics 
+            if t.get("theory_content", "").strip() and not t.get("published", False)
+        ]
+        
+        if not topics_to_publish:
+            return APIRoute.success(
+                data={
+                    "published_topics": [],
+                    "message": "No hay temas con contenido listos para publicar"
+                },
+                message="Auto-publicación completada - no hay temas para publicar"
+            )
+        
+        # Publicar temas que están listos
+        published_topics = []
+        errors = []
+        
+        for topic in topics_to_publish:
+            try:
+                topic_id = str(topic["_id"])
+                success, message = topic_service.update_topic(topic_id, {"published": True})
+                if success:
+                    published_topics.append({
+                        "id": topic_id,
+                        "name": topic.get("name", ""),
+                        "auto_published": True
+                    })
+                else:
+                    errors.append({"topic_id": topic_id, "error": message})
+            except Exception as e:
+                errors.append({"topic_id": str(topic.get("_id")), "error": str(e)})
+        
+        # Programar sincronización automática si hay cambios
+        if published_topics:
+            try:
+                from src.virtual.services import ContentChangeDetector
+                change_detector = ContentChangeDetector()
+                change_info = change_detector.detect_changes(module_id)
+                
+                if change_info.get("has_changes"):
+                    task_ids = change_detector.schedule_incremental_updates(module_id, change_info)
+                    logging.info(f"Auto-publicación: {len(task_ids)} actualizaciones programadas")
+            except Exception as sync_error:
+                logging.warning(f"Error en sincronización tras auto-publicación: {sync_error}")
+        
+        return APIRoute.success(
+            data={
+                "published_topics": published_topics,
+                "total_published": len(published_topics),
+                "errors": errors,
+                "criteria": "Temas con contenido teórico no vacío"
+            },
+            message=f"Auto-publicación completada: {len(published_topics)} temas publicados"
+        )
+        
+    except Exception as e:
+        logging.error(f"Error en auto-publicación: {str(e)}")
+        return APIRoute.error(
+            ErrorCodes.SERVER_ERROR,
+            str(e),
+            status_code=500
+        )
 
 # Rutas para Evaluaciones
 @study_plan_bp.route('/evaluation', methods=['POST'])
@@ -799,7 +1015,7 @@ def generate_content_by_type():
         }
         
         # Crear el contenido 
-        topic_content_service = TopicContentService()
+        topic_content_service = ContentService()
         success, content_id = topic_content_service.create_content(content_data)
         
         if not success:
@@ -1163,7 +1379,7 @@ def create_resource():
             topic_id = data['topic_id']
             try:
                 # Vincular el recurso al tema
-                link_success, link_result = topic_resource_service.link_resource_to_topic(
+                link_success, link_result = topic_content_service.link_resource_to_topic(
                     topic_id=topic_id,
                     resource_id=result,
                     relevance_score=data.get('relevance_score', 0.5),
@@ -1264,66 +1480,6 @@ def delete_resource(resource_id):
             str(e),
             status_code=500
         )
-
-@study_plan_bp.route('/topic-resources/<topic_id>/<resource_id>', methods=['POST'])
-@APIRoute.standard(auth_required_flag=True, roles=[ROLES["TEACHER"]])
-def link_resource_to_topic(topic_id, resource_id):
-    """
-    DEPRECATED: Usar /api/topic-resources/<topic_id>/<resource_id> en su lugar.
-    Ruta mantenida temporalmente por compatibilidad.
-    
-    Vincula un recurso específico a un tema.
-    """
-    # Importación circular, solo necesaria para esta redirección temporal
-    from src.topic_resources.routes import link_resource_to_topic as new_link_resource
-    
-    # Redirigir a la nueva implementación
-    return new_link_resource(topic_id, resource_id)
-
-@study_plan_bp.route('/topic-resources/<topic_id>/<resource_id>', methods=['DELETE'])
-@APIRoute.standard(auth_required_flag=True, roles=[ROLES["TEACHER"]])
-def unlink_resource_from_topic(topic_id, resource_id):
-    """
-    DEPRECATED: Usar /api/topic-resources/<topic_id>/<resource_id> en su lugar.
-    Ruta mantenida temporalmente por compatibilidad.
-    
-    Desvincula un recurso de un tema.
-    """
-    # Importación circular, solo necesaria para esta redirección temporal
-    from src.topic_resources.routes import unlink_resource_from_topic as new_unlink_resource
-    
-    # Redirigir a la nueva implementación
-    return new_unlink_resource(topic_id, resource_id)
-
-@study_plan_bp.route('/topic-resources/<topic_id>', methods=['GET'])
-@APIRoute.standard(auth_required_flag=True)
-def get_topic_resources(topic_id):
-    """
-    DEPRECATED: Usar /api/topic-resources/<topic_id> en su lugar.
-    Ruta mantenida temporalmente por compatibilidad.
-    
-    Obtiene todos los recursos asociados a un tema específico.
-    """
-    # Importación circular, solo necesaria para esta redirección temporal
-    from src.topic_resources.routes import get_topic_resources as new_get_topic_resources
-    
-    # Redirigir a la nueva implementación
-    return new_get_topic_resources(topic_id)
-
-@study_plan_bp.route('/resource-topics/<resource_id>', methods=['GET'])
-@APIRoute.standard(auth_required_flag=True)
-def get_resource_topics(resource_id):
-    """
-    DEPRECATED: Usar /api/topic-resources/by-resource/<resource_id> en su lugar.
-    Ruta mantenida temporalmente por compatibilidad.
-    
-    Obtiene todos los temas asociados a un recurso específico.
-    """
-    # Importación circular, solo necesaria para esta redirección temporal
-    from src.topic_resources.routes import get_resource_topics as new_get_resource_topics
-    
-    # Redirigir a la nueva implementación
-    return new_get_resource_topics(resource_id)
 
 # Rutas para Recursos Vinculados a Evaluaciones
 @study_plan_bp.route('/evaluations/<evaluation_id>/resources', methods=['POST'])

@@ -10,11 +10,10 @@ from src.shared.exceptions import AppException
 from .models import (
     VirtualModule,
     VirtualTopic,
-    Quiz,
-    QuizResult,
     VirtualGenerationTask,
     ContentTemplate
 )
+# Quiz y QuizResult eliminados - ahora se usan TopicContent y ContentResult
 
 class VirtualModuleService(VerificationBaseService):
     """
@@ -190,215 +189,8 @@ class VirtualTopicService(VerificationBaseService):
             print(f"Error al obtener temas del módulo: {str(e)}")
             return []
 
-class QuizService(VerificationBaseService):
-    """
-    Servicio para gestionar quizzes (evaluaciones formativas interactivas).
-    """
-    def __init__(self):
-        super().__init__(collection_name=COLLECTIONS["QUIZZES"])
-        self.results_collection = self.db[COLLECTIONS["QUIZ_RESULTS"]]
-
-    def check_module_exists(self, module_id: str) -> bool:
-        """
-        Verifica si un módulo virtual existe.
-        
-        Args:
-            module_id: ID del módulo a verificar
-            
-        Returns:
-            bool: True si el módulo existe, False en caso contrario
-        """
-        try:
-            module = self.db.virtual_modules.find_one({"_id": ObjectId(module_id)})
-            return module is not None
-        except Exception:
-            return False
-            
-    def check_quiz_exists(self, quiz_id: str) -> bool:
-        """
-        Verifica si un quiz existe.
-        
-        Args:
-            quiz_id: ID del quiz a verificar
-            
-        Returns:
-            bool: True si el quiz existe, False en caso contrario
-        """
-        try:
-            quiz = self.collection.find_one({"_id": ObjectId(quiz_id)})
-            return quiz is not None
-        except Exception:
-            return False
-    
-    def create_quiz(self, quiz_data: dict) -> Tuple[bool, str]:
-        """
-        Crea un nuevo quiz para un módulo virtual.
-        
-        Args:
-            quiz_data: Datos del quiz a crear
-            
-        Returns:
-            Tuple[bool, str]: (Éxito, mensaje o ID)
-        """
-        try:
-            # Verificar que el módulo existe
-            if not self.check_module_exists(quiz_data.get('virtual_module_id')):
-                return False, "Módulo virtual no encontrado"
-            
-            # Validar estructura básica de preguntas
-            questions = quiz_data.get('questions', [])
-            if not isinstance(questions, list):
-                return False, "El campo 'questions' debe ser una lista."
-            for i, q in enumerate(questions):
-                if not isinstance(q, dict):
-                     return False, f"Cada elemento en 'questions' debe ser un diccionario (índice {i})."
-                if not all(k in q for k in ["id", "type", "text", "points"]):
-                     return False, f"Pregunta inválida en índice {i}. Faltan campos requeridos ('id', 'type', 'text', 'points')."
-                # Add more specific validation per type if needed here
-                
-            quiz = Quiz(**quiz_data)
-            result = self.collection.insert_one(quiz.to_dict())
-            return True, str(result.inserted_id)
-        except Exception as e:
-            return False, str(e)
-
-    def submit_quiz(self, result_data: dict) -> Tuple[bool, str]:
-        """
-        Registra las respuestas de un estudiante a un quiz y calcula la puntuación.
-        """
-        try:
-            quiz_id = result_data.get('quiz_id')
-            # Verificar que el quiz existe
-            quiz = self.collection.find_one(
-                {"_id": ObjectId(quiz_id)}
-            )
-            if not quiz:
-                return False, "Quiz no encontrado"
-            
-            # Verificar que el estudiante existe
-            student = self.db.users.find_one(
-                {"_id": ObjectId(result_data['student_id']), "role": "STUDENT"}
-            )
-            if not student:
-                return False, "Estudiante no encontrado"
-                
-            # Calcular puntuación
-            score = self._calculate_score(quiz, result_data['answers'])
-            
-            # Crear resultado de quiz
-            result_model = QuizResult(
-                quiz_id=quiz_id,
-                student_id=result_data['student_id'],
-                answers=result_data['answers'],
-                score=score,
-                submission_time=datetime.now()
-            )
-            
-            result_id = self.results_collection.insert_one(result_model.to_dict()).inserted_id
-            # Propagar nota solo si la evaluación usa quiz como nota
-            evaluation = get_db().evaluations.find_one({"linked_quiz_id": ObjectId(quiz_id), "use_quiz_score": True})
-            if evaluation:
-                from src.study_plans.services import EvaluationService
-                EvaluationService().record_result({
-                    "evaluation_id": str(evaluation["_id"]),
-                    "student_id": result_data["student_id"],
-                    "score": score
-                })
-            return True, str(result_id)
-        except Exception as e:
-            return False, str(e)
-
-    def get_student_results(self, student_id: str, module_id: Optional[str] = None) -> List[Dict]:
-        try:
-            # Construir la consulta base
-            query = {"student_id": ObjectId(student_id)}
-            
-            # Si se especifica un módulo, filtrar por los quizzes de ese módulo
-            quiz_filter = {}
-            if module_id:
-                # Obtener todos los quizzes del módulo
-                quizzes = list(self.collection.find(
-                    {"virtual_module_id": ObjectId(module_id)}
-                ))
-                quiz_ids = [quiz["_id"] for quiz in quizzes]
-                
-                # Filtrar resultados por esos quizzes
-                if quiz_ids:
-                    quiz_filter = {"quiz_id": {"$in": quiz_ids}}
-                else:
-                    # Si no hay quizzes, devolver lista vacía
-                    return []
-            
-            # Combinar filtros
-            if quiz_filter:
-                query.update(quiz_filter)
-                
-            # Obtener resultados
-            results = list(self.results_collection.find(query))
-            
-            # Procesar resultados (convertir ObjectId a string, obtener detalles del quiz, etc.)
-            processed_results = []
-            for result in results:
-                result["_id"] = str(result["_id"])
-                result["quiz_id"] = str(result["quiz_id"])
-                result["student_id"] = str(result["student_id"])
-                
-                # Obtener detalles del quiz
-                quiz = self.collection.find_one({"_id": ObjectId(result["quiz_id"])})
-                if quiz:
-                    result["quiz_title"] = quiz.get("title", "")
-                    result["total_points"] = quiz.get("total_points", 0)
-                    result["module_id"] = str(quiz.get("virtual_module_id", ""))
-                
-                processed_results.append(result)
-                
-            return processed_results
-        except Exception as e:
-            print(f"Error al obtener resultados de quizzes del estudiante: {str(e)}")
-            return []
-
-    def _calculate_score(self, quiz: Dict, answers: List[Dict]) -> float:
-        """Calcula la puntuación de un quiz en base a las respuestas proporcionadas"""
-        questions = quiz.get("questions", [])
-        max_points = quiz.get("total_points", 100)
-        
-        # Crear un diccionario para acceder rápidamente a las preguntas por ID
-        questions_dict = {str(q.get("question_id", i)): q for i, q in enumerate(questions)}
-        
-        # Inicializar puntuación
-        points_earned = 0
-        total_question_points = 0
-        
-        # Revisar cada respuesta
-        for answer in answers:
-            question_id = str(answer.get("question_id"))
-            if question_id in questions_dict:
-                question = questions_dict[question_id]
-                question_points = question.get("points", 0)
-                total_question_points += question_points
-                
-                # Comparar respuesta con solución
-                if question.get("type") == "multiple_choice":
-                    # Para preguntas de opción múltiple
-                    if answer.get("selected_option") == question.get("correct_option"):
-                        points_earned += question_points
-                elif question.get("type") == "true_false":
-                    # Para preguntas de verdadero/falso
-                    if answer.get("selected_value") == question.get("correct_value"):
-                        points_earned += question_points
-                elif question.get("type") == "short_answer":
-                    # Para preguntas de respuesta corta, podría ser más complejo
-                    # Aquí se ejemplifica una comparación simple
-                    if answer.get("text", "").lower() == question.get("correct_answer", "").lower():
-                        points_earned += question_points
-        
-        # Calcular puntuación final como porcentaje del total
-        if total_question_points > 0:
-            final_score = (points_earned / total_question_points) * max_points
-        else:
-            final_score = 0
-            
-        return round(final_score, 2)
+# QuizService eliminado - Los quizzes ahora se manejan como TopicContent con content_type="quiz"
+# La funcionalidad de evaluación se migró al sistema unificado de ContentResult
 
 
 class ContentChangeDetector(VerificationBaseService):
@@ -929,9 +721,8 @@ class FastVirtualModuleGenerator(VerificationBaseService):
             # 4. Crear módulo virtual básico
             virtual_module_data = {
                 "study_plan_id": str(original_module["study_plan_id"]),
+                "module_id": module_id,
                 "student_id": student_id,
-                "name": original_module.get("name", "Módulo Virtual"),
-                "description": original_module.get("description", ""),
                 "adaptations": {
                     "cognitive_profile": cognitive_profile,
                     "generation_method": "fast",
@@ -944,8 +735,8 @@ class FastVirtualModuleGenerator(VerificationBaseService):
             # Añadir referencia al módulo original
             virtual_module_data["module_id"] = module_id
             
-            virtual_module = VirtualModule(**virtual_module_data)
-            result = self.collection.insert_one(virtual_module.to_dict())
+            # El constructor de VirtualModule ya no espera name/description
+            result = self.collection.insert_one(virtual_module_data)
             virtual_module_id = str(result.inserted_id)
             
             # 5. Generar temas virtuales de forma optimizada
@@ -977,60 +768,220 @@ class FastVirtualModuleGenerator(VerificationBaseService):
     
     def _generate_virtual_topics_fast(self, module_id: str, student_id: str, 
                                     virtual_module_id: str, cognitive_profile: Dict,
-                                    remaining_time: int):
+                                    remaining_time: int, initial_batch_size: int = 2):
         """
         Genera temas virtuales optimizados para velocidad.
-        
-        Args:
-            module_id: ID del módulo original
-            student_id: ID del estudiante
-            virtual_module_id: ID del módulo virtual
-            cognitive_profile: Perfil cognitivo del estudiante
-            remaining_time: Tiempo restante en segundos
         """
         try:
-            # Obtener temas del módulo original
-            topics = list(self.db.topics.find({"module_id": ObjectId(module_id)}))
+            # Obtener temas del módulo original que estén publicados
+            topics = list(self.db.topics.find({
+                "module_id": ObjectId(module_id),
+                "published": True
+            }).sort("created_at", 1))  # Ordenar por fecha de creación
             
-            topics_per_second = max(1, len(topics) / max(remaining_time - 5, 5))
+            if not topics:
+                logging.warning(f"No se encontraron temas publicados para el módulo {module_id}. El módulo virtual se generará sin temas.")
+                return
+
+            # Limitar al lote inicial
+            topics_to_generate = topics[:initial_batch_size]
             
-            for i, topic in enumerate(topics):
-                # Verificar tiempo restante
-                if remaining_time <= 5:
-                    break
+            logging.info(f"Generando lote inicial de {len(topics_to_generate)} temas para el módulo virtual {virtual_module_id}. "
+                         f"({len(topics) - len(topics_to_generate)} pendientes)")
+
+            # Generar contenido para cada tema
+            for topic in topics_to_generate:
+                try:
+                    topic_id = str(topic["_id"])
                     
-                topic_id = str(topic["_id"])
-                
-                # Crear tema virtual básico
-                virtual_topic_data = {
-                    "topic_id": topic_id,
-                    "student_id": student_id,
-                    "virtual_module_id": virtual_module_id,
-                    "name": topic.get("name", f"Tema {i+1}"),
-                    "adaptations": {
-                        "cognitive_profile": cognitive_profile,
-                        "difficulty_adjustment": self._calculate_quick_difficulty_adjustment(
-                            topic, cognitive_profile
-                        )
-                    },
-                    "status": "active",
-                    "created_at": datetime.now(),
-                    "progress": 0.0
-                }
-                
-                # Insertar tema virtual
-                self.db.virtual_topics.insert_one(virtual_topic_data)
-                
-                # Generar contenido básico usando templates
-                self._generate_basic_content_from_templates(
-                    topic_id, cognitive_profile, virtual_topic_data
-                )
-                
-                remaining_time -= 1/topics_per_second
-                
+                    # Crear tema virtual básico
+                    virtual_topic_data = {
+                        "topic_id": topic_id,
+                        "student_id": student_id,
+                        "virtual_module_id": virtual_module_id,
+                        "adaptations": {
+                            "cognitive_profile": cognitive_profile,
+                            "difficulty_adjustment": self._calculate_quick_difficulty_adjustment(
+                                topic, cognitive_profile
+                            )
+                        },
+                        "status": "active",
+                        "progress": 0.0,
+                        "completion_status": "not_started"
+                    }
+                    
+                    # Insertar tema virtual
+                    # El diccionario ya no contiene 'name'
+                    result = self.db.virtual_topics.insert_one(virtual_topic_data)
+                    virtual_topic_id = str(result.inserted_id)
+                    
+                    # Generar contenido personalizado para el tema
+                    self._generate_basic_content_from_templates(
+                        topic_id=str(topic["_id"]),
+                        virtual_topic_id=virtual_topic_id,
+                        cognitive_profile=cognitive_profile,
+                        virtual_topic_data=virtual_topic_data
+                    )
+                except Exception as e_topic:
+                    logging.error(f"Error generando tema virtual para {topic['_id']}: {e_topic}")
+
         except Exception as e:
-            logging.error(f"Error al generar temas virtuales: {str(e)}")
-    
+            logging.error(f"Error en _generate_virtual_topics_fast: {str(e)}")
+
+    def synchronize_module_content(self, virtual_module_id: str) -> Tuple[bool, Dict]:
+        """
+        Sincroniza un módulo virtual existente con su módulo original.
+        Aplica cambios, añade nuevo contenido y desactiva el obsoleto.
+        """
+        try:
+            logging.info(f"Iniciando sincronización para el módulo virtual: {virtual_module_id}")
+            report = {"added": [], "updated": [], "removed": [], "errors": []}
+
+            virtual_module = self.db.virtual_modules.find_one({"_id": ObjectId(virtual_module_id)})
+            if not virtual_module:
+                return False, {"error": "Módulo virtual no encontrado"}
+
+            module_id = virtual_module["module_id"]
+            student_id = virtual_module["student_id"]
+            
+            student = self.db.users.find_one({"_id": student_id})
+            cognitive_profile = student.get("cognitive_profile", {}) if student else {}
+
+            # 1. Comparar Temas
+            original_topics = list(self.db.topics.find({"module_id": module_id, "published": True}))
+            virtual_topics = list(self.db.virtual_topics.find({"virtual_module_id": ObjectId(virtual_module_id)}))
+            
+            original_topic_ids = {str(t["_id"]) for t in original_topics}
+            virtual_topic_ids = {str(vt["topic_id"]) for vt in virtual_topics}
+
+            # Temas a añadir
+            topics_to_add = [t for t in original_topics if str(t["_id"]) not in virtual_topic_ids]
+            for topic in topics_to_add:
+                try:
+                    logging.info(f"Sincronización: añadiendo nuevo tema {topic['_id']} a {virtual_module_id}")
+                    
+                    # Crear tema virtual básico usando la misma lógica que _generate_virtual_topics_fast
+                    virtual_topic_data = {
+                        "topic_id": ObjectId(str(topic["_id"])),
+                        "student_id": student_id,
+                        "virtual_module_id": ObjectId(virtual_module_id),
+                        "adaptations": {
+                            "cognitive_profile": cognitive_profile,
+                            "difficulty_adjustment": self._calculate_quick_difficulty_adjustment(
+                                topic, cognitive_profile
+                            )
+                        },
+                        "status": "active",
+                        "progress": 0.0,
+                        "completion_status": "not_started",
+                        "created_at": datetime.now()
+                    }
+                    
+                    # Insertar tema virtual
+                    result = self.db.virtual_topics.insert_one(virtual_topic_data)
+                    virtual_topic_id = str(result.inserted_id)
+                    
+                    # Generar contenido personalizado para el tema nuevo
+                    self._generate_topic_contents_for_sync(
+                        topic_id=str(topic["_id"]),
+                        virtual_topic_id=virtual_topic_id,
+                        cognitive_profile=cognitive_profile
+                    )
+                    
+                    report["added"].append({"type": "topic", "id": str(topic["_id"]), "virtual_topic_id": virtual_topic_id})
+                except Exception as e:
+                    report["errors"].append({"type": "topic_add", "id": str(topic["_id"]), "error": str(e)})
+
+            # Temas a eliminar (despublicados)
+            topics_to_remove_ids = [vt["_id"] for vt in virtual_topics if str(vt["topic_id"]) not in original_topic_ids]
+            if topics_to_remove_ids:
+                self.db.virtual_topics.update_many(
+                    {"_id": {"$in": topics_to_remove_ids}},
+                    {"$set": {"status": "archived", "updated_at": datetime.now()}}
+                )
+                report["removed"].extend([{"type": "topic", "id": str(tid)} for tid in topics_to_remove_ids])
+
+            # 2. Comparar Contenidos para cada tema existente
+            for vt in virtual_topics:
+                original_topic_id = vt["topic_id"]
+                
+                original_contents = list(self.db.topic_contents.find({"topic_id": original_topic_id}))
+                virtual_contents = list(self.db.virtual_topic_contents.find({"virtual_topic_id": vt["_id"]}))
+
+                original_content_ids = {str(c["_id"]) for c in original_contents}
+                virtual_content_ids = {str(vc["content_id"]) for vc in virtual_contents}
+
+                # Contenido a añadir
+                contents_to_add = [c for c in original_contents if str(c["_id"]) not in virtual_content_ids]
+                for content in contents_to_add:
+                    try:
+                        logging.info(f"Sincronización: añadiendo nuevo contenido {content['_id']} a virtual_topic {vt['_id']}")
+                        
+                        # Crear VirtualTopicContent personalizado para el estudiante
+                        virtual_content_data = {
+                            "virtual_topic_id": vt["_id"],
+                            "content_id": content["_id"],
+                            "student_id": student_id,
+                            "personalization_data": {
+                                "adapted_for_profile": cognitive_profile,
+                                "sync_generated": True,
+                                "sync_date": datetime.now()
+                            },
+                            "adapted_content": None,  # Usar contenido original sin adaptación por ahora
+                            "interaction_tracking": {
+                                "access_count": 0,
+                                "total_time_spent": 0,
+                                "last_accessed": None,
+                                "completion_status": "not_started",
+                                "completion_percentage": 0.0,
+                                "sessions": 0,
+                                "best_score": None,
+                                "avg_score": None,
+                                "interactions": []
+                            },
+                            "access_permissions": {},
+                            "status": "active",
+                            "created_at": datetime.now(),
+                            "updated_at": datetime.now()
+                        }
+                        
+                        # Insertar contenido virtual
+                        result = self.db.virtual_topic_contents.insert_one(virtual_content_data)
+                        virtual_content_id = str(result.inserted_id)
+                        
+                        report["added"].append({"type": "content", "id": str(content["_id"]), "virtual_content_id": virtual_content_id})
+                    except Exception as e:
+                        report["errors"].append({"type": "content_add", "id": str(content["_id"]), "error": str(e)})
+
+                # Contenido a eliminar
+                contents_to_remove_ids = [vc["_id"] for vc in virtual_contents if str(vc["content_id"]) not in original_content_ids]
+                if contents_to_remove_ids:
+                    self.db.virtual_topic_contents.update_many(
+                        {"_id": {"$in": contents_to_remove_ids}},
+                        {"$set": {"status": "archived", "updated_at": datetime.now()}}
+                    )
+                    report["removed"].extend([{"type": "content", "id": str(cid)} for cid in contents_to_remove_ids])
+                
+                # Contenido a actualizar (simplificado: por ahora no se detectan cambios internos)
+                # En una versión avanzada, se compararía un hash o `updated_at` de `TopicContent` vs `VirtualTopicContent`
+                
+            # Registrar la actualización en el módulo virtual
+            self.db.virtual_modules.update_one(
+                {"_id": ObjectId(virtual_module_id)},
+                {"$push": {"updates": {
+                    "type": "content_sync",
+                    "timestamp": datetime.now(),
+                    "details": report
+                }}}
+            )
+
+            logging.info(f"Sincronización completada para {virtual_module_id}. Reporte: {report}")
+            return True, report
+
+        except Exception as e:
+            logging.error(f"Error fatal durante la sincronización del módulo {virtual_module_id}: {str(e)}")
+            return False, {"error": str(e)}
+
     def _calculate_quick_difficulty_adjustment(self, topic: Dict, 
                                              cognitive_profile: Dict) -> Dict:
         """
@@ -1123,3 +1074,64 @@ class FastVirtualModuleGenerator(VerificationBaseService):
         except Exception as e:
             logging.error(f"Error al obtener template cacheado: {str(e)}")
             return None
+
+    def _generate_topic_contents_for_sync(self, topic_id: str, virtual_topic_id: str, cognitive_profile: Dict):
+        """
+        Genera contenidos virtuales para un tema específico durante sincronización.
+        
+        Args:
+            topic_id: ID del tema original
+            virtual_topic_id: ID del tema virtual recién creado
+            cognitive_profile: Perfil cognitivo del estudiante
+        """
+        try:
+            # Obtener contenidos originales del tema
+            original_contents = list(self.db.topic_contents.find({
+                "topic_id": ObjectId(topic_id),
+                "status": "active"
+            }))
+            
+            if not original_contents:
+                logging.warning(f"No se encontraron contenidos para el tema {topic_id}")
+                return
+            
+            # Crear VirtualTopicContent para cada contenido original
+            for content in original_contents:
+                try:
+                    virtual_content_data = {
+                        "virtual_topic_id": ObjectId(virtual_topic_id),
+                        "content_id": content["_id"],
+                        "student_id": ObjectId(cognitive_profile.get("student_id")) if cognitive_profile.get("student_id") else None,
+                        "personalization_data": {
+                            "adapted_for_profile": cognitive_profile,
+                            "sync_generated": True,
+                            "sync_date": datetime.now(),
+                            "content_type": content.get("content_type", "unknown")
+                        },
+                        "adapted_content": None,  # Usar contenido original
+                        "interaction_tracking": {
+                            "access_count": 0,
+                            "total_time_spent": 0,
+                            "last_accessed": None,
+                            "completion_status": "not_started",
+                            "completion_percentage": 0.0,
+                            "sessions": 0,
+                            "best_score": None,
+                            "avg_score": None,
+                            "interactions": []
+                        },
+                        "access_permissions": {},
+                        "status": "active",
+                        "created_at": datetime.now(),
+                        "updated_at": datetime.now()
+                    }
+                    
+                    # Insertar contenido virtual
+                    self.db.virtual_topic_contents.insert_one(virtual_content_data)
+                    logging.debug(f"Contenido virtual creado para {content['_id']} en tema {virtual_topic_id}")
+                    
+                except Exception as e_content:
+                    logging.error(f"Error creando contenido virtual para {content.get('_id')}: {e_content}")
+            
+        except Exception as e:
+            logging.error(f"Error en _generate_topic_contents_for_sync: {str(e)}")

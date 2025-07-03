@@ -402,12 +402,13 @@ class ContentResultService(VerificationBaseService):
             content_result = ContentResult(**result_data)
             result = self.collection.insert_one(content_result.to_dict())
             
-            # Actualizar tracking en contenido virtual
-            virtual_content_service = VirtualContentService()
-            virtual_content_service.track_interaction(
-                result_data["virtual_content_id"],
-                result_data["session_data"]
-            )
+            # Actualizar tracking solo si es un resultado de contenido virtual
+            if result_data.get("virtual_content_id"):
+                virtual_content_service = VirtualContentService()
+                virtual_content_service.track_interaction(
+                    result_data["virtual_content_id"],
+                    result_data.get("session_data", {})
+                )
             
             return True, str(result.inserted_id)
             
@@ -415,14 +416,17 @@ class ContentResultService(VerificationBaseService):
             logging.error(f"Error registrando resultado: {str(e)}")
             return False, f"Error interno: {str(e)}"
 
-    def get_student_results(self, student_id: str, content_type: str = None) -> List[Dict]:
+    def get_student_results(self, student_id: str, content_type: str = None, evaluation_id: str = None) -> List[Dict]:
         """
-        Obtiene resultados de un estudiante, opcionalmente filtrados por tipo.
+        Obtiene resultados de un estudiante, opcionalmente filtrados.
         """
         try:
             # Si se especifica tipo de contenido, primero buscar contenidos virtuales de ese tipo
             query = {"student_id": ObjectId(student_id)}
             
+            if evaluation_id:
+                query["evaluation_id"] = ObjectId(evaluation_id)
+
             if content_type:
                 # Buscar contenidos virtuales del tipo especificado
                 virtual_contents = list(get_db().virtual_topic_contents.find({

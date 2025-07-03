@@ -6,15 +6,15 @@ from bson import ObjectId
 from datetime import datetime
 import logging
 
-from .services import VirtualModuleService, VirtualTopicService, QuizService, ServerlessQueueService, FastVirtualModuleGenerator, ContentChangeDetector
+from .services import VirtualModuleService, VirtualTopicService, ServerlessQueueService, FastVirtualModuleGenerator, ContentChangeDetector
 from src.study_plans.models import ContentTypes, LearningMethodologyTypes
 
 virtual_bp = APIBlueprint('virtual', __name__)
-quiz_bp = APIBlueprint('quizzes', __name__, url_prefix='/api/quizzes')
+# quiz_bp eliminado - ahora los quizzes se manejan como TopicContent
 
 virtual_module_service = VirtualModuleService()
 virtual_topic_service = VirtualTopicService()
-quiz_service = QuizService()
+# quiz_service eliminado - funcionalidad migrada a ContentService
 queue_service = ServerlessQueueService()
 fast_generator = FastVirtualModuleGenerator()
 change_detector = ContentChangeDetector()
@@ -87,74 +87,109 @@ def get_module_topics(module_id):
     topics = virtual_topic_service.get_module_topics(module_id)
     return APIRoute.success(data={"topics": topics})
 
-# Rutas para Quizzes
-@quiz_bp.route('/', methods=['POST'])
-@APIRoute.standard(
-    auth_required_flag=True,
-    roles=[ROLES["TEACHER"]],
-    required_fields=['virtual_module_id', 'title', 'description', 'due_date', 
-                   'topics_covered', 'questions', 'total_points', 'passing_score']
-)
-def create_quiz():
-    """Crea un nuevo quiz interactivo"""
-    data = request.get_json()
-    success, result = quiz_service.create_quiz(data)
-    
-    if success:
-        return APIRoute.success(
-            data={"quiz_id": result},
-            message="Quiz creado exitosamente",
-            status_code=201
-        )
-    return APIRoute.error(
-        ErrorCodes.CREATION_ERROR,
-        result,
-        status_code=400
-    )
+# Rutas de Quiz eliminadas - ahora se manejan como TopicContent
+# Los quizzes se crean con POST /study_plan/topic/content (content_type="quiz")
+# Los resultados se envían con POST /virtual/content-result
 
-@quiz_bp.route('/submit', methods=['POST'])
+@virtual_bp.route('/content-result', methods=['POST'])
 @APIRoute.standard(
     auth_required_flag=True,
     roles=[ROLES["STUDENT"]],
-    required_fields=['quiz_id', 'student_id', 'answers']
+    required_fields=['virtual_content_id', 'student_id', 'session_data']
 )
-def submit_quiz():
-    """Envía las respuestas de un quiz virtual"""
-    data = request.get_json()
-    success, result = quiz_service.submit_quiz(data)
-    
-    if success:
-        return APIRoute.success(
-            data={"result_id": result},
-            message="Quiz enviado exitosamente",
-            status_code=201
-        )
-    return APIRoute.error(
-        ErrorCodes.SUBMISSION_ERROR,
-        result,
-        status_code=400
-    )
-
-@quiz_bp.route('/results/student/<student_id>', methods=['GET'])
-@APIRoute.standard(auth_required_flag=True)
-def get_student_quiz_results(student_id):
-    """Obtiene los resultados de los quizzes para un estudiante específico"""
-    module_id = request.args.get('module_id')
-    results = quiz_service.get_student_results(student_id, module_id)
-    return APIRoute.success(data=results)
-
-@quiz_bp.route('/<quiz_id>', methods=['GET'])
-@APIRoute.standard(auth_required_flag=True)
-def get_quiz_details(quiz_id):
-    """Obtiene los detalles de un quiz específico"""
+def submit_content_result():
+    """
+    Endpoint unificado para enviar resultados de cualquier tipo de contenido interactivo.
+    Reemplaza los endpoints específicos de quiz, game, etc.
+    """
     try:
-        quiz = quiz_service.collection.find_one({"_id": ObjectId(quiz_id)})
-        if quiz:
-            return APIRoute.success(data=quiz)
-        return APIRoute.error(ErrorCodes.NOT_FOUND, "Quiz no encontrado")
+        data = request.get_json()
+        virtual_content_id = data.get('virtual_content_id')
+        student_id = data.get('student_id')
+        session_data = data.get('session_data')
+        learning_metrics = data.get('learning_metrics', {})
+        feedback = data.get('feedback', '')
+        session_type = data.get('session_type', 'completion')
+        
+        # Verificar que el contenido virtual existe
+        virtual_content = get_db().virtual_topic_contents.find_one({
+            "_id": ObjectId(virtual_content_id)
+        })
+        
+        if not virtual_content:
+            return APIRoute.error(
+                ErrorCodes.NOT_FOUND,
+                "Contenido virtual no encontrado",
+                status_code=404
+            )
+        
+        # Verificar que el estudiante coincide
+        if str(virtual_content.get("student_id")) != student_id:
+            return APIRoute.error(
+                ErrorCodes.PERMISSION_DENIED,
+                "No tienes permiso para enviar resultados de este contenido",
+                status_code=403
+            )
+        
+        # Crear el resultado usando el servicio unificado
+        from src.content.services import ContentResultService
+        content_result_service = ContentResultService()
+        
+        result_data = {
+            "virtual_content_id": virtual_content_id,
+            "student_id": student_id,
+            "session_data": session_data,
+            "learning_metrics": learning_metrics,
+            "feedback": feedback,
+            "session_type": session_type
+        }
+        
+        success, result_id = content_result_service.record_result(result_data)
+        
+        if success:
+            # Actualizar tracking del contenido virtual
+            completion_percentage = session_data.get('completion_percentage', 100)
+            
+            update_data = {
+                "interaction_tracking.last_accessed": datetime.now(),
+                "interaction_tracking.completion_percentage": completion_percentage,
+                "updated_at": datetime.now()
+            }
+            
+            # Si completó al 100%, marcar como completado
+            if completion_percentage >= 100:
+                update_data["interaction_tracking.completion_status"] = "completed"
+            elif completion_percentage > 0:
+                update_data["interaction_tracking.completion_status"] = "in_progress"
+            
+            get_db().virtual_topic_contents.update_one(
+                {"_id": ObjectId(virtual_content_id)},
+                {"$set": update_data, "$inc": {"interaction_tracking.access_count": 1}}
+            )
+            
+            return APIRoute.success(
+                data={
+                    "result_id": result_id,
+                    "completion_percentage": completion_percentage,
+                    "status": "submitted"
+                },
+                message="Resultado registrado exitosamente",
+                status_code=201
+            )
+        else:
+            return APIRoute.error(
+                ErrorCodes.OPERATION_FAILED,
+                result_id,  # El mensaje de error viene en result_id
+                status_code=500
+            )
+        
     except Exception as e:
-        logging.error(f"Error al obtener quiz: {str(e)}")
-        return APIRoute.error(ErrorCodes.SERVER_ERROR, str(e), status_code=500)
+        logging.error(f"Error al registrar resultado de contenido: {str(e)}")
+        return APIRoute.error(
+            ErrorCodes.SERVER_ERROR,
+            str(e),
+            status_code=500
+        )
 
 @virtual_bp.route('/generate', methods=['POST'])
 @APIRoute.standard(auth_required_flag=True, roles=[ROLES["STUDENT"], ROLES["TEACHER"]], required_fields=['class_id', 'study_plan_id'])
@@ -481,8 +516,15 @@ def generate_virtual_topics(module_id: str, student_id: str, virtual_module_id: 
     Genera temas virtuales para un módulo. Función auxiliar separada para procesamiento asincrónico.
     """
     try:
-        # Obtener temas del módulo
-        topics = list(get_db().topics.find({"module_id": ObjectId(module_id)}))
+        # Obtener temas del módulo que estén publicados
+        topics = list(get_db().topics.find({
+            "module_id": ObjectId(module_id),
+            "published": True
+        }))
+        
+        if not topics:
+            logging.warning(f"No se encontraron temas publicados para el módulo {module_id}. El módulo virtual se generará sin temas.")
+            return True
         
         for topic in topics:
             topic_id = str(topic["_id"])
@@ -1108,14 +1150,31 @@ def process_generation_queue():
                         })
                 
                 elif task_type == "update":
-                    # Implementar lógica de actualización incremental
-                    # Por ahora marcar como completada
-                    queue_service.complete_task(task_id, {"updated": True})
-                    processed_tasks.append({
-                        "task_id": task_id,
-                        "module_id": module_id,
-                        "type": task_type
-                    })
+                    # Lógica de actualización incremental
+                    virtual_module_id = task.get("payload", {}).get("virtual_module_id")
+                    if not virtual_module_id:
+                        raise ValueError("La tarea de actualización no tiene virtual_module_id en el payload")
+
+                    success, result = fast_generator.synchronize_module_content(virtual_module_id)
+                    
+                    if success:
+                        queue_service.complete_task(
+                            task_id,
+                            {"update_report": result}
+                        )
+                        processed_tasks.append({
+                            "task_id": task_id,
+                            "virtual_module_id": virtual_module_id,
+                            "type": task_type,
+                            "report": result
+                        })
+                    else:
+                        queue_service.fail_task(task_id, str(result))
+                        failed_tasks.append({
+                            "task_id": task_id,
+                            "virtual_module_id": virtual_module_id,
+                            "error": str(result)
+                        })
                 
             except Exception as task_error:
                 logging.error(f"Error procesando tarea {task_id}: {str(task_error)}")
@@ -1358,4 +1417,289 @@ def detect_module_changes(module_id):
             ErrorCodes.SERVER_ERROR,
             str(e),
             status_code=500
-        ) 
+        )
+
+@virtual_bp.route('/trigger-next-topic', methods=['POST'])
+@APIRoute.standard(auth_required_flag=True, required_fields=['current_topic_id', 'student_id', 'progress'])
+def trigger_next_topic():
+    """
+    Disparado cuando el progreso de un tema supera el 80%.
+    Genera hasta 2 temas por delante para mantener el flujo progresivo optimizado.
+    """
+    try:
+        data = request.get_json()
+        current_topic_id = data.get('current_topic_id')
+        student_id = data.get('student_id')
+        progress = data.get('progress', 0)
+        batch_size = data.get('batch_size', 2)  # Permitir configurar el lote
+        
+        # 1. Validar progreso mínimo
+        if progress < 80:
+            return APIRoute.error(
+                ErrorCodes.BAD_REQUEST,
+                "El progreso debe ser mayor al 80% para activar siguiente tema",
+                status_code=400
+            )
+        
+        # 2. Obtener información del tema actual y módulo virtual en una sola consulta optimizada
+        current_topic = get_db().topics.find_one({"_id": ObjectId(current_topic_id)})
+        if not current_topic:
+            return APIRoute.error(
+                ErrorCodes.NOT_FOUND,
+                "Tema actual no encontrado",
+                status_code=404
+            )
+        
+        module_id = current_topic["module_id"]
+        
+        # Obtener módulo virtual y perfil cognitivo del estudiante en paralelo
+        virtual_module = get_db().virtual_modules.find_one({
+            "student_id": ObjectId(student_id),
+            "module_id": module_id
+        })
+        
+        student = get_db().users.find_one({"_id": ObjectId(student_id)})
+        
+        if not virtual_module:
+            return APIRoute.error(
+                ErrorCodes.NOT_FOUND,
+                "Módulo virtual no encontrado para este estudiante",
+                status_code=404
+            )
+        
+        cognitive_profile = student.get("cognitive_profile", {}) if student else {}
+        virtual_module_id = str(virtual_module["_id"])
+        
+        # 3. Algoritmo optimizado: obtener todos los datos necesarios en consultas eficientes
+        # Consulta única para obtener temas publicados ordenados
+        all_published_topics = list(get_db().topics.find({
+            "module_id": module_id,
+            "published": True
+        }).sort("created_at", 1))
+        
+        if not all_published_topics:
+            return APIRoute.success(
+                data={
+                    "message": "No hay temas publicados disponibles en este módulo",
+                    "has_next": False,
+                    "generated_topics": []
+                },
+                message="No hay temas para generar"
+            )
+        
+        # Consulta única para obtener temas virtuales ya generados
+        generated_virtual_topics = list(get_db().virtual_topics.find({
+            "student_id": ObjectId(student_id),
+            "virtual_module_id": ObjectId(virtual_module_id)
+        }, {"topic_id": 1}))
+        
+        generated_topic_ids = {vt["topic_id"] for vt in generated_virtual_topics}
+        
+        # 4. Implementar lógica "dos temas por delante"
+        # Encontrar posición del tema actual y determinar cuántos temas generar
+        current_index = None
+        for i, topic in enumerate(all_published_topics):
+            if topic["_id"] == ObjectId(current_topic_id):
+                current_index = i
+                break
+        
+        if current_index is None:
+            return APIRoute.error(
+                ErrorCodes.BAD_REQUEST,
+                "Tema actual no encontrado en la lista de temas publicados",
+                status_code=400
+            )
+        
+        # Calcular qué temas deben estar disponibles (actual + 2 por delante)
+        topics_should_be_available = all_published_topics[current_index:current_index + batch_size + 1]
+        topics_to_generate = [
+            topic for topic in topics_should_be_available 
+            if topic["_id"] not in generated_topic_ids
+        ]
+        
+        if not topics_to_generate:
+            # Verificar si hay más temas pendientes de publicar
+            remaining_topics = all_published_topics[current_index + batch_size + 1:]
+            return APIRoute.success(
+                data={
+                    "message": "Todos los temas disponibles ya están generados",
+                    "has_next": len(remaining_topics) > 0,
+                    "generated_topics": [],
+                    "remaining_unpublished": len(remaining_topics)
+                },
+                message="Generación de lote completada"
+            )
+        
+        # 5. Generar temas en lote de forma optimizada
+        generated_topics = []
+        errors = []
+        
+        for topic in topics_to_generate:
+            try:
+                topic_id = str(topic["_id"])
+                
+                # Crear tema virtual básico
+                virtual_topic_data = {
+                    "topic_id": topic["_id"],
+                    "student_id": ObjectId(student_id),
+                    "virtual_module_id": ObjectId(virtual_module_id),
+                    "adaptations": {
+                        "cognitive_profile": cognitive_profile,
+                        "difficulty_adjustment": calculate_difficulty_adjustment(topic, cognitive_profile),
+                        "batch_generated": True,
+                        "batch_timestamp": datetime.now()
+                    },
+                    "status": "active",
+                    "progress": 0.0,
+                    "completion_status": "not_started",
+                    "created_at": datetime.now()
+                }
+                
+                # Insertar tema virtual
+                result = get_db().virtual_topics.insert_one(virtual_topic_data)
+                virtual_topic_id = str(result.inserted_id)
+                
+                # Generar contenido personalizado (optimizado para lotes)
+                generate_personalized_content(topic_id, virtual_topic_id, cognitive_profile)
+                
+                generated_topics.append({
+                    "id": topic_id,
+                    "virtual_topic_id": virtual_topic_id,
+                    "name": topic.get("name", ""),
+                    "order": all_published_topics.index(topic)
+                })
+                
+                logging.info(f"Tema generado en lote: {topic.get('name')} para estudiante {student_id}")
+                
+            except Exception as generation_error:
+                error_msg = f"Error generando tema {topic.get('_id')}: {str(generation_error)}"
+                logging.error(error_msg)
+                errors.append({
+                    "topic_id": str(topic.get("_id")),
+                    "error": str(generation_error)
+                })
+        
+        # 6. Calcular estado de disponibilidad futura
+        total_topics = len(all_published_topics)
+        current_position = current_index + 1
+        has_more = current_position + len(generated_topics) < total_topics
+        
+        return APIRoute.success(
+            data={
+                "generated_topics": generated_topics,
+                "total_generated": len(generated_topics),
+                "errors": errors,
+                "has_next": has_more,
+                "progress_info": {
+                    "current_position": current_position,
+                    "total_topics": total_topics,
+                    "completion_percentage": round((current_position / total_topics) * 100, 1)
+                },
+                "next_batch_available": has_more
+            },
+            message=f"Lote de {len(generated_topics)} temas generado exitosamente"
+        )
+        
+    except Exception as e:
+        logging.error(f"Error al activar siguiente tema: {str(e)}")
+        return APIRoute.error(
+            ErrorCodes.SERVER_ERROR,
+            str(e),
+            status_code=500
+        )
+
+@virtual_bp.route('/content-results/student/<student_id>', methods=['GET'])
+@APIRoute.standard(auth_required_flag=True)
+def get_student_content_results(student_id):
+    """
+    Obtiene todos los resultados de contenido de un estudiante.
+    Reemplaza los endpoints específicos de quiz/game results.
+    """
+    try:
+        from src.content.services import ContentResultService
+        content_result_service = ContentResultService()
+        
+        # Obtener parámetros opcionales
+        content_type = request.args.get('content_type')  # Filtrar por tipo de contenido
+        module_id = request.args.get('module_id')  # Filtrar por módulo
+        
+        # Obtener resultados del estudiante
+        results = content_result_service.get_student_results(student_id, content_type)
+        
+        # Si se especifica un módulo, filtrar por módulo
+        if module_id and results:
+            # Obtener contenidos virtuales del módulo específico
+            virtual_module = get_db().virtual_modules.find_one({
+                "module_id": ObjectId(module_id),
+                "student_id": ObjectId(student_id)
+            })
+            
+            if virtual_module:
+                # Obtener contenidos virtuales del módulo
+                virtual_topics = list(get_db().virtual_topics.find({
+                    "virtual_module_id": virtual_module["_id"]
+                }))
+                
+                virtual_topic_ids = [vt["_id"] for vt in virtual_topics]
+                
+                # Obtener contenidos de esos temas
+                virtual_contents = list(get_db().virtual_topic_contents.find({
+                    "virtual_topic_id": {"$in": virtual_topic_ids}
+                }))
+                
+                virtual_content_ids = [str(vc["_id"]) for vc in virtual_contents]
+                
+                # Filtrar resultados por esos contenidos
+                results = [r for r in results if r.get("virtual_content_id") in virtual_content_ids]
+        
+        # Enriquecer resultados con información adicional
+        enriched_results = []
+        for result in results:
+            # Obtener información del contenido virtual
+            virtual_content = get_db().virtual_topic_contents.find_one({
+                "_id": ObjectId(result["virtual_content_id"])
+            })
+            
+            if virtual_content:
+                # Obtener información del contenido original
+                content = get_db().topic_contents.find_one({
+                    "_id": virtual_content.get("content_id")
+                })
+                
+                # Obtener información del tema virtual
+                virtual_topic = get_db().virtual_topics.find_one({
+                    "_id": virtual_content.get("virtual_topic_id")
+                })
+                
+                enriched_result = {
+                    **result,
+                    "content_info": {
+                        "content_type": content.get("content_type") if content else "unknown",
+                        "title": content.get("title") if content else "Sin título"
+                    },
+                    "topic_info": {
+                        "topic_name": virtual_topic.get("name") if virtual_topic else "Sin nombre",
+                        "virtual_topic_id": str(virtual_topic["_id"]) if virtual_topic else None
+                    }
+                }
+                enriched_results.append(enriched_result)
+        
+        return APIRoute.success(
+            data={
+                "results": enriched_results,
+                "total_count": len(enriched_results),
+                "filters_applied": {
+                    "content_type": content_type,
+                    "module_id": module_id
+                }
+            },
+            message="Resultados obtenidos exitosamente"
+        )
+        
+    except Exception as e:
+        logging.error(f"Error al obtener resultados del estudiante: {str(e)}")
+        return APIRoute.error(
+            ErrorCodes.SERVER_ERROR,
+            str(e),
+            status_code=500
+        )

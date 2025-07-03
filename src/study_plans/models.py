@@ -106,15 +106,15 @@ class Topic:
                  difficulty: str,
                  date_start: datetime,
                  date_end: datetime,
-                 resources: List[Dict] = None,
-                 theory_content: str = ""):
+                 theory_content: str = "",
+                 published: bool = False):
         self.module_id = ObjectId(module_id)
         self.name = name
         self.difficulty = difficulty
-        self.resources = resources or []
         self.theory_content = theory_content
         self.date_start = date_start
         self.date_end = date_end
+        self.published = published
         self.created_at = datetime.now()
 
     def to_dict(self) -> dict:
@@ -122,10 +122,10 @@ class Topic:
             "module_id": self.module_id,
             "name": self.name,
             "difficulty": self.difficulty,
-            "resources": self.resources,
             "theory_content": self.theory_content,
             "date_start": self.date_start,
             "date_end": self.date_end,
+            "published": self.published,
             "created_at": self.created_at
         }
 
@@ -167,26 +167,27 @@ class Evaluation:
             "linked_quiz_id": self.linked_quiz_id
         }
 
-class EvaluationResult:
-    def __init__(self,
-                 evaluation_id: str,
-                 student_id: str,
-                 score: float,
-                 feedback: str = ""):
-        self.evaluation_id = ObjectId(evaluation_id)
-        self.student_id = ObjectId(student_id)
-        self.score = score
-        self.feedback = feedback
-        self.recorded_at = datetime.now()
+# DEPRECATED: Usar ContentResult en su lugar.
+# class EvaluationResult:
+#     def __init__(self,
+#                  evaluation_id: str,
+#                  student_id: str,
+#                  score: float,
+#                  feedback: str = ""):
+#         self.evaluation_id = ObjectId(evaluation_id)
+#         self.student_id = ObjectId(student_id)
+#         self.score = score
+#         self.feedback = feedback
+#         self.recorded_at = datetime.now()
 
-    def to_dict(self) -> dict:
-        return {
-            "evaluation_id": self.evaluation_id,
-            "student_id": self.student_id,
-            "score": self.score,
-            "feedback": self.feedback,
-            "recorded_at": self.recorded_at
-        }
+#     def to_dict(self) -> dict:
+#         return {
+#             "evaluation_id": self.evaluation_id,
+#             "student_id": self.student_id,
+#             "score": self.score,
+#             "feedback": self.feedback,
+#             "recorded_at": self.recorded_at
+#         }
 
 class EvaluationResource:
     """
@@ -290,6 +291,7 @@ class TopicContent:
                  topic_id: str,
                  content: str,
                  content_type: str,  # Código del tipo de contenido (text, feynman, diagram, etc.)
+                 interactive_data: Optional[Dict] = None,  # Para quizzes, simulaciones, etc.
                  learning_methodologies: List[str] = None,
                  adaptation_options: Dict = None,
                  resources: List[str] = None,
@@ -300,6 +302,7 @@ class TopicContent:
         self.topic_id = ObjectId(topic_id)
         self.content = content
         self.content_type = content_type
+        self.interactive_data = interactive_data or {}
         self.learning_methodologies = learning_methodologies or []
         self.adaptation_options = adaptation_options or {}
         self.resources = resources or []
@@ -315,6 +318,7 @@ class TopicContent:
             "topic_id": self.topic_id,
             "content": self.content,
             "content_type": self.content_type,
+            "interactive_data": self.interactive_data,
             "learning_methodologies": self.learning_methodologies,
             "adaptation_options": self.adaptation_options,
             "resources": self.resources,
@@ -338,6 +342,7 @@ class ContentTypes:
     DOCUMENTS = "documents"           # Para PDFs y otros documentos (NUEVO)
     SLIDES = "slides"                 # Diapositivas/Presentaciones
     IMAGE = "image"                   # Imagen estática
+    LINK = "link"                     # Enlace web (NUEVO)
     
     # Contenido Visual
     DIAGRAM = "diagram"               # Diagramas
@@ -381,7 +386,7 @@ class ContentTypes:
     def get_categories(cls):
         return {
             "theoretical": [cls.TEXT, cls.FEYNMAN, cls.STORY, cls.SUMMARY, cls.GLOSSARY, 
-                          cls.GUIDED_QUESTIONS, cls.EXAMPLES, cls.DOCUMENTS],
+                          cls.GUIDED_QUESTIONS, cls.EXAMPLES, cls.DOCUMENTS, cls.LINK],
             "visual": [cls.DIAGRAM, cls.INFOGRAPHIC, cls.MINDMAP, cls.TIMELINE, 
                      cls.ILLUSTRATION, cls.CHART, cls.PICTOGRAM, cls.IMAGE, cls.SLIDES],
             "multimedia": [cls.VIDEO, cls.AUDIO, cls.MUSIC, cls.ANIMATION, 

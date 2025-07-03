@@ -188,32 +188,44 @@ class VirtualTopicContent:
 
 class ContentResult:
     """
-    Resultados unificados de interacción con contenido.
-    Reemplaza game_results, simulation_results, quiz_results.
+    Resultados unificados de interacción y evaluación.
+    Reemplaza game_results, simulation_results, quiz_results, evaluation_results.
     """
     def __init__(self,
-                 virtual_content_id: str,  # Referencia a VirtualTopicContent
                  student_id: str,
-                 session_data: Dict,
-                 learning_metrics: Dict = None,
-                 feedback: str = None,
+                 virtual_content_id: Optional[str] = None,  # Para resultados de contenido
+                 evaluation_id: Optional[str] = None,       # Para resultados de evaluación formal
+                 session_data: Optional[Dict] = None,
+                 learning_metrics: Optional[Dict] = None,
+                 score: Optional[float] = None,
+                 feedback: Optional[str] = None,
+                 graded_by: Optional[str] = None,           # ID del profesor/evaluador
                  session_type: str = "completion"):  # "practice", "assessment", "exploration"
         
-        self.virtual_content_id = ObjectId(virtual_content_id)
+        if not virtual_content_id and not evaluation_id:
+            raise ValueError("Se debe proporcionar virtual_content_id o evaluation_id")
+
+        self.virtual_content_id = ObjectId(virtual_content_id) if virtual_content_id else None
+        self.evaluation_id = ObjectId(evaluation_id) if evaluation_id else None
         self.student_id = ObjectId(student_id)
-        self.session_data = session_data
+        self.session_data = session_data or {}
         self.learning_metrics = learning_metrics or {}
+        self.score = score
         self.feedback = feedback
+        self.graded_by = ObjectId(graded_by) if graded_by else None
         self.session_type = session_type
         self.created_at = datetime.now()
 
     def to_dict(self) -> Dict:
         return {
             "virtual_content_id": self.virtual_content_id,
+            "evaluation_id": self.evaluation_id,
             "student_id": self.student_id,
             "session_data": self.session_data,
             "learning_metrics": self.learning_metrics,
+            "score": self.score,
             "feedback": self.feedback,
+            "graded_by": self.graded_by,
             "session_type": self.session_type,
             "created_at": self.created_at
         }
