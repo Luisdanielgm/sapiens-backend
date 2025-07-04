@@ -176,7 +176,10 @@ class VirtualTopicService(VerificationBaseService):
     def get_module_topics(self, module_id: str) -> List[Dict]:
         try:
             topics = list(self.collection.find(
-                {"virtual_module_id": ObjectId(module_id)}
+                {
+                    "virtual_module_id": ObjectId(module_id),
+                    "status": {"$ne": "locked"}
+                }
             ).sort("order", 1))
             
             # Convertir ObjectIds a strings
@@ -799,13 +802,15 @@ class FastVirtualModuleGenerator(VerificationBaseService):
                         "topic_id": topic_id,
                         "student_id": student_id,
                         "virtual_module_id": virtual_module_id,
+                        "name": topic.get("name"),
+                        "description": topic.get("theory_content", ""),
                         "adaptations": {
                             "cognitive_profile": cognitive_profile,
                             "difficulty_adjustment": self._calculate_quick_difficulty_adjustment(
                                 topic, cognitive_profile
                             )
                         },
-                        "status": "active",
+                        "status": "locked",
                         "progress": 0.0,
                         "completion_status": "not_started"
                     }
@@ -865,13 +870,15 @@ class FastVirtualModuleGenerator(VerificationBaseService):
                         "topic_id": ObjectId(str(topic["_id"])),
                         "student_id": student_id,
                         "virtual_module_id": ObjectId(virtual_module_id),
+                        "name": topic.get("name"),
+                        "description": topic.get("theory_content", ""),
                         "adaptations": {
                             "cognitive_profile": cognitive_profile,
                             "difficulty_adjustment": self._calculate_quick_difficulty_adjustment(
                                 topic, cognitive_profile
                             )
                         },
-                        "status": "active",
+                        "status": "locked",
                         "progress": 0.0,
                         "completion_status": "not_started",
                         "created_at": datetime.now()

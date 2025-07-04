@@ -292,16 +292,6 @@ def get_virtualization_readiness(module_id):
     except Exception as e:
         return APIRoute.error(ErrorCodes.SERVER_ERROR, str(e), status_code=getattr(e, 'code', 500))
 
-@study_plan_bp.route('/module/<module_id>/virtualization-settings', methods=['PUT'])
-@APIRoute.standard(auth_required_flag=True, roles=[ROLES['TEACHER']])
-def update_virtualization_settings(module_id):
-    """Actualiza la configuración de virtualización de un módulo"""
-    try:
-        settings = request.get_json()
-        module_service.update_virtualization_settings(module_id, settings)
-        return APIRoute.success(message="Configuración de virtualización actualizada exitosamente")
-    except Exception as e:
-        return APIRoute.error(ErrorCodes.SERVER_ERROR, str(e), status_code=getattr(e, 'code', 500))
 
 # Rutas para Topics
 @study_plan_bp.route('/topic', methods=['POST'])

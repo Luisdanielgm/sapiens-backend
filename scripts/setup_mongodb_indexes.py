@@ -80,16 +80,8 @@ def create_virtualization_indexes():
     except Exception as e:
         print(f"⚠️  Error creando índices para virtual_modules: {str(e)}")
     
-    # Índices para modules (optimizar virtualization readiness)
+    # Índices para modules
     try:
-        # Índice para módulos habilitados para virtualización
-        db.modules.create_index([
-            ("study_plan_id", 1),
-            ("ready_for_virtualization", 1)
-        ], name="virtualization_ready_idx")
-        print("✅ Índice creado: modules.virtualization_ready_idx")
-        indexes_created += 1
-        
         # Índice para detección de cambios
         db.modules.create_index([
             ("last_content_update", 1)
