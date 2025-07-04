@@ -65,7 +65,6 @@ class Module:
                  evaluation_rubric: Dict[str, any],
                  date_start: datetime,
                  date_end: datetime,
-                 ready_for_virtualization: bool = False,  # deprecated
                  content_completeness_score: int = 0,
                  virtualization_requirements: Optional[Dict] = None,
                  last_content_update: Optional[datetime] = None,
@@ -76,7 +75,6 @@ class Module:
         self.evaluation_rubric = evaluation_rubric
         self.date_start = date_start
         self.date_end = date_end
-        self.ready_for_virtualization = ready_for_virtualization
         self.content_completeness_score = content_completeness_score
         self.virtualization_requirements = virtualization_requirements or {}
         self.last_content_update = last_content_update or datetime.now()
@@ -91,7 +89,6 @@ class Module:
             "evaluation_rubric": self.evaluation_rubric,
             "date_start": self.date_start,
             "date_end": self.date_end,
-            "ready_for_virtualization": self.ready_for_virtualization,
             "content_completeness_score": self.content_completeness_score,
             "virtualization_requirements": self.virtualization_requirements,
             "last_content_update": self.last_content_update,

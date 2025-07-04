@@ -925,16 +925,22 @@ def initialize_progressive_generation():
                 status_code=404
             )
         
-        # 3. Obtener módulos del plan que estén habilitados para virtualización
-        enabled_modules = list(get_db().modules.find({
-            "study_plan_id": ObjectId(plan_id),
-            "ready_for_virtualization": True
-        }))
-        
+        # 3. Obtener módulos del plan que tengan al menos un tema publicado
+        all_modules = list(get_db().modules.find({"study_plan_id": ObjectId(plan_id)}))
+        enabled_modules = []
+        for mod in all_modules:
+            published_count = get_db().topics.count_documents({
+                "module_id": mod["_id"],
+                "published": True
+            })
+            if published_count > 0:
+                mod["published_count"] = published_count
+                enabled_modules.append(mod)
+
         if not enabled_modules:
             return APIRoute.error(
                 ErrorCodes.BAD_REQUEST,
-                "No hay módulos habilitados para virtualización en este plan",
+                "No hay módulos con temas publicados en este plan",
                 status_code=400
             )
         
@@ -1060,11 +1066,12 @@ def trigger_next_generation():
         
         plan_id = current_module["study_plan_id"]
         
-        # 3. Buscar siguiente módulo habilitado no generado
-        all_enabled_modules = list(get_db().modules.find({
-            "study_plan_id": plan_id,
-            "ready_for_virtualization": True
-        }).sort("created_at", 1))  # Ordenar por fecha de creación
+        # 3. Buscar siguiente módulo con temas publicados no generado
+        all_plan_modules = list(get_db().modules.find({"study_plan_id": plan_id}).sort("created_at", 1))
+        all_enabled_modules = []
+        for m in all_plan_modules:
+            if get_db().topics.count_documents({"module_id": m["_id"], "published": True}) > 0:
+                all_enabled_modules.append(m)
         
         # Obtener módulos ya generados
         generated_modules = list(get_db().virtual_modules.find({

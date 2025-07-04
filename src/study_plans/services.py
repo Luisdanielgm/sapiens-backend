@@ -771,7 +771,6 @@ class ModuleService(VerificationBaseService):
         
         # Preparar detalles de cheques
         checks = {
-            "ready_for_virtualization": module.get("ready_for_virtualization", False),
             "total_topics": total_topics,
             "published_topics_count": published_topics_count,
             "unpublished_topics_count": unpublished_topics_count,
@@ -781,8 +780,6 @@ class ModuleService(VerificationBaseService):
             "content_completeness_score": content_completeness_score
         }
         suggestions = []
-        if not checks["ready_for_virtualization"]:
-            suggestions.append("Habilitar la virtualización del módulo")
         # Sugerencia de publicar temas restantes
         if unpublished_topics_count > 0:
             suggestions.append(f"{unpublished_topics_count} temas sin publicar")
@@ -796,7 +793,6 @@ class ModuleService(VerificationBaseService):
         if eval_count == 0:
             suggestions.append("Agregar al menos una evaluación al módulo")
         ready = all([
-            checks["ready_for_virtualization"],
             checks["published_topics_count"] > 0,
             checks["missing_theory_count"] == 0,
             checks["missing_resources_count"] == 0,
@@ -804,48 +800,6 @@ class ModuleService(VerificationBaseService):
         ])
         return {"ready": ready, "checks": checks, "suggestions": suggestions}
 
-    def update_virtualization_settings(self, module_id: str, settings: dict) -> None:
-        """
-        Actualiza configuración de virtualización de un módulo.
-        """
-        validate_object_id(module_id, "ID de módulo")
-        module = self.collection.find_one({"_id": ObjectId(module_id)})
-        if not module:
-            raise AppException("Módulo no encontrado", AppException.NOT_FOUND)
-        update_data = {}
-        if "ready_for_virtualization" in settings:
-            desired_state = bool(settings["ready_for_virtualization"])
-
-            if desired_state:
-                published_count = self.db.topics.count_documents({
-                    "module_id": ObjectId(module_id),
-                    "published": True
-                })
-                if published_count == 0:
-                    raise AppException(
-                        "No se puede habilitar sin temas publicados",
-                        AppException.BAD_REQUEST
-                    )
-
-            update_data["ready_for_virtualization"] = desired_state
-
-            # Si se activa, detectar cambios para posible sincronización
-            if desired_state:
-                from src.virtual.services import ContentChangeDetector
-                change_detector = ContentChangeDetector()
-                change_info = change_detector.detect_changes(module_id)
-                if change_info.get("has_changes"):
-                    change_detector.schedule_incremental_updates(module_id, change_info)
-        
-        if "virtualization_requirements" in settings:
-            if not isinstance(settings["virtualization_requirements"], dict):
-                raise AppException("Requisitos inválidos", AppException.BAD_REQUEST)
-            update_data["virtualization_requirements"] = settings["virtualization_requirements"]
-        update_data["last_content_update"] = datetime.now()
-        update_data["updated_at"] = datetime.now()
-        result = self.collection.update_one({"_id": ObjectId(module_id)}, {"$set": update_data})
-        if result.modified_count == 0:
-            raise AppException("No se pudo actualizar configuración", AppException.BAD_REQUEST)
 
 class TopicService(VerificationBaseService):
     def __init__(self):
