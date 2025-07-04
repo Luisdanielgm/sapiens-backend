@@ -3,7 +3,7 @@ from flask_jwt_extended import jwt_required, get_jwt_identity
 from bson import ObjectId
 import logging
 
-from src.shared.decorators import handle_errors, auth_required, validate_json, role_required
+from src.shared.decorators import role_required
 from src.shared.database import get_db
 from src.shared.standardization import APIRoute, ErrorCodes
 from .services import (
@@ -182,7 +182,7 @@ def update_content(content_id):
         success, result = content_service.update_content(content_id, data)
 
         if success:
-            return APIRoute.success(data={"message": result}, message=result)
+            return APIRoute.success(data={"message": result})
         else:
             return APIRoute.error(ErrorCodes.UPDATE_ERROR, result)
             
@@ -205,7 +205,7 @@ def delete_content(content_id):
         success, result = content_service.delete_content(content_id)
 
         if success:
-            return APIRoute.success(data={"message": result}, message=result)
+            return APIRoute.success(data={"message": result})
         else:
             return APIRoute.error(ErrorCodes.NOT_FOUND, result, status_code=404)
             

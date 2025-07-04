@@ -82,7 +82,7 @@ def process_institute_invitation(invitation_id):
     )
     
     if success:
-        return APIRoute.success(data={"message": message}, message=message)
+        return APIRoute.success(message=message)
     return APIRoute.error(
         ErrorCodes.PROCESSING_ERROR,
         message,
@@ -161,7 +161,7 @@ def process_class_invitation(invitation_id):
     )
     
     if success:
-        return APIRoute.success(data={"message": message}, message=message)
+        return APIRoute.success(message=message)
     return APIRoute.error(
         ErrorCodes.PROCESSING_ERROR,
         message,
@@ -217,7 +217,7 @@ def process_membership_request(request_id):
     
     success, message = invitation_service.process_membership_request(request_id, action)
     if success:
-        return APIRoute.success(data={"message": message}, message=message)
+        return APIRoute.success(message=message)
     return APIRoute.error(
         ErrorCodes.PROCESSING_ERROR,
         message,

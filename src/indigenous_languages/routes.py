@@ -238,9 +238,12 @@ def update_translation_endpoint(translation_id):
     try:
         data = request.get_json()
         success, message = translation_service.update_translation(translation_id, data)
-        
+
         if success:
-            return APIRoute.success(data={"message": message}, message=message)
+            return APIRoute.success(
+                data={"translation_id": translation_id, "updated": True},
+                message=message,
+            )
         return APIRoute.error(
             ErrorCodes.UPDATE_ERROR,
             message,
@@ -259,9 +262,12 @@ def delete_translation_endpoint(translation_id):
     """Elimina una traducción existente"""
     try:
         success, message = translation_service.delete_translation(translation_id)
-        
+
         if success:
-            return APIRoute.success(data={"message": message}, message=message)
+            return APIRoute.success(
+                data={"translation_id": translation_id, "deleted": True},
+                message=message,
+            )
         return APIRoute.error(
             ErrorCodes.DELETE_ERROR,
             message,

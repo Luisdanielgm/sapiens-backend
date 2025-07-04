@@ -336,9 +336,12 @@ def update_session(session_id):
             del data['created_at']
         
         success, message = deep_research_service.update_session(session_id, data)
-        
+
         if success:
-            return APIRoute.success(data={"message": message}, message=message)
+            return APIRoute.success(
+                data={"session_id": session_id, "operation": "update"},
+                message=message,
+            )
         else:
             return APIRoute.error(
                 ErrorCodes.RESOURCE_NOT_FOUND,
@@ -361,9 +364,12 @@ def delete_session(session_id):
     """
     try:
         success, message = deep_research_service.delete_session(session_id)
-        
+
         if success:
-            return APIRoute.success(data={"message": message}, message=message)
+            return APIRoute.success(
+                data={"session_id": session_id, "deleted": True},
+                message=message,
+            )
         else:
             return APIRoute.error(
                 ErrorCodes.RESOURCE_NOT_FOUND,
@@ -391,9 +397,12 @@ def update_topic_theory():
         content = data.get('content')
         
         success, message = deep_research_service.update_topic_theory_content(topic_id, content)
-        
+
         if success:
-            return APIRoute.success(data={"message": "Contenido teórico actualizado exitosamente"}, message="Contenido teórico actualizado exitosamente")
+            return APIRoute.success(
+                data={"topic_id": topic_id, "updated": True},
+                message="Contenido teórico actualizado exitosamente",
+            )
         else:
             return APIRoute.error(
                 ErrorCodes.UPDATE_ERROR,

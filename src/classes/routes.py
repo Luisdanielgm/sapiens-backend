@@ -103,7 +103,7 @@ def update_class(class_id):
         success, result = class_service.update_class(class_id, updates)
 
         if success:
-            return APIRoute.success(data={"message": result}, message=result)
+            return APIRoute.success(data={"message": result})
         else:
             return APIRoute.error(ErrorCodes.UPDATE_ERROR, result)
     except Exception as e:
@@ -122,7 +122,7 @@ def delete_class(class_id):
         success, message = class_service.delete_class(class_id)
 
         if success:
-            return APIRoute.success(data={"message": message}, message=message)
+            return APIRoute.success(data={"message": message})
         return APIRoute.error(
             ErrorCodes.DELETE_ERROR,
             message,
@@ -286,7 +286,7 @@ def remove_class_member(class_id, member_id):
         success, message = membership_service.remove_member(class_id, member_id)
 
         if success:
-            return APIRoute.success(data={"message": message}, message=message)
+            return APIRoute.success(data={"message": message})
         return APIRoute.error(
             ErrorCodes.DELETE_ERROR,
             message,
@@ -445,7 +445,7 @@ def update_subperiod(class_id, subperiod_id):
         success, message = subperiod_service.update_subperiod(subperiod_id, request.json)
 
         if success:
-            return APIRoute.success(data={"message": message}, message=message)
+            return APIRoute.success(data={"message": message})
         return APIRoute.error(
             ErrorCodes.OPERATION_FAILED,
             message,
@@ -486,7 +486,7 @@ def delete_subperiod(class_id, subperiod_id):
         success, message = subperiod_service.delete_subperiod(subperiod_id)
 
         if success:
-            return APIRoute.success(data={"message": message}, message=message)
+            return APIRoute.success(data={"message": message})
         return APIRoute.error(
             ErrorCodes.DELETE_ERROR,
             message,
