@@ -55,9 +55,9 @@ def create_class():
             class_data['schedule'] = request.json['schedule']
         
         success, result = class_service.create_class(class_data)
-        
+
         if success:
-            return APIRoute.success({"id": result}, message="Clase creada exitosamente", status_code=201)
+            return APIRoute.success(data={"id": result}, message="Clase creada exitosamente", status_code=201)
         else:
             return APIRoute.error(ErrorCodes.CREATION_ERROR, result)
     except Exception as e:
@@ -72,7 +72,7 @@ def get_class_details(class_id):
     try:
         class_details = class_service.get_class_details(class_id)
         if class_details:
-            return APIRoute.success(class_details)
+            return APIRoute.success(data=class_details)
         else:
             return APIRoute.error("Clase no encontrada", 404)
     except Exception as e:
@@ -101,11 +101,11 @@ def update_class(class_id):
             return APIRoute.error("No se proporcionaron campos válidos para actualizar", 400)
         
         success, result = class_service.update_class(class_id, updates)
-        
+
         if success:
-            return APIRoute.success({"message": result})
+            return APIRoute.success(data={"message": result}, message=result)
         else:
-            return APIRoute.error(result, 400)
+            return APIRoute.error(ErrorCodes.UPDATE_ERROR, result)
     except Exception as e:
         return APIRoute.error(str(e), 500)
 
@@ -120,13 +120,13 @@ def delete_class(class_id):
     """
     try:
         success, message = class_service.delete_class(class_id)
-        
+
         if success:
-            return APIRoute.success(message=message)
+            return APIRoute.success(data={"message": message}, message=message)
         return APIRoute.error(
             ErrorCodes.DELETE_ERROR,
             message,
-            status_code=400
+            status_code=400,
         )
     except Exception as e:
         return APIRoute.error(
@@ -164,13 +164,15 @@ def check_class_dependencies(class_id):
             "class_id": ObjectId(class_id)
         })
         
-        return APIRoute.success({
-            "has_dependencies": members_count > 0 or subperiods_count > 0,
-            "dependencies": {
-                "members": members_count,
-                "subperiods": subperiods_count
+        return APIRoute.success(
+            data={
+                "has_dependencies": members_count > 0 or subperiods_count > 0,
+                "dependencies": {
+                    "members": members_count,
+                    "subperiods": subperiods_count,
+                },
             }
-        })
+        )
         
     except Exception as e:
         return APIRoute.error(
@@ -199,11 +201,11 @@ def add_class_member(class_id):
             return APIRoute.error("Rol no válido. Debe ser 'TEACHER' o 'STUDENT'", 400)
         
         success, result = membership_service.add_member(class_id, user_id, role)
-        
+
         if success:
-            return APIRoute.success({"id": result}, 201)
+            return APIRoute.success(data={"id": result}, status_code=201)
         else:
-            return APIRoute.error(result, 400)
+            return APIRoute.error(ErrorCodes.CREATION_ERROR, result)
     except Exception as e:
         return APIRoute.error(str(e), 500)
 
@@ -230,7 +232,7 @@ def get_class_members(class_id):
         
         # Modificar el servicio para filtrar por rol
         members = membership_service.get_class_members(class_id, role)
-        return APIRoute.success(members)
+        return APIRoute.success(data=members)
     except Exception as e:
         return APIRoute.error(str(e), 500)
 
@@ -242,7 +244,7 @@ def get_teacher_classes(teacher_id_or_email):
     """
     try:
         classes = membership_service.get_classes_by_teacher(teacher_id_or_email)
-        return APIRoute.success(classes)
+        return APIRoute.success(data=classes)
     except Exception as e:
         return APIRoute.error(str(e), 500)
 
@@ -254,7 +256,7 @@ def get_student_classes(student_id_or_email):
     """
     try:
         classes = membership_service.get_classes_by_student(student_id_or_email)
-        return APIRoute.success(classes)
+        return APIRoute.success(data=classes)
     except Exception as e:
         return APIRoute.error(str(e), 500)
 
@@ -266,7 +268,7 @@ def get_class_students(class_id):
     """
     try:
         students = membership_service.get_class_students(class_id)
-        return APIRoute.success(students)
+        return APIRoute.success(data=students)
     except Exception as e:
         return APIRoute.error(str(e), 500)
 
@@ -282,13 +284,13 @@ def remove_class_member(class_id, member_id):
     """
     try:
         success, message = membership_service.remove_member(class_id, member_id)
-        
+
         if success:
-            return APIRoute.success(message=message)
+            return APIRoute.success(data={"message": message}, message=message)
         return APIRoute.error(
             ErrorCodes.DELETE_ERROR,
             message,
-            status_code=400
+            status_code=400,
         )
     except Exception as e:
         return APIRoute.error(
@@ -335,11 +337,11 @@ def add_class_member_by_email(class_id):
             )
         
         success, result = membership_service.add_member_by_email(class_id, email, role)
-        
+
         if success:
             if isinstance(result, dict) and "message" in result:
-                return APIRoute.success(result, message=result["message"], status_code=200)
-            return APIRoute.success(result, status_code=201)
+                return APIRoute.success(data=result, message=result["message"], status_code=200)
+            return APIRoute.success(data=result, status_code=201)
         else:
             return APIRoute.error(
                 ErrorCodes.OPERATION_FAILED,
@@ -381,11 +383,11 @@ def create_subperiod(class_id):
         }
         
         success, result = subperiod_service.create_subperiod(subperiod_data)
-        
+
         if success:
-            return APIRoute.success({"id": result}, 201)
+            return APIRoute.success(data={"id": result}, status_code=201)
         else:
-            return APIRoute.error(result, 400)
+            return APIRoute.error(ErrorCodes.CREATION_ERROR, result)
     except Exception as e:
         return APIRoute.error(str(e), 500)
 
@@ -397,7 +399,7 @@ def get_class_subperiods(class_id):
     """
     try:
         subperiods = subperiod_service.get_class_subperiods(class_id)
-        return APIRoute.success(subperiods)
+        return APIRoute.success(data=subperiods)
     except Exception as e:
         return APIRoute.error(str(e), 500)
 
@@ -441,9 +443,9 @@ def update_subperiod(class_id, subperiod_id):
         
         # Actualizar el subperíodo
         success, message = subperiod_service.update_subperiod(subperiod_id, request.json)
-        
+
         if success:
-            return APIRoute.success(message=message)
+            return APIRoute.success(data={"message": message}, message=message)
         return APIRoute.error(
             ErrorCodes.OPERATION_FAILED,
             message,
@@ -482,9 +484,9 @@ def delete_subperiod(class_id, subperiod_id):
         
         # Eliminar el subperíodo
         success, message = subperiod_service.delete_subperiod(subperiod_id)
-        
+
         if success:
-            return APIRoute.success(message=message)
+            return APIRoute.success(data={"message": message}, message=message)
         return APIRoute.error(
             ErrorCodes.DELETE_ERROR,
             message,
@@ -506,7 +508,7 @@ def get_level_classes(level_id):
     """
     try:
         classes = class_service.get_classes_by_level(level_id)
-        return APIRoute.success(classes)
+        return APIRoute.success(data=classes)
     except Exception as e:
         return APIRoute.error(str(e), 500)
 

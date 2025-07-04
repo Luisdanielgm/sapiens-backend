@@ -240,7 +240,7 @@ def update_translation_endpoint(translation_id):
         success, message = translation_service.update_translation(translation_id, data)
         
         if success:
-            return APIRoute.success(message=message)
+            return APIRoute.success(data={"message": message}, message=message)
         return APIRoute.error(
             ErrorCodes.UPDATE_ERROR,
             message,
@@ -261,7 +261,7 @@ def delete_translation_endpoint(translation_id):
         success, message = translation_service.delete_translation(translation_id)
         
         if success:
-            return APIRoute.success(message=message)
+            return APIRoute.success(data={"message": message}, message=message)
         return APIRoute.error(
             ErrorCodes.DELETE_ERROR,
             message,

@@ -1,11 +1,17 @@
-from flask import Blueprint, request, jsonify, g
+from flask import Blueprint, request, g
 from flask_jwt_extended import jwt_required, get_jwt_identity
 from bson import ObjectId
 import logging
 
 from src.shared.decorators import handle_errors, auth_required, validate_json, role_required
 from src.shared.database import get_db
-from .services import ContentService, ContentTypeService, VirtualContentService, ContentResultService
+from src.shared.standardization import APIRoute, ErrorCodes
+from .services import (
+    ContentService,
+    ContentTypeService,
+    VirtualContentService,
+    ContentResultService,
+)
 
 content_bp = Blueprint('content', __name__, url_prefix='/api/content')
 
@@ -31,18 +37,16 @@ def get_content_types():
         subcategory = request.args.get('subcategory')  # game, simulation, quiz, diagram, etc.
         
         content_types = content_type_service.get_content_types(category, subcategory)
-        
-        return jsonify({
-            "success": True,
-            "content_types": content_types
-        }), 200
+
+        return APIRoute.success(data={"content_types": content_types})
         
     except Exception as e:
         logging.error(f"Error obteniendo tipos de contenido: {str(e)}")
-        return jsonify({
-            "success": False,
-            "message": "Error interno del servidor"
-        }), 500
+        return APIRoute.error(
+            ErrorCodes.SERVER_ERROR,
+            "Error interno del servidor",
+            status_code=500,
+        )
 
 @content_bp.route('/types', methods=['POST'])
 @jwt_required()
@@ -57,23 +61,21 @@ def create_content_type():
         success, result = content_type_service.create_content_type(data)
         
         if success:
-            return jsonify({
-                "success": True,
-                "message": "Tipo de contenido creado exitosamente",
-                "content_type_id": result
-            }), 201
+            return APIRoute.success(
+                data={"content_type_id": result},
+                message="Tipo de contenido creado exitosamente",
+                status_code=201,
+            )
         else:
-            return jsonify({
-                "success": False,
-                "message": result
-            }), 400
+            return APIRoute.error(ErrorCodes.CREATION_ERROR, result)
             
     except Exception as e:
         logging.error(f"Error creando tipo de contenido: {str(e)}")
-        return jsonify({
-            "success": False,
-            "message": "Error interno del servidor"
-        }), 500
+        return APIRoute.error(
+            ErrorCodes.SERVER_ERROR,
+            "Error interno del servidor",
+            status_code=500,
+        )
 
 # ============================================
 # ENDPOINTS DE CONTENIDO UNIFICADO
@@ -108,25 +110,23 @@ def create_content():
         data['creator_id'] = get_jwt_identity()
         
         success, result = content_service.create_content(data)
-        
+
         if success:
-            return jsonify({
-                "success": True,
-                "message": "Contenido creado exitosamente",
-                "content_id": result
-            }), 201
+            return APIRoute.success(
+                data={"content_id": result},
+                message="Contenido creado exitosamente",
+                status_code=201,
+            )
         else:
-            return jsonify({
-                "success": False,
-                "message": result
-            }), 400
+            return APIRoute.error(ErrorCodes.CREATION_ERROR, result)
             
     except Exception as e:
         logging.error(f"Error creando contenido: {str(e)}")
-        return jsonify({
-            "success": False,
-            "message": "Error interno del servidor"
-        }), 500
+        return APIRoute.error(
+            ErrorCodes.SERVER_ERROR,
+            "Error interno del servidor",
+            status_code=500,
+        )
 
 @content_bp.route('/topic/<topic_id>', methods=['GET'])
 @jwt_required()
@@ -139,18 +139,16 @@ def get_topic_content(topic_id):
         content_type = request.args.get('content_type')
         
         contents = content_service.get_topic_content(topic_id, content_type)
-        
-        return jsonify({
-            "success": True,
-            "contents": contents
-        }), 200
+
+        return APIRoute.success(data={"contents": contents})
         
     except Exception as e:
         logging.error(f"Error obteniendo contenido del tema: {str(e)}")
-        return jsonify({
-            "success": False,
-            "message": "Error interno del servidor"
-        }), 500
+        return APIRoute.error(
+            ErrorCodes.SERVER_ERROR,
+            "Error interno del servidor",
+            status_code=500,
+        )
 
 @content_bp.route('/topic/<topic_id>/interactive', methods=['GET'])
 @jwt_required()
@@ -160,18 +158,16 @@ def get_interactive_content(topic_id):
     """
     try:
         contents = content_service.get_interactive_content(topic_id)
-        
-        return jsonify({
-            "success": True,
-            "interactive_contents": contents
-        }), 200
+
+        return APIRoute.success(data={"interactive_contents": contents})
         
     except Exception as e:
         logging.error(f"Error obteniendo contenido interactivo: {str(e)}")
-        return jsonify({
-            "success": False,
-            "message": "Error interno del servidor"
-        }), 500
+        return APIRoute.error(
+            ErrorCodes.SERVER_ERROR,
+            "Error interno del servidor",
+            status_code=500,
+        )
 
 @content_bp.route('/<content_id>', methods=['PUT'])
 @jwt_required()
@@ -184,24 +180,19 @@ def update_content(content_id):
         data = request.json
         
         success, result = content_service.update_content(content_id, data)
-        
+
         if success:
-            return jsonify({
-                "success": True,
-                "message": result
-            }), 200
+            return APIRoute.success(data={"message": result}, message=result)
         else:
-            return jsonify({
-                "success": False,
-                "message": result
-            }), 400
+            return APIRoute.error(ErrorCodes.UPDATE_ERROR, result)
             
     except Exception as e:
         logging.error(f"Error actualizando contenido: {str(e)}")
-        return jsonify({
-            "success": False,
-            "message": "Error interno del servidor"
-        }), 500
+        return APIRoute.error(
+            ErrorCodes.SERVER_ERROR,
+            "Error interno del servidor",
+            status_code=500,
+        )
 
 @content_bp.route('/<content_id>', methods=['DELETE'])
 @jwt_required()
@@ -212,24 +203,19 @@ def delete_content(content_id):
     """
     try:
         success, result = content_service.delete_content(content_id)
-        
+
         if success:
-            return jsonify({
-                "success": True,
-                "message": result
-            }), 200
+            return APIRoute.success(data={"message": result}, message=result)
         else:
-            return jsonify({
-                "success": False,
-                "message": result
-            }), 404
+            return APIRoute.error(ErrorCodes.NOT_FOUND, result, status_code=404)
             
     except Exception as e:
         logging.error(f"Error eliminando contenido: {str(e)}")
-        return jsonify({
-            "success": False,
-            "message": "Error interno del servidor"
-        }), 500
+        return APIRoute.error(
+            ErrorCodes.SERVER_ERROR,
+            "Error interno del servidor",
+            status_code=500,
+        )
 
 # ============================================
 # ENDPOINTS DE CONTENIDO PERSONALIZADO
@@ -260,10 +246,11 @@ def personalize_content():
             if profile:
                 cognitive_profile = profile
             else:
-                return jsonify({
-                    "success": False,
-                    "message": "No se encontró perfil cognitivo para el estudiante"
-                }), 404
+                return APIRoute.error(
+                    ErrorCodes.NOT_FOUND,
+                    "No se encontró perfil cognitivo para el estudiante",
+                    status_code=404,
+                )
         
         success, result = virtual_content_service.personalize_content(
             data['virtual_topic_id'],
@@ -271,25 +258,23 @@ def personalize_content():
             student_id,
             cognitive_profile
         )
-        
+
         if success:
-            return jsonify({
-                "success": True,
-                "message": "Contenido personalizado exitosamente",
-                "virtual_content_id": result
-            }), 201
+            return APIRoute.success(
+                data={"virtual_content_id": result},
+                message="Contenido personalizado exitosamente",
+                status_code=201,
+            )
         else:
-            return jsonify({
-                "success": False,
-                "message": result
-            }), 400
+            return APIRoute.error(ErrorCodes.OPERATION_FAILED, result)
             
     except Exception as e:
         logging.error(f"Error personalizando contenido: {str(e)}")
-        return jsonify({
-            "success": False,
-            "message": "Error interno del servidor"
-        }), 500
+        return APIRoute.error(
+            ErrorCodes.SERVER_ERROR,
+            "Error interno del servidor",
+            status_code=500,
+        )
 
 @content_bp.route('/interaction', methods=['POST'])
 @jwt_required()
@@ -316,24 +301,25 @@ def track_interaction():
             data['virtual_content_id'],
             data['interaction_data']
         )
-        
+
         if success:
-            return jsonify({
-                "success": True,
-                "message": "Interacción registrada exitosamente"
-            }), 200
+            return APIRoute.success(
+                data={"message": "Interacción registrada exitosamente"},
+                message="Interacción registrada exitosamente",
+            )
         else:
-            return jsonify({
-                "success": False,
-                "message": "Error registrando interacción"
-            }), 400
+            return APIRoute.error(
+                ErrorCodes.OPERATION_FAILED,
+                "Error registrando interacción",
+            )
             
     except Exception as e:
         logging.error(f"Error registrando interacción: {str(e)}")
-        return jsonify({
-            "success": False,
-            "message": "Error interno del servidor"
-        }), 500
+        return APIRoute.error(
+            ErrorCodes.SERVER_ERROR,
+            "Error interno del servidor",
+            status_code=500,
+        )
 
 # ============================================
 # ENDPOINTS DE RESULTADOS UNIFICADOS
@@ -369,25 +355,23 @@ def record_result():
         data['student_id'] = data.get('student_id', get_jwt_identity())
         
         success, result = content_result_service.record_result(data)
-        
+
         if success:
-            return jsonify({
-                "success": True,
-                "message": "Resultado registrado exitosamente",
-                "result_id": result
-            }), 201
+            return APIRoute.success(
+                data={"result_id": result},
+                message="Resultado registrado exitosamente",
+                status_code=201,
+            )
         else:
-            return jsonify({
-                "success": False,
-                "message": result
-            }), 400
+            return APIRoute.error(ErrorCodes.OPERATION_FAILED, result)
             
     except Exception as e:
         logging.error(f"Error registrando resultado: {str(e)}")
-        return jsonify({
-            "success": False,
-            "message": "Error interno del servidor"
-        }), 500
+        return APIRoute.error(
+            ErrorCodes.SERVER_ERROR,
+            "Error interno del servidor",
+            status_code=500,
+        )
 
 @content_bp.route('/results/student/<student_id>', methods=['GET'])
 @jwt_required()
@@ -400,26 +384,25 @@ def get_student_results(student_id):
         # Verificar permisos: solo el mismo estudiante o profesores/admin
         current_user = get_jwt_identity()
         if current_user != student_id and not g.user.get('role') in ['professor', 'admin']:
-            return jsonify({
-                "success": False,
-                "message": "No autorizado para ver estos resultados"
-            }), 403
+            return APIRoute.error(
+                ErrorCodes.PERMISSION_DENIED,
+                "No autorizado para ver estos resultados",
+                status_code=403,
+            )
         
         content_type = request.args.get('content_type')
         
         results = content_result_service.get_student_results(student_id, content_type)
-        
-        return jsonify({
-            "success": True,
-            "results": results
-        }), 200
+
+        return APIRoute.success(data={"results": results})
         
     except Exception as e:
         logging.error(f"Error obteniendo resultados del estudiante: {str(e)}")
-        return jsonify({
-            "success": False,
-            "message": "Error interno del servidor"
-        }), 500
+        return APIRoute.error(
+            ErrorCodes.SERVER_ERROR,
+            "Error interno del servidor",
+            status_code=500,
+        )
 
 @content_bp.route('/results/my', methods=['GET'])
 @jwt_required()
@@ -433,18 +416,16 @@ def get_my_results():
         content_type = request.args.get('content_type')
         
         results = content_result_service.get_student_results(student_id, content_type)
-        
-        return jsonify({
-            "success": True,
-            "results": results
-        }), 200
+
+        return APIRoute.success(data={"results": results})
         
     except Exception as e:
         logging.error(f"Error obteniendo mis resultados: {str(e)}")
-        return jsonify({
-            "success": False,
-            "message": "Error interno del servidor"
-        }), 500
+        return APIRoute.error(
+            ErrorCodes.SERVER_ERROR,
+            "Error interno del servidor",
+            status_code=500,
+        )
 
 # ============================================
 # ENDPOINTS DE COMPATIBILIDAD (LEGACY)
@@ -458,31 +439,30 @@ def create_game_legacy():
     Endpoint de compatibilidad para crear juegos.
     Redirige al endpoint unificado con content_type="game"
     """
+    # TODO: evaluar eliminar este endpoint legacy tras refactor del frontend
     try:
         data = request.json
         data['content_type'] = 'game'
         data['creator_id'] = get_jwt_identity()
         
         success, result = content_service.create_content(data)
-        
+
         if success:
-            return jsonify({
-                "success": True,
-                "message": "Juego creado exitosamente",
-                "game_id": result  # Mantener nombre legacy
-            }), 201
+            return APIRoute.success(
+                data={"game_id": result},
+                message="Juego creado exitosamente",
+                status_code=201,
+            )
         else:
-            return jsonify({
-                "success": False,
-                "message": result
-            }), 400
+            return APIRoute.error(ErrorCodes.CREATION_ERROR, result)
             
     except Exception as e:
         logging.error(f"Error creando juego (legacy): {str(e)}")
-        return jsonify({
-            "success": False,
-            "message": "Error interno del servidor"
-        }), 500
+        return APIRoute.error(
+            ErrorCodes.SERVER_ERROR,
+            "Error interno del servidor",
+            status_code=500,
+        )
 
 @content_bp.route('/simulations', methods=['POST'])
 @jwt_required()
@@ -491,31 +471,30 @@ def create_simulation_legacy():
     """
     Endpoint de compatibilidad para crear simulaciones.
     """
+    # TODO: revisar si este endpoint legacy sigue siendo necesario
     try:
         data = request.json
         data['content_type'] = 'simulation'
         data['creator_id'] = get_jwt_identity()
         
         success, result = content_service.create_content(data)
-        
+
         if success:
-            return jsonify({
-                "success": True,
-                "message": "Simulación creada exitosamente",
-                "simulation_id": result
-            }), 201
+            return APIRoute.success(
+                data={"simulation_id": result},
+                message="Simulación creada exitosamente",
+                status_code=201,
+            )
         else:
-            return jsonify({
-                "success": False,
-                "message": result
-            }), 400
+            return APIRoute.error(ErrorCodes.CREATION_ERROR, result)
             
     except Exception as e:
         logging.error(f"Error creando simulación (legacy): {str(e)}")
-        return jsonify({
-            "success": False,
-            "message": "Error interno del servidor"
-        }), 500
+        return APIRoute.error(
+            ErrorCodes.SERVER_ERROR,
+            "Error interno del servidor",
+            status_code=500,
+        )
 
 @content_bp.route('/quizzes', methods=['POST'])
 @jwt_required()
@@ -524,28 +503,27 @@ def create_quiz_legacy():
     """
     Endpoint de compatibilidad para crear quizzes.
     """
+    # TODO: este endpoint es redundante con la ruta unificada
     try:
         data = request.json
         data['content_type'] = 'quiz'
         data['creator_id'] = get_jwt_identity()
         
         success, result = content_service.create_content(data)
-        
+
         if success:
-            return jsonify({
-                "success": True,
-                "message": "Quiz creado exitosamente",
-                "quiz_id": result
-            }), 201
+            return APIRoute.success(
+                data={"quiz_id": result},
+                message="Quiz creado exitosamente",
+                status_code=201,
+            )
         else:
-            return jsonify({
-                "success": False,
-                "message": result
-            }), 400
+            return APIRoute.error(ErrorCodes.CREATION_ERROR, result)
             
     except Exception as e:
         logging.error(f"Error creando quiz (legacy): {str(e)}")
-        return jsonify({
-            "success": False,
-            "message": "Error interno del servidor"
-        }), 500 
+        return APIRoute.error(
+            ErrorCodes.SERVER_ERROR,
+            "Error interno del servidor",
+            status_code=500,
+        )

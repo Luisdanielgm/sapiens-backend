@@ -234,7 +234,7 @@ def auto_complete_content(virtual_content_id):
             }, "$inc": {"interaction_tracking.access_count": 1}}
         )
 
-        return APIRoute.success(message="Contenido completado", data={"status": "completed"})
+        return APIRoute.success(data={"status": "completed"}, message="Contenido completado")
 
     except Exception as e:
         logging.error(f"Error auto-completando contenido: {str(e)}")

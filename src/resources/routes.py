@@ -65,7 +65,7 @@ def list_teacher_resources():
             # Listado simple por carpeta o todos (pasando email para respetar jerarquía)
             resources = resource_service.get_teacher_resources(teacher_id, folder_id, email=email)
             
-        return APIRoute.success({"resources": resources})
+        return APIRoute.success(data={"resources": resources})
     except Exception as e:
         return APIRoute.error(
             ErrorCodes.SERVER_ERROR, 
@@ -104,7 +104,7 @@ def get_folder_tree():
         # Obtener árbol de carpetas (pasando email para respetar jerarquía)
         tree = folder_service.get_folder_tree(teacher_id, email=email)
             
-        return APIRoute.success(tree)
+        return APIRoute.success(data=tree)
     except Exception as e:
         return APIRoute.error(
             ErrorCodes.SERVER_ERROR, 
@@ -119,7 +119,7 @@ def create_resource_handler():
     Maneja directamente las solicitudes OPTIONS para evitar problemas de CORS.
     """
     if request.method == 'OPTIONS':
-        return APIRoute.success({})
+        return APIRoute.success(data={})
     
     # Para POST, usar el handler con autenticación
     return create_resource()
@@ -176,8 +176,8 @@ def create_resource():
             # Obtener el recurso creado
             resource = resource_service.get_resource(result)
             return APIRoute.success(
-                resource, 
-                message="Recurso creado exitosamente", 
+                data=resource,
+                message="Recurso creado exitosamente",
                 status_code=201
             )
         else:
@@ -202,7 +202,7 @@ def get_resource(resource_id):
     try:
         resource = resource_service.get_resource(resource_id)
         if resource:
-            return APIRoute.success(resource)
+            return APIRoute.success(data=resource)
         else:
             return APIRoute.error(
                 ErrorCodes.RESOURCE_NOT_FOUND, 
@@ -223,7 +223,7 @@ def update_resource_handler(resource_id):
     Maneja directamente las solicitudes OPTIONS para evitar problemas de CORS.
     """
     if request.method == 'OPTIONS':
-        return APIRoute.success({})
+        return APIRoute.success(data={})
     
     # Para PUT, usar el handler con autenticación
     return update_resource(resource_id)
@@ -271,7 +271,7 @@ def update_resource(resource_id):
             # Obtener el recurso actualizado
             resource = resource_service.get_resource(resource_id)
             return APIRoute.success(
-                resource,
+                data=resource,
                 message=result
             )
         else:
@@ -294,7 +294,7 @@ def move_resource_handler(resource_id):
     Maneja directamente las solicitudes OPTIONS para evitar problemas de CORS.
     """
     if request.method == 'OPTIONS':
-        return APIRoute.success({})
+        return APIRoute.success(data={})
     
     # Para PUT, usar el handler con autenticación
     return move_resource(resource_id)
@@ -370,7 +370,7 @@ def move_resource(resource_id):
         
         if success:
             return APIRoute.success(
-                {"message": "Recurso movido correctamente"}
+                data={"message": "Recurso movido correctamente"}
             )
         else:
             return APIRoute.error(
@@ -392,7 +392,7 @@ def delete_resource_handler(resource_id):
     Maneja directamente las solicitudes OPTIONS para evitar problemas de CORS.
     """
     if request.method == 'OPTIONS':
-        return APIRoute.success({})
+        return APIRoute.success(data={})
     
     # Para DELETE, usar el handler con autenticación
     return delete_resource(resource_id)
@@ -430,7 +430,7 @@ def delete_resource(resource_id):
         
         if success:
             return APIRoute.success(
-                {"message": result}
+                data={"message": result}
             )
         else:
             return APIRoute.error(
@@ -452,7 +452,7 @@ def create_folder_handler():
     Maneja directamente las solicitudes OPTIONS para evitar problemas de CORS.
     """
     if request.method == 'OPTIONS':
-        return APIRoute.success({})
+        return APIRoute.success(data={})
     
     # Para POST, usar el handler con autenticación
     return create_folder()
@@ -503,8 +503,8 @@ def create_folder():
             # Obtener la carpeta creada
             folder = folder_service.get_folder(result)
             return APIRoute.success(
-                folder, 
-                message="Carpeta creada exitosamente", 
+                data=folder,
+                message="Carpeta creada exitosamente",
                 status_code=201
             )
         else:
@@ -529,7 +529,7 @@ def get_folder(folder_id):
     try:
         folder = folder_service.get_folder(folder_id)
         if folder:
-            return APIRoute.success(folder)
+            return APIRoute.success(data=folder)
         else:
             return APIRoute.error(
                 ErrorCodes.RESOURCE_NOT_FOUND, 
@@ -586,7 +586,7 @@ def get_folder_resources(folder_id):
         # Obtener recursos de la carpeta (pasando email para respetar jerarquía)
         resources = resource_service.get_teacher_resources(folder["created_by"], folder_id, email=email)
             
-        return APIRoute.success({
+        return APIRoute.success(data={
             "folder": folder,
             "resources": resources
         })
@@ -604,7 +604,7 @@ def update_folder_handler(folder_id):
     Maneja directamente las solicitudes OPTIONS para evitar problemas de CORS.
     """
     if request.method == 'OPTIONS':
-        return APIRoute.success({})
+        return APIRoute.success(data={})
     
     # Para PUT, usar el handler con autenticación
     return update_folder(folder_id)
@@ -649,7 +649,7 @@ def update_folder(folder_id):
             # Obtener la carpeta actualizada
             folder = folder_service.get_folder(folder_id)
             return APIRoute.success(
-                folder,
+                data=folder,
                 message=result
             )
         else:
@@ -672,7 +672,7 @@ def delete_folder_handler(folder_id):
     Maneja directamente las solicitudes OPTIONS para evitar problemas de CORS.
     """
     if request.method == 'OPTIONS':
-        return APIRoute.success({})
+        return APIRoute.success(data={})
     
     # Para DELETE, usar el handler con autenticación
     return delete_folder(folder_id)
@@ -692,7 +692,7 @@ def delete_folder(folder_id):
         
         if success:
             return APIRoute.success(
-                {"message": result}
+                data={"message": result}
             )
         else:
             return APIRoute.error(
@@ -728,7 +728,7 @@ def get_folders_tree():
         # sin crear una nueva usando la lógica mejorada en get_user_root_folder
         try:
             folder_tree = folder_service.get_folder_tree(None, email=email)
-            return APIRoute.success(folder_tree)
+            return APIRoute.success(data=folder_tree)
         except Exception as e:
             log_error = getattr(folder_service, 'log_error', print)
             log_error(f"Error al obtener árbol de carpetas: {str(e)}")
@@ -751,7 +751,7 @@ def create_resource_direct_handler():
     Maneja directamente las solicitudes OPTIONS para evitar problemas de CORS.
     """
     if request.method == 'OPTIONS':
-        return APIRoute.success({})
+        return APIRoute.success(data={})
     
     # Para POST, usar el handler con autenticación
     return create_resource_direct()
@@ -819,8 +819,8 @@ def create_resource_direct():
             return APIRoute.error(ErrorCodes.RESOURCE_NOT_FOUND, "No se pudo encontrar el recurso después de crearlo/obtenerlo", status_code=404)
 
         return APIRoute.success(
-            resource, 
-            message=message, 
+            data=resource,
+            message=message,
             status_code=status_code
         )
 

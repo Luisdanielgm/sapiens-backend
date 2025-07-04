@@ -46,7 +46,7 @@ def update_institute_member(institute_id, member_id):
     """Actualizar un miembro del instituto"""
     data = request.get_json()
     membership_service.update_institute_member(member_id, data)
-    return APIRoute.success(message="Miembro actualizado correctamente")
+    return APIRoute.success(data={"message": "Miembro actualizado correctamente"}, message="Miembro actualizado correctamente")
 
 @members_bp.route('/institute/<institute_id>/members/<user_id>', methods=['DELETE'])
 @APIRoute.standard(
@@ -56,7 +56,7 @@ def update_institute_member(institute_id, member_id):
 def remove_institute_member(institute_id, user_id):
     """Eliminar un miembro del instituto"""
     membership_service.remove_institute_member(institute_id, user_id)
-    return APIRoute.success(message="Miembro eliminado correctamente")
+    return APIRoute.success(data={"message": "Miembro eliminado correctamente"}, message="Miembro eliminado correctamente")
 
 # ========== CLASS MEMBERS ==========
 @members_bp.route('/class/<class_id>/members', methods=['GET'])
@@ -125,7 +125,7 @@ def update_class_member(class_id, member_id):
     data = request.get_json()
     success, message = membership_service.update_class_member(member_id, data)
     if success:
-        return APIRoute.success(message="Miembro actualizado correctamente")
+        return APIRoute.success(data={"message": "Miembro actualizado correctamente"}, message="Miembro actualizado correctamente")
     return APIRoute.error(
         ErrorCodes.MEMBER_UPDATE_ERROR,
         message,
@@ -141,7 +141,7 @@ def remove_class_member(class_id, user_id):
     """Eliminar un miembro de la clase"""
     success, message = membership_service.remove_class_member(class_id, user_id)
     if success:
-        return APIRoute.success(message="Miembro eliminado correctamente")
+        return APIRoute.success(data={"message": "Miembro eliminado correctamente"}, message="Miembro eliminado correctamente")
     return APIRoute.error(
         ErrorCodes.MEMBER_DELETE_ERROR,
         message,

@@ -49,7 +49,7 @@ def link_resource_to_topic(topic_id, resource_id):
     
     if success:
         return APIRoute.success(
-            {"id": result},
+            data={"id": result},
             message="Recurso vinculado correctamente al tema"
         )
     else:
@@ -78,6 +78,7 @@ def unlink_resource_from_topic(topic_id, resource_id):
     
     if success:
         return APIRoute.success(
+            data={"message": message},
             message=message
         )
     else:
@@ -120,7 +121,7 @@ def get_topic_resources(topic_id):
     )
     
     return APIRoute.success(
-        resources,
+        data=resources,
         message=f"Se encontraron {len(resources)} recursos para el tema"
     )
 
@@ -141,6 +142,6 @@ def get_resource_topics(resource_id):
     topics = topic_resource_service.get_resource_topics(resource_id)
     
     return APIRoute.success(
-        topics,
+        data=topics,
         message=f"Se encontraron {len(topics)} temas para el recurso"
     ) 

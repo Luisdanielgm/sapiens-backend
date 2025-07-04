@@ -171,7 +171,7 @@ def delete_student(email):
     success, message = user_service.delete_student(email)
     
     if success:
-        return APIRoute.success(message=message)
+        return APIRoute.success(data={"message": message}, message=message)
     else:
         return APIRoute.error(
             ErrorCodes.BAD_REQUEST,
@@ -242,7 +242,7 @@ def update_cognitive_profile():
     success = profile_service.update_cognitive_profile(email, profile_data)
     
     if success:
-        return APIRoute.success(message="Perfil cognitivo actualizado correctamente")
+        return APIRoute.success(data={"message": "Perfil cognitivo actualizado correctamente"}, message="Perfil cognitivo actualizado correctamente")
     else:
         return APIRoute.error(
             ErrorCodes.BAD_REQUEST,
