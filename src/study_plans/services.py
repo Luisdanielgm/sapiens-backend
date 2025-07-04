@@ -814,10 +814,23 @@ class ModuleService(VerificationBaseService):
             raise AppException("Módulo no encontrado", AppException.NOT_FOUND)
         update_data = {}
         if "ready_for_virtualization" in settings:
-            update_data["ready_for_virtualization"] = bool(settings["ready_for_virtualization"])
+            desired_state = bool(settings["ready_for_virtualization"])
+
+            if desired_state:
+                published_count = self.db.topics.count_documents({
+                    "module_id": ObjectId(module_id),
+                    "published": True
+                })
+                if published_count == 0:
+                    raise AppException(
+                        "No se puede habilitar sin temas publicados",
+                        AppException.BAD_REQUEST
+                    )
+
+            update_data["ready_for_virtualization"] = desired_state
 
             # Si se activa, detectar cambios para posible sincronización
-            if settings["ready_for_virtualization"]:
+            if desired_state:
                 from src.virtual.services import ContentChangeDetector
                 change_detector = ContentChangeDetector()
                 change_info = change_detector.detect_changes(module_id)

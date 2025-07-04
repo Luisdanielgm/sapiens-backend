@@ -65,7 +65,7 @@ class Module:
                  evaluation_rubric: Dict[str, any],
                  date_start: datetime,
                  date_end: datetime,
-                 ready_for_virtualization: bool = False,
+                 ready_for_virtualization: bool = False,  # deprecated
                  content_completeness_score: int = 0,
                  virtualization_requirements: Optional[Dict] = None,
                  last_content_update: Optional[datetime] = None,
