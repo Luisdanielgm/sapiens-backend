@@ -45,7 +45,7 @@ def find_collections_in_code(base_path='src'):
     # Patrones de Regex para encontrar colecciones
     patterns = [
         re.compile(r'(?:db|get_db\(\))\.(?P<collection>\w+)\.'),
-        re.compile(r'super\(\)\.__init__\(collection_name="(?P<collection>\w+)"\)')
+        re.compile(r'super\(\)\.__init__\((?:collection_name=)?["\'](?P<collection>\w+)["\']\)')
     ]
     
     for root, _, files in os.walk(base_path):
