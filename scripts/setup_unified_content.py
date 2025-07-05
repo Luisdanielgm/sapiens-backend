@@ -332,6 +332,11 @@ def create_collections():
     # Índices para content_results
     db.content_results.create_index([("student_id", 1), ("created_at", -1)])
     db.content_results.create_index("virtual_content_id")
+    db.content_results.create_index(
+        [("student_id", 1), ("virtual_content_id", 1)],
+        name="student_content_unique_idx",
+        unique=True
+    )
     
     print("✅ Índices creados")
 

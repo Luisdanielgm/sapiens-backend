@@ -328,7 +328,7 @@ def update_config():
         success, result = ai_monitoring_service.update_monitoring_config(data)
         
         if success:
-            return APIRoute.success(message=result)
+            return APIRoute.success(data={"message": result}, message=result)
         else:
             return APIRoute.error(
                 ErrorCodes.BAD_REQUEST,

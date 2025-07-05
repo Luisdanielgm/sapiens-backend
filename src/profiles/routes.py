@@ -147,7 +147,7 @@ def update_teacher_profile():
     try:
         success = profile_service.update_teacher_profile(user_id_or_email, profile_data)
         if success:
-            return APIRoute.success(message="Perfil de profesor actualizado correctamente")
+            return APIRoute.success(data={"message": "Perfil de profesor actualizado correctamente"})
         else:
             return APIRoute.error(
                 ErrorCodes.BAD_REQUEST,
@@ -173,9 +173,9 @@ def delete_teacher_profile(user_id_or_email):
     """
     try:
         success = profile_service.delete_teacher_profile(user_id_or_email)
-        
+
         if success:
-            return APIRoute.success(message="Perfil de profesor eliminado correctamente")
+            return APIRoute.success(data={"message": "Perfil de profesor eliminado correctamente"})
         return APIRoute.error(
             ErrorCodes.RESOURCE_NOT_FOUND,
             "Perfil de profesor no encontrado",
@@ -266,7 +266,7 @@ def update_student_profile():
     try:
         success = profile_service.update_student_profile(user_id_or_email, profile_data)
         if success:
-            return APIRoute.success(message="Perfil de estudiante actualizado correctamente")
+            return APIRoute.success(data={"message": "Perfil de estudiante actualizado correctamente"})
         else:
             return APIRoute.error(
                 ErrorCodes.BAD_REQUEST,
@@ -329,9 +329,9 @@ def delete_student_profile(user_id_or_email):
     """
     try:
         success = profile_service.delete_student_profile(user_id_or_email)
-        
+
         if success:
-            return APIRoute.success(message="Perfil de estudiante eliminado correctamente")
+            return APIRoute.success(data={"message": "Perfil de estudiante eliminado correctamente"})
         return APIRoute.error(
             ErrorCodes.RESOURCE_NOT_FOUND,
             "Perfil de estudiante no encontrado",
@@ -419,7 +419,7 @@ def update_admin_profile():
     try:
         success = profile_service.update_admin_profile(user_id_or_email, profile_data)
         if success:
-            return APIRoute.success(message="Perfil de administrador actualizado correctamente")
+            return APIRoute.success(data={"message": "Perfil de administrador actualizado correctamente"})
         else:
             return APIRoute.error(
                 ErrorCodes.BAD_REQUEST,
@@ -445,9 +445,9 @@ def delete_admin_profile(user_id_or_email):
     """
     try:
         success = profile_service.delete_admin_profile(user_id_or_email)
-        
+
         if success:
-            return APIRoute.success(message="Perfil de administrador eliminado correctamente")
+            return APIRoute.success(data={"message": "Perfil de administrador eliminado correctamente"})
         return APIRoute.error(
             ErrorCodes.RESOURCE_NOT_FOUND,
             "Perfil de administrador no encontrado",
@@ -560,7 +560,7 @@ def update_institute_admin_profile():
     success = profile_service.update_institute_admin_profile(user_id_or_email, profile_data)
     
     if success:
-        return APIRoute.success(message="Perfil de administrador de instituto actualizado correctamente")
+        return APIRoute.success(data={"message": "Perfil de administrador de instituto actualizado correctamente"})
     return APIRoute.error(
         ErrorCodes.BAD_REQUEST,
         "No se pudo actualizar el perfil de administrador de instituto",
@@ -578,9 +578,9 @@ def delete_institute_admin_profile(user_id_or_email):
     """
     try:
         success = profile_service.delete_institute_admin_profile(user_id_or_email)
-        
+
         if success:
-            return APIRoute.success(message="Perfil de administrador de instituto eliminado correctamente")
+            return APIRoute.success(data={"message": "Perfil de administrador de instituto eliminado correctamente"})
         return APIRoute.error(
             ErrorCodes.RESOURCE_NOT_FOUND,
             "Perfil de administrador de instituto no encontrado",
@@ -732,7 +732,7 @@ def update_institute_profile(institute_id):
     success = profile_service.update_institute_profile(institute_id, profile_data)
     
     if success:
-        return APIRoute.success(message="Perfil de instituto actualizado correctamente")
+        return APIRoute.success(data={"message": "Perfil de instituto actualizado correctamente"})
     return APIRoute.error(
         ErrorCodes.BAD_REQUEST,
         "No se pudo actualizar el perfil de instituto",
@@ -750,9 +750,9 @@ def delete_institute_profile(institute_id):
     """
     try:
         success = profile_service.delete_institute_profile(institute_id)
-        
+
         if success:
-            return APIRoute.success(message="Perfil de instituto eliminado correctamente")
+            return APIRoute.success(data={"message": "Perfil de instituto eliminado correctamente"})
         return APIRoute.error(
             ErrorCodes.RESOURCE_NOT_FOUND,
             "Perfil de instituto no encontrado",
@@ -839,9 +839,9 @@ def update_cognitive_profile():
     profile_data = data.get('profile_data', {})
     
     success = profile_service.update_cognitive_profile(user_id_or_email, profile_data)
-    
+
     if success:
-        return APIRoute.success(message="Perfil cognitivo actualizado correctamente")
+        return APIRoute.success(data={"message": "Perfil cognitivo actualizado correctamente"})
     return APIRoute.error(
         ErrorCodes.BAD_REQUEST,
         "No se pudo actualizar el perfil cognitivo",
@@ -859,9 +859,9 @@ def delete_cognitive_profile(user_id_or_email):
     """
     try:
         success = profile_service.delete_cognitive_profile(user_id_or_email)
-        
+
         if success:
-            return APIRoute.success(message="Perfil cognitivo eliminado correctamente")
+            return APIRoute.success(data={"message": "Perfil cognitivo eliminado correctamente"})
         return APIRoute.error(
             ErrorCodes.RESOURCE_NOT_FOUND,
             "Perfil cognitivo no encontrado",

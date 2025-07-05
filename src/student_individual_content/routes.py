@@ -76,9 +76,12 @@ def update_student_content(content_id):
         data = request.get_json()
         
         success, message = content_service.update_content(content_id, data)
-        
+
         if success:
-            return APIRoute.success(message=message)
+            return APIRoute.success(
+                data={"content_id": content_id, "updated": True},
+                message=message,
+            )
         return APIRoute.error(
             ErrorCodes.UPDATE_ERROR,
             message,
@@ -158,9 +161,12 @@ def delete_student_content(content_id):
     """
     try:
         success, message = content_service.delete_content(content_id)
-        
+
         if success:
-            return APIRoute.success(message=message)
+            return APIRoute.success(
+                data={"content_id": content_id, "deleted": True},
+                message=message,
+            )
         return APIRoute.error(
             ErrorCodes.DELETE_ERROR,
             message,

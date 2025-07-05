@@ -190,15 +190,9 @@ class VirtualModulesFlowTester:
         if readiness and readiness.get("success"):
             self.log(f"📋 Readiness verificado: {readiness['data']}")
         
-        # Habilitar virtualización
-        settings = {"ready_for_virtualization": True}
-        result = self.api_call("PUT", f"/study_plan/module/{module_id}/virtualization-settings", settings)
-        if result and result.get("success"):
-            self.log("✅ Virtualización habilitada")
-            return True
-        else:
-            self.log("❌ Error habilitando virtualización", "ERROR")
-            return False
+        # Con la nueva lógica ya no se habilita manualmente
+        self.log("✅ Paso de habilitación omitido - se usa publicación de temas")
+        return True
 
     def test_5_generate_virtual_module(self, study_plan_id, module_id):
         """Paso 5: Generar módulo virtual para estudiante"""
