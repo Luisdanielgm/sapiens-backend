@@ -434,7 +434,7 @@ def toggle_topic_publication(topic_id):
 @APIRoute.standard(auth_required_flag=True)
 def get_module_topics(module_id):
     """Obtiene todos los topics de un módulo"""
-    topics = topic_service.get_topics_by_module(module_id)
+    topics = topic_service.get_module_topics(module_id)
     # Asegurar que sea serializable
     topics = ensure_json_serializable(topics)
     return APIRoute.success(data=topics)
@@ -444,7 +444,7 @@ def get_module_topics(module_id):
 def get_module_topics_publication_status(module_id):
     """Obtiene el estado de publicación de todos los temas de un módulo"""
     try:
-        topics = topic_service.get_topics_by_module(module_id)
+        topics = topic_service.get_module_topics(module_id)
         
         # Calcular estadísticas de publicación
         total_topics = len(topics)
@@ -497,14 +497,14 @@ def publish_topics_batch(module_id):
             )
         
         # Verificar que todos los temas pertenecen al módulo
-        topics_in_module = topic_service.get_topics_by_module(module_id)
-        valid_topic_ids = {str(t["_id"]) for t in topics_in_module}
+        topics_in_module = topic_service.get_module_topics(module_id)
+        topic_ids_in_module = {str(t['_id']) for t in topics_in_module}
         
-        invalid_topics = [tid for tid in topic_ids if tid not in valid_topic_ids]
-        if invalid_topics:
+        invalid_ids = [tid for tid in topic_ids if tid not in topic_ids_in_module]
+        if invalid_ids:
             return APIRoute.error(
                 ErrorCodes.BAD_REQUEST,
-                f"Los siguientes topic_ids no pertenecen al módulo: {invalid_topics}",
+                f"Los siguientes topic_ids no pertenecen al módulo: {invalid_ids}",
                 status_code=400
             )
         
@@ -560,7 +560,7 @@ def publish_topics_batch(module_id):
 def auto_publish_ready_topics(module_id):
     """Publica automáticamente todos los temas que tienen contenido teórico"""
     try:
-        topics = topic_service.get_topics_by_module(module_id)
+        topics = topic_service.get_module_topics(module_id)
         
         # Filtrar temas que tienen contenido y no están publicados
         topics_to_publish = [

@@ -877,10 +877,20 @@ def initialize_progressive_generation():
             )
         
         # 3. Obtener módulos del plan que estén habilitados para virtualización
-        enabled_modules = list(get_db().modules.find({
+        initial_modules = list(get_db().modules.find({
             "study_plan_id": ObjectId(plan_id),
             "ready_for_virtualization": True
         }))
+        
+        # Filtrar módulos que tengan al menos un tema publicado
+        enabled_modules = []
+        for module in initial_modules:
+            has_published_topics = get_db().topics.find_one({
+                "module_id": module["_id"],
+                "published": True
+            })
+            if has_published_topics:
+                enabled_modules.append(module)
         
         if not enabled_modules:
             return APIRoute.error(
@@ -1012,10 +1022,20 @@ def trigger_next_generation():
         plan_id = current_module["study_plan_id"]
         
         # 3. Buscar siguiente módulo habilitado no generado
-        all_enabled_modules = list(get_db().modules.find({
+        initial_modules = list(get_db().modules.find({
             "study_plan_id": plan_id,
             "ready_for_virtualization": True
         }).sort("created_at", 1))  # Ordenar por fecha de creación
+        
+        # Filtrar módulos que tengan al menos un tema publicado
+        all_enabled_modules = []
+        for module in initial_modules:
+            has_published_topics = get_db().topics.find_one({
+                "module_id": module["_id"],
+                "published": True
+            })
+            if has_published_topics:
+                all_enabled_modules.append(module)
         
         # Obtener módulos ya generados
         generated_modules = list(get_db().virtual_modules.find({
