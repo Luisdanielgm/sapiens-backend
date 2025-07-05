@@ -1205,7 +1205,7 @@ def get_methodology_compatibility():
 def get_topic_contents(topic_id):
     """Obtiene todos los contenidos asociados a un tema"""
     try:
-        contents = topic_content_service.get_topic_contents(topic_id)
+        contents = topic_content_service.get_topic_content(topic_id)
         return APIRoute.success(data=contents)
     except Exception as e:
         logging.error(f"Error al obtener contenidos del tema: {str(e)}")
@@ -1220,7 +1220,7 @@ def get_topic_contents(topic_id):
 def get_topic_content_by_type(topic_id, content_type):
     """Obtiene todos los contenidos de un tema según su tipo"""
     try:
-        contents = topic_content_service.get_topic_content_by_type(topic_id, content_type)
+        contents = topic_content_service.get_topic_content(topic_id, content_type)
         if contents is None:
             return APIRoute.error(
                 ErrorCodes.SERVER_ERROR,
