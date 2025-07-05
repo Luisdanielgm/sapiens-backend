@@ -10,6 +10,10 @@ from .services import MembershipService
 members_bp = APIBlueprint('members', __name__)
 membership_service = MembershipService()
 
+MEMBER_UPDATED_MESSAGE = "Miembro actualizado correctamente"
+MEMBER_DELETED_MESSAGE = "Miembro eliminado correctamente"
+MEMBER_ADDED_MESSAGE = "Miembro añadido correctamente"
+
 # ========== INSTITUTO MEMBERS ==========
 @members_bp.route('/institute/<institute_id>/members', methods=['GET'])
 @APIRoute.standard(auth_required_flag=True)
@@ -33,8 +37,8 @@ def add_institute_member(institute_id):
     member_id = membership_service.add_institute_member(data)
     return APIRoute.success(
         data={"member_id": member_id},
-        message="Miembro añadido correctamente",
-        status_code=201
+        message=MEMBER_ADDED_MESSAGE,
+        status_code=201,
     )
 
 @members_bp.route('/institute/<institute_id>/members/<member_id>', methods=['PUT'])
@@ -46,7 +50,10 @@ def update_institute_member(institute_id, member_id):
     """Actualizar un miembro del instituto"""
     data = request.get_json()
     membership_service.update_institute_member(member_id, data)
-    return APIRoute.success(message="Miembro actualizado correctamente")
+    return APIRoute.success(
+        data={"member_id": member_id, "operation": "update"},
+        message=MEMBER_UPDATED_MESSAGE,
+    )
 
 @members_bp.route('/institute/<institute_id>/members/<user_id>', methods=['DELETE'])
 @APIRoute.standard(
@@ -56,7 +63,10 @@ def update_institute_member(institute_id, member_id):
 def remove_institute_member(institute_id, user_id):
     """Eliminar un miembro del instituto"""
     membership_service.remove_institute_member(institute_id, user_id)
-    return APIRoute.success(message="Miembro eliminado correctamente")
+    return APIRoute.success(
+        data={"user_id": user_id, "operation": "delete"},
+        message=MEMBER_DELETED_MESSAGE,
+    )
 
 # ========== CLASS MEMBERS ==========
 @members_bp.route('/class/<class_id>/members', methods=['GET'])
@@ -82,8 +92,8 @@ def add_class_member(class_id):
     if success:
         return APIRoute.success(
             data={"member_id": result},
-            message="Miembro añadido correctamente", 
-            status_code=201
+            message=MEMBER_ADDED_MESSAGE,
+            status_code=201,
         )
     return APIRoute.error(
         ErrorCodes.MEMBER_ADD_ERROR,
@@ -106,8 +116,8 @@ def add_class_member_by_email(class_id):
     if success:
         return APIRoute.success(
             data={"member_id": result},
-            message="Miembro añadido correctamente", 
-            status_code=201
+            message=MEMBER_ADDED_MESSAGE,
+            status_code=201,
         )
     return APIRoute.error(
         ErrorCodes.MEMBER_ADD_ERROR,
@@ -125,7 +135,10 @@ def update_class_member(class_id, member_id):
     data = request.get_json()
     success, message = membership_service.update_class_member(member_id, data)
     if success:
-        return APIRoute.success(message="Miembro actualizado correctamente")
+        return APIRoute.success(
+            data={"member_id": member_id, "operation": "update"},
+            message=MEMBER_UPDATED_MESSAGE,
+        )
     return APIRoute.error(
         ErrorCodes.MEMBER_UPDATE_ERROR,
         message,
@@ -141,7 +154,10 @@ def remove_class_member(class_id, user_id):
     """Eliminar un miembro de la clase"""
     success, message = membership_service.remove_class_member(class_id, user_id)
     if success:
-        return APIRoute.success(message="Miembro eliminado correctamente")
+        return APIRoute.success(
+            data={"user_id": user_id, "operation": "delete"},
+            message=MEMBER_DELETED_MESSAGE,
+        )
     return APIRoute.error(
         ErrorCodes.MEMBER_DELETE_ERROR,
         message,

@@ -41,7 +41,7 @@ def get_institute(institute_id):
     try:
         institute = institute_service.get_institute(institute_id)
         if institute:
-            return APIRoute.success(institute)
+            return APIRoute.success(data=institute)
         else:
             return APIRoute.error(ErrorCodes.NOT_FOUND, "Instituto no encontrado", status_code=404)
     except Exception as e:
@@ -70,11 +70,11 @@ def update_institute(institute_id):
             return APIRoute.error("No se proporcionaron campos válidos para actualizar", 400)
             
         success, result = institute_service.update_institute(institute_id, updates)
-        
+
         if success:
-            return APIRoute.success({"message": result})
+            return APIRoute.success(data={"message": result}, message=result)
         else:
-            return APIRoute.error(result, 400)
+            return APIRoute.error(ErrorCodes.UPDATE_ERROR, result)
     except Exception as e:
         return APIRoute.error(str(e), 500)
 
@@ -90,11 +90,11 @@ def delete_institute(institute_id):
             return APIRoute.error("No se pudo identificar el correo del administrador", 400)
             
         success, result = institute_service.delete_institute(institute_id, admin_email)
-        
+
         if success:
-            return APIRoute.success({"message": result})
+            return APIRoute.success(data={"message": result}, message=result)
         else:
-            return APIRoute.error(result, 400)
+            return APIRoute.error(ErrorCodes.DELETION_ERROR, result)
     except Exception as e:
         return APIRoute.error(str(e), 500)
 
@@ -106,11 +106,11 @@ def activate_institute(institute_id):
     """
     try:
         success, result = institute_service.activate_institute(institute_id)
-        
+
         if success:
-            return APIRoute.success({"message": result})
+            return APIRoute.success(data={"message": result}, message=result)
         else:
-            return APIRoute.error(result, 400)
+            return APIRoute.error(ErrorCodes.OPERATION_FAILED, result)
     except Exception as e:
         return APIRoute.error(ErrorCodes.SERVER_ERROR, str(e), status_code=500)
 
@@ -123,7 +123,7 @@ def get_institute_statistics(institute_id):
     try:
         statistics = institute_service.get_institute_statistics(institute_id)
         if statistics:
-            return APIRoute.success(statistics)
+            return APIRoute.success(data=statistics)
         else:
             return APIRoute.error("No se pudieron obtener las estadísticas del instituto", 404)
     except Exception as e:
@@ -155,7 +155,7 @@ def get_institute_by_admin():
             
         institute = institute_service.get_institute_by_admin(admin_email)
         if institute:
-            return APIRoute.success(institute)
+            return APIRoute.success(data=institute)
         else:
             return APIRoute.error(ErrorCodes.NOT_FOUND, "No se encontró un instituto asociado a este administrador", status_code=404)
     except Exception as e:
@@ -170,7 +170,7 @@ def get_all_institutes():
     """
     try:
         institutes = institute_service.get_all_institutes()
-        return APIRoute.success(institutes)
+        return APIRoute.success(data=institutes)
     except Exception as e:
         return APIRoute.error(ErrorCodes.SERVER_ERROR, str(e), status_code=500)
 
@@ -182,7 +182,7 @@ def get_institute_programs(institute_id):
     """
     try:
         programs = program_service.get_institute_programs(institute_id)
-        return APIRoute.success(programs)
+        return APIRoute.success(data=programs)
     except Exception as e:
         return APIRoute.error(str(e), 500)
 
@@ -200,11 +200,11 @@ def create_program():
                 return APIRoute.error(f"Campo requerido: {field}", 400)
                 
         success, result = program_service.create_program(request.json)
-        
+
         if success:
-            return APIRoute.success({"id": result}, 201)
+            return APIRoute.success(data={"id": result}, status_code=201)
         else:
-            return APIRoute.error(result, 400)
+            return APIRoute.error(ErrorCodes.CREATION_ERROR, result)
     except Exception as e:
         return APIRoute.error(str(e), 500)
 
@@ -217,7 +217,7 @@ def get_program(program_id):
     try:
         program = program_service.get_program_by_id(program_id)
         if program:
-            return APIRoute.success(program)
+            return APIRoute.success(data=program)
         else:
             return APIRoute.error("Programa no encontrado", 404)
     except Exception as e:
@@ -246,11 +246,11 @@ def update_program(program_id):
             return APIRoute.error("No se proporcionaron campos válidos para actualizar", 400)
             
         success, result = program_service.update_program(program_id, updates)
-        
+
         if success:
-            return APIRoute.success({"message": result})
+            return APIRoute.success(data={"message": result}, message=result)
         else:
-            return APIRoute.error(result, 400)
+            return APIRoute.error(ErrorCodes.UPDATE_ERROR, result)
     except Exception as e:
         return APIRoute.error(str(e), 500)
 
@@ -262,11 +262,11 @@ def delete_program(program_id):
     """
     try:
         success, result = program_service.delete_program(program_id)
-        
+
         if success:
-            return APIRoute.success({"message": result})
+            return APIRoute.success(data={"message": result}, message=result)
         else:
-            return APIRoute.error(result, 400)
+            return APIRoute.error(ErrorCodes.DELETION_ERROR, result)
     except Exception as e:
         return APIRoute.error(str(e), 500)
 
@@ -284,11 +284,11 @@ def create_level():
                 return APIRoute.error(f"Campo requerido: {field}", 400)
                 
         success, result = level_service.create_level(request.json)
-        
+
         if success:
-            return APIRoute.success({"id": result}, 201)
+            return APIRoute.success(data={"id": result}, status_code=201)
         else:
-            return APIRoute.error(result, 400)
+            return APIRoute.error(ErrorCodes.CREATION_ERROR, result)
     except Exception as e:
         return APIRoute.error(str(e), 500)
 
@@ -300,7 +300,7 @@ def get_program_levels(program_id):
     """
     try:
         levels = level_service.get_program_levels(program_id)
-        return APIRoute.success(levels)
+        return APIRoute.success(data=levels)
     except Exception as e:
         return APIRoute.error(str(e), 500)
 
@@ -313,7 +313,7 @@ def get_level(level_id):
     try:
         level = level_service.get_level_by_id(level_id)
         if level:
-            return APIRoute.success(level)
+            return APIRoute.success(data=level)
         else:
             return APIRoute.error("Nivel no encontrado", 404)
     except Exception as e:
@@ -342,11 +342,11 @@ def update_level(level_id):
             return APIRoute.error("No se proporcionaron campos válidos para actualizar", 400)
             
         success, result = level_service.update_level(level_id, updates)
-        
+
         if success:
-            return APIRoute.success({"message": result})
+            return APIRoute.success(data={"message": result}, message=result)
         else:
-            return APIRoute.error(result, 400)
+            return APIRoute.error(ErrorCodes.UPDATE_ERROR, result)
     except Exception as e:
         return APIRoute.error(str(e), 500)
 
@@ -358,10 +358,10 @@ def delete_level(level_id):
     """
     try:
         success, result = level_service.delete_level(level_id)
-        
+
         if success:
-            return APIRoute.success({"message": result})
+            return APIRoute.success(data={"message": result}, message=result)
         else:
-            return APIRoute.error(result, 400)
+            return APIRoute.error(ErrorCodes.DELETION_ERROR, result)
     except Exception as e:
         return APIRoute.error(str(e), 500)

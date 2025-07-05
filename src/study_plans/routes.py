@@ -246,7 +246,7 @@ def update_module(module_id):
         success, message = module_service.update_module(module_id, data)
         
         if success:
-            return APIRoute.success(message=message)
+            return APIRoute.success(data={"message": message}, message=message)
         else:
             return APIRoute.error(
                 ErrorCodes.UPDATE_ERROR,
@@ -268,7 +268,7 @@ def delete_module(module_id):
         success, message = module_service.delete_module(module_id)
         
         if success:
-            return APIRoute.success(message=message)
+            return APIRoute.success(data={"message": message}, message=message)
         else:
             return APIRoute.error(
                 ErrorCodes.DELETE_ERROR,
@@ -354,7 +354,7 @@ def update_topic(topic_id):
         success, message = topic_service.update_topic(topic_id, data)
         
         if success:
-            return APIRoute.success(message=message)
+            return APIRoute.success(data={"message": message}, message=message)
         else:
             return APIRoute.error(
                 ErrorCodes.UPDATE_ERROR,
@@ -376,7 +376,7 @@ def delete_topic(topic_id):
         success, message = topic_service.delete_topic(topic_id)
         
         if success:
-            return APIRoute.success(message=message)
+            return APIRoute.success(data={"message": message}, message=message)
         else:
             return APIRoute.error(
                 ErrorCodes.DELETE_ERROR,
@@ -669,7 +669,7 @@ def update_evaluation(evaluation_id):
         success, message = evaluation_service.update_evaluation(evaluation_id, data)
         
         if success:
-            return APIRoute.success(message=message)
+            return APIRoute.success(data={"message": message}, message=message)
         else:
             return APIRoute.error(
                 ErrorCodes.UPDATE_ERROR,
@@ -691,7 +691,7 @@ def delete_evaluation(evaluation_id):
         success, message = evaluation_service.delete_evaluation(evaluation_id)
         
         if success:
-            return APIRoute.success(message=message)
+            return APIRoute.success(data={"message": message}, message=message)
         else:
             return APIRoute.error(
                 ErrorCodes.DELETE_ERROR,
@@ -733,7 +733,7 @@ def update_evaluation_result(result_id):
         success, message = evaluation_service.update_result(result_id, data)
         
         if success:
-            return APIRoute.success(message=message)
+            return APIRoute.success(data={"message": message}, message=message)
         else:
             return APIRoute.error(
                 ErrorCodes.UPDATE_ERROR,
@@ -755,7 +755,7 @@ def delete_evaluation_result(result_id):
         success, message = evaluation_service.delete_result(result_id)
         
         if success:
-            return APIRoute.success(message=message)
+            return APIRoute.success(data={"message": message}, message=message)
         else:
             return APIRoute.error(
                 ErrorCodes.DELETE_ERROR,
@@ -1493,7 +1493,7 @@ def link_resource_to_evaluation_route(evaluation_id):
             status_code = 404 if "no encontrado" in result else 400
             return APIRoute.error(ErrorCodes.OPERATION_FAILED, result, status_code=status_code)
             
-        return APIRoute.success({"link_id": result}, message="Recurso vinculado exitosamente", status_code=201)
+        return APIRoute.success(data={"link_id": result}, message="Recurso vinculado exitosamente", status_code=201)
     except Exception as e:
         logging.error(f"Error al vincular recurso a evaluación: {str(e)}")
         return APIRoute.error(ErrorCodes.SERVER_ERROR, str(e), status_code=500)
@@ -1551,7 +1551,7 @@ def get_evaluation_resources_route(evaluation_id):
         if current_user_role == ROLES["STUDENT"] and not role_filter:
             resources = [r for r in resources if r.get("role") in allowed_roles_for_student and (r.get("role") != "submission" or r.get("created_by") == current_user_id)]
 
-        return APIRoute.success({"resources": resources})
+        return APIRoute.success(data={"resources": resources})
     except Exception as e:
         log_error(f"Error al obtener recursos de evaluación: {str(e)}")
         return APIRoute.error(ErrorCodes.SERVER_ERROR, str(e), status_code=500)
@@ -1567,7 +1567,7 @@ def remove_resource_from_evaluation_route(evaluation_id, resource_id):
             status_code = 404 if "no encontrado" in result else 400
             return APIRoute.error(ErrorCodes.OPERATION_FAILED, result, status_code=status_code)
             
-        return APIRoute.success(message=result)
+        return APIRoute.success(data={"message": result}, message=result)
     except Exception as e:
         logging.error(f"Error al desvincular recurso de evaluación: {str(e)}")
         return APIRoute.error(ErrorCodes.SERVER_ERROR, str(e), status_code=500)
