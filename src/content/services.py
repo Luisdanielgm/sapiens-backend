@@ -233,6 +233,36 @@ class ContentService(VerificationBaseService):
             logging.error(f"Error eliminando contenido: {str(e)}")
             return False, f"Error interno: {str(e)}"
 
+    def get_content(self, content_id: str) -> Optional[Dict]:
+        """Obtiene un contenido específico por su ID."""
+        try:
+            content = self.collection.find_one({"_id": ObjectId(content_id)})
+            if not content:
+                return None
+
+            content["_id"] = str(content["_id"])
+            content["topic_id"] = str(content["topic_id"])
+            if content.get("template_id"):
+                content["template_id"] = str(content["template_id"])
+            if content.get("creator_id"):
+                content["creator_id"] = str(content["creator_id"])
+
+            return content
+        except Exception as e:
+            logging.error(f"Error obteniendo contenido: {str(e)}")
+            return None
+
+    def adapt_content_to_methodology(self, content_id: str, methodology_code: str) -> Tuple[bool, Dict]:
+        """Adapta un contenido según una metodología de aprendizaje."""
+        try:
+            from src.study_plans.services import TopicContentService
+
+            topic_content_service = TopicContentService()
+            return topic_content_service.adapt_content_to_methodology(content_id, methodology_code)
+        except Exception as e:
+            logging.error(f"Error adaptando contenido: {str(e)}")
+            return False, {"error": str(e)}
+
 class VirtualContentService(VerificationBaseService):
     """
     Servicio para contenido personalizado por estudiante.
