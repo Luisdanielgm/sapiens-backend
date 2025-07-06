@@ -1,3 +1,4 @@
+import logging
 from datetime import datetime
 from bson import ObjectId
 from typing import Dict, List, Optional
@@ -83,7 +84,8 @@ class TopicContent:
                  status: str = "draft",
                  _id: Optional[ObjectId] = None,
                  created_at: Optional[datetime] = None,
-                 updated_at: Optional[datetime] = None):
+                 updated_at: Optional[datetime] = None,
+                 **kwargs):
         self._id = _id or ObjectId()
         self.topic_id = ObjectId(topic_id)
         self.content = content
@@ -98,6 +100,9 @@ class TopicContent:
         self.status = status
         self.created_at = created_at or datetime.now()
         self.updated_at = updated_at or datetime.now()
+
+        if kwargs:
+            logging.warning(f"TopicContent received unexpected arguments, which were ignored: {list(kwargs.keys())}")
         
     def to_dict(self) -> dict:
         return {

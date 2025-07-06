@@ -113,8 +113,20 @@ class ContentService(VerificationBaseService):
             if not content_type_def:
                 return False, f"Tipo de contenido '{content_type}' no válido"
 
-            # Crear contenido
-            content = TopicContent(**content_data)
+            # Crear contenido explícitamente para mapear campos
+            content = TopicContent(
+                topic_id=topic_id,
+                content_type=content_type,
+                content=content_data.get("content", ""),
+                interactive_data=content_data.get("interactive_data"),
+                learning_methodologies=content_data.get("learning_methodologies"),
+                adaptation_options=content_data.get("metadata"), # Mapeo clave
+                resources=content_data.get("resources"),
+                web_resources=content_data.get("web_resources"),
+                generation_prompt=content_data.get("generation_prompt"),
+                ai_credits=content_data.get("ai_credits", True),
+                status=content_data.get("status", "draft")
+            )
             result = self.collection.insert_one(content.to_dict())
             
             # Actualizar métricas del tipo de contenido
