@@ -17,6 +17,7 @@ from src.study_plans.models import (
 from src.resources.services import ResourceService, ResourceFolderService
 from src.content.services import ContentResultService, ContentService
 from src.shared.logging import log_error
+import inspect # <--- Añadir import
 
 class StudyPlanService(VerificationBaseService):
     def __init__(self):
@@ -1589,6 +1590,12 @@ class TopicContentService(VerificationBaseService):
             methodology = data.get('methodology')
             if methodology:
                 learning_methodologies.append(methodology)
+
+            # DIAGNÓSTICO: Registrar la firma del constructor de TopicContent
+            try:
+                logging.info(f"DIAGNOSTIC: TopicContent constructor signature: {inspect.signature(TopicContent)}")
+            except Exception as inspect_e:
+                logging.error(f"DIAGNOSTIC: Could not inspect TopicContent signature: {inspect_e}")
 
             # 4. Creación explícita del objeto TopicContent
             # Se llama al constructor con argumentos nombrados para evitar errores de **kwargs.
