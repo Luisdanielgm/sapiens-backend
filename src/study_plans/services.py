@@ -1552,51 +1552,66 @@ class TopicContentService(VerificationBaseService):
         super().__init__(collection_name="topic_contents")
         self.content_type_service = ContentTypeService()
         
-    def create_content(self, content_data: dict) -> Tuple[bool, str]:
+    def create_content(self, data: dict) -> Tuple[bool, str]:
         """
         Crea un nuevo contenido para un tema.
         
         Args:
-            content_data: Datos del contenido a crear
+            data: Datos del contenido a crear, directamente desde el JSON del request.
             
         Returns:
             Tupla con estado y mensaje/ID
         """
         try:
-            # Mapear campos de frontend a los parámetros del modelo TopicContent
-            # methodology -> learning_methodologies (lista)
-            method = content_data.pop('methodology', None)
-            if method is not None:
-                content_data['learning_methodologies'] = [method]
-            # metadata -> adaptation_options
-            meta = content_data.pop('metadata', None)
-            if meta is not None:
-                content_data['adaptation_options'] = meta
-            
             # Validar que existe el tema
-            topic_id = content_data.get("topic_id")
+            topic_id = data.get("topic_id")
+            if not topic_id:
+                return False, "Falta topic_id"
             topic = get_db().topics.find_one({"_id": ObjectId(topic_id)})
             if not topic:
                 return False, "Tema no encontrado"
                 
             # Validar que existe el tipo de contenido
-            content_type = content_data.get("content_type")
+            content_type = data.get("content_type")
+            if not content_type:
+                return False, "Falta content_type"
             if not self.content_type_service.get_content_type(content_type):
                 return False, f"Tipo de contenido '{content_type}' no válido"
-                
-            # Crear el contenido (filtrando claves no esperadas)
-            allowed_keys = [
-                "topic_id", "content", "content_type", "learning_methodologies",
-                "adaptation_options", "resources", "web_resources",
-                "generation_prompt", "ai_credits", "status"
-            ]
-            model_kwargs = {k: content_data[k] for k in allowed_keys if k in content_data}
-            topic_content = TopicContent(**model_kwargs)
+
+            # Preparar los argumentos para el constructor del modelo a partir de los datos recibidos.
+            model_kwargs = {
+                'topic_id': data.get('topic_id'),
+                'content': data.get('content'),
+                'content_type': data.get('content_type'),
+                'status': data.get('status', 'draft'),
+                'ai_credits': data.get('ai_credits', True),
+                'generation_prompt': data.get('generation_prompt')
+            }
+
+            # Mapear campos que tienen nombres diferentes en el frontend y en el modelo.
+            # methodology -> learning_methodologies (lista)
+            methodology = data.get('methodology')
+            if methodology:
+                model_kwargs['learning_methodologies'] = [methodology]
+            
+            # metadata -> adaptation_options
+            metadata = data.get('metadata')
+            if metadata:
+                model_kwargs['adaptation_options'] = metadata
+
+            # Filtrar claves None para no pasarlas al constructor si no existen
+            final_kwargs = {k: v for k, v in model_kwargs.items() if v is not None}
+            
+            # Crear la instancia del modelo y guardarla en la base de datos
+            topic_content = TopicContent(**final_kwargs)
             result = self.collection.insert_one(topic_content.to_dict())
             
             return True, str(result.inserted_id)
+        except TypeError as e:
+            logging.error(f"Error de tipo al crear contenido para tema: {str(e)}. Datos recibidos: {data}")
+            return False, f"Error interno: {str(e)}"
         except Exception as e:
-            logging.error(f"Error al crear contenido para tema: {str(e)}")
+            logging.error(f"Error general al crear contenido para tema: {str(e)}")
             return False, str(e)
             
     def get_topic_contents(self, topic_id: str) -> List[Dict]:
