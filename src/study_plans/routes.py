@@ -20,7 +20,7 @@ from bson import ObjectId
 from src.shared.utils import ensure_json_serializable
 from datetime import datetime
 from src.shared.database import get_db
-from .models import ContentTypes, LearningMethodologyTypes
+from src.content.models import ContentTypes, LearningMethodologyTypes
 from src.shared.constants import STATUS
 from werkzeug.utils import secure_filename
 import os

@@ -12,7 +12,10 @@ from src.shared.database import get_db
 from src.classes.services import ClassService
 from src.study_plans.models import (
     StudyPlanPerSubject, StudyPlanAssignment, Module, Topic, Evaluation, 
-    EvaluationResource, TopicContent, ContentTypeDefinition, ContentTypes
+    EvaluationResource
+)
+from src.content.models import (
+    TopicContent, ContentType, ContentTypes
 )
 from src.resources.services import ResourceService, ResourceFolderService
 from src.content.services import ContentResultService, ContentService
@@ -1375,7 +1378,7 @@ class ContentTypeService(VerificationBaseService):
                 return False, "Ya existe un tipo de contenido con ese código"
                 
             # Crear objeto y obtener diccionario para inserción
-            content_type = ContentTypeDefinition(**content_type_data)
+            content_type = ContentType(**content_type_data)
             result = self.collection.insert_one(content_type.to_dict())
             
             return True, str(result.inserted_id)

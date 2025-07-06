@@ -11,7 +11,7 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 # Ahora se pueden importar los módulos necesarios
 from src.shared.constants import COLLECTIONS
-from src.study_plans.models import ContentTypes
+from src.content.models import ContentTypes
 
 # --- Configuración de la Base de Datos ---
 # Se recomienda usar variables de entorno para la configuración en producción

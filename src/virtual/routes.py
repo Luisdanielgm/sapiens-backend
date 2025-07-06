@@ -7,7 +7,7 @@ from datetime import datetime
 import logging
 
 from .services import VirtualModuleService, VirtualTopicService, ServerlessQueueService, FastVirtualModuleGenerator, ContentChangeDetector
-from src.study_plans.models import ContentTypes, LearningMethodologyTypes
+from src.content.models import ContentTypes, LearningMethodologyTypes
 
 virtual_bp = APIBlueprint('virtual', __name__)
 # quiz_bp eliminado - ahora los quizzes se manejan como TopicContent
