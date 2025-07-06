@@ -1563,53 +1563,54 @@ class TopicContentService(VerificationBaseService):
             Tupla con estado y mensaje/ID
         """
         try:
-            # Validar que existe el tema
+            # 1. Validaciones de datos de entrada
             topic_id = data.get("topic_id")
             if not topic_id:
                 return False, "Falta topic_id"
-            topic = get_db().topics.find_one({"_id": ObjectId(topic_id)})
-            if not topic:
-                return False, "Tema no encontrado"
-                
-            # Validar que existe el tipo de contenido
+            
             content_type = data.get("content_type")
             if not content_type:
                 return False, "Falta content_type"
+            
+            content_payload = data.get("content")
+            if content_payload is None:
+                return False, "Falta el campo 'content'"
+
+            # 2. Validaciones de existencia en la BD
+            topic = get_db().topics.find_one({"_id": ObjectId(topic_id)})
+            if not topic:
+                return False, "Tema no encontrado"
+
             if not self.content_type_service.get_content_type(content_type):
                 return False, f"Tipo de contenido '{content_type}' no válido"
 
-            # Preparar los argumentos para el constructor del modelo a partir de los datos recibidos.
-            model_kwargs = {
-                'topic_id': data.get('topic_id'),
-                'content': data.get('content'),
-                'content_type': data.get('content_type'),
-                'status': data.get('status', 'draft'),
-                'ai_credits': data.get('ai_credits', True),
-                'generation_prompt': data.get('generation_prompt')
-            }
-
-            # Mapear campos que tienen nombres diferentes en el frontend y en el modelo.
-            # methodology -> learning_methodologies (lista)
+            # 3. Mapeo y preparación de datos para el constructor
+            learning_methodologies = []
             methodology = data.get('methodology')
             if methodology:
-                model_kwargs['learning_methodologies'] = [methodology]
-            
-            # metadata -> adaptation_options
-            metadata = data.get('metadata')
-            if metadata:
-                model_kwargs['adaptation_options'] = metadata
+                learning_methodologies.append(methodology)
 
-            # Filtrar claves None para no pasarlas al constructor si no existen
-            final_kwargs = {k: v for k, v in model_kwargs.items() if v is not None}
+            # 4. Creación explícita del objeto TopicContent
+            # Se llama al constructor con argumentos nombrados para evitar errores de **kwargs.
+            topic_content = TopicContent(
+                topic_id=topic_id,
+                content=content_payload,
+                content_type=content_type,
+                status=data.get('status', 'draft'),
+                ai_credits=data.get('ai_credits', True),
+                generation_prompt=data.get('generation_prompt'),
+                learning_methodologies=learning_methodologies,
+                adaptation_options=data.get('metadata')
+            )
             
-            # Crear la instancia del modelo y guardarla en la base de datos
-            topic_content = TopicContent(**final_kwargs)
+            # 5. Inserción en la base de datos
             result = self.collection.insert_one(topic_content.to_dict())
             
             return True, str(result.inserted_id)
         except TypeError as e:
-            logging.error(f"Error de tipo al crear contenido para tema: {str(e)}. Datos recibidos: {data}")
-            return False, f"Error interno: {str(e)}"
+            # Este log es crucial para depurar si el error persiste.
+            logging.error(f"Error de tipo al instanciar TopicContent: {str(e)}. Datos recibidos: {data}")
+            return False, f"Error interno del servidor al procesar la solicitud: {str(e)}"
         except Exception as e:
             logging.error(f"Error general al crear contenido para tema: {str(e)}")
             return False, str(e)
