@@ -11,7 +11,8 @@ from .models import (
     VirtualModule,
     VirtualTopic,
     VirtualGenerationTask,
-    ContentTemplate
+    ContentTemplate,
+    VirtualTopicContent
 )
 # Quiz y QuizResult eliminados - ahora se usan TopicContent y ContentResult
 
@@ -190,6 +191,26 @@ class VirtualTopicService(VerificationBaseService):
             return topics
         except Exception as e:
             print(f"Error al obtener temas del módulo: {str(e)}")
+            return []
+
+    def get_topic_contents(self, virtual_topic_id: str) -> List[Dict]:
+        """
+        Obtiene todos los contenidos de un tema virtual específico.
+        """
+        try:
+            contents = list(self.db.virtual_topic_contents.find(
+                {"virtual_topic_id": ObjectId(virtual_topic_id)}
+            ).sort("created_at", 1))
+            
+            # Convertir ObjectIds a strings para la respuesta JSON
+            for content in contents:
+                for key, value in content.items():
+                    if isinstance(value, ObjectId):
+                        content[key] = str(value)
+            
+            return contents
+        except Exception as e:
+            logging.error(f"Error al obtener contenidos del tema virtual: {str(e)}")
             return []
 
 # QuizService eliminado - Los quizzes ahora se manejan como TopicContent con content_type="quiz"
@@ -735,11 +756,9 @@ class FastVirtualModuleGenerator(VerificationBaseService):
                 "generation_progress": 50
             }
             
-            # Añadir referencia al módulo original
-            virtual_module_data["module_id"] = module_id
-            
-            # El constructor de VirtualModule ya no espera name/description
-            result = self.collection.insert_one(virtual_module_data)
+            # Usar el modelo para asegurar la conversión a ObjectId
+            module = VirtualModule(**virtual_module_data)
+            result = self.collection.insert_one(module.to_dict())
             virtual_module_id = str(result.inserted_id)
             
             # 5. Generar temas virtuales de forma optimizada
@@ -802,8 +821,7 @@ class FastVirtualModuleGenerator(VerificationBaseService):
                         "topic_id": topic_id,
                         "student_id": student_id,
                         "virtual_module_id": virtual_module_id,
-                        "name": topic.get("name"),
-                        "description": topic.get("theory_content", ""),
+                        # El modelo no incluye 'name' ni 'description', se obtienen del topic original si es necesario
                         "adaptations": {
                             "cognitive_profile": cognitive_profile,
                             "difficulty_adjustment": self._calculate_quick_difficulty_adjustment(
@@ -815,17 +833,18 @@ class FastVirtualModuleGenerator(VerificationBaseService):
                         "completion_status": "not_started"
                     }
                     
-                    # Insertar tema virtual
-                    # El diccionario ya no contiene 'name'
-                    result = self.db.virtual_topics.insert_one(virtual_topic_data)
+                    # Insertar tema virtual usando el modelo
+                    virtual_topic = VirtualTopic(**virtual_topic_data)
+                    result = self.db.virtual_topics.insert_one(virtual_topic.to_dict())
                     virtual_topic_id = str(result.inserted_id)
                     
                     # Generar contenido personalizado para el tema
+                    # Llamada corregida para pasar el ID del tema virtual y del estudiante
                     self._generate_basic_content_from_templates(
-                        topic_id=str(topic["_id"]),
+                        topic_id=topic_id,
                         virtual_topic_id=virtual_topic_id,
-                        cognitive_profile=cognitive_profile,
-                        virtual_topic_data=virtual_topic_data
+                        student_id=student_id,
+                        cognitive_profile=cognitive_profile
                     )
                 except Exception as e_topic:
                     logging.error(f"Error generando tema virtual para {topic['_id']}: {e_topic}")
@@ -1019,8 +1038,9 @@ class FastVirtualModuleGenerator(VerificationBaseService):
         }
     
     def _generate_basic_content_from_templates(self, topic_id: str, 
-                                             cognitive_profile: Dict,
-                                             virtual_topic_data: Dict):
+                                             virtual_topic_id: str,
+                                             student_id: str,
+                                             cognitive_profile: Dict):
         """
         Genera contenido básico usando templates pre-generados.
         """
@@ -1033,17 +1053,16 @@ class FastVirtualModuleGenerator(VerificationBaseService):
                 template = self._get_cached_template(content_type, cognitive_profile)
                 
                 if template:
-                    # Crear contenido basado en template
-                    content_data = {
-                        "virtual_topic_id": ObjectId(virtual_topic_data["virtual_module_id"]),
-                        "content_type": content_type,
-                        "content": template["template_data"].get("content", ""),
-                        "template_id": template.get("_id"),
-                        "created_at": datetime.now(),
-                        "generated_from_template": True
-                    }
+                    # Crear contenido usando el modelo VirtualTopicContent
+                    content_data = VirtualTopicContent(
+                        virtual_topic_id=virtual_topic_id,
+                        student_id=student_id,
+                        content_type=content_type,
+                        content=template["template_data"].get("content", ""),
+                        template_id=str(template.get("_id"))
+                    )
                     
-                    self.db.virtual_topic_contents.insert_one(content_data)
+                    self.db.virtual_topic_contents.insert_one(content_data.to_dict())
                     
         except Exception as e:
             logging.error(f"Error al generar contenido desde templates: {str(e)}")

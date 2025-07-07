@@ -87,6 +87,13 @@ def get_module_topics(module_id):
     topics = virtual_topic_service.get_module_topics(module_id)
     return APIRoute.success(data={"topics": topics})
 
+@virtual_bp.route('/topic/<virtual_topic_id>/contents', methods=['GET'])
+@APIRoute.standard(auth_required_flag=True)
+def get_virtual_topic_contents(virtual_topic_id):
+    """Obtiene todos los contenidos de un tema virtual específico."""
+    contents = virtual_topic_service.get_topic_contents(virtual_topic_id)
+    return APIRoute.success(data={"contents": contents})
+
 # Rutas de Quiz eliminadas - ahora se manejan como TopicContent
 # Los quizzes se crean con POST /study_plan/topic/content (content_type="quiz")
 # Los resultados se envían con POST /virtual/content-result

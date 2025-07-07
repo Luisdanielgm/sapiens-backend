@@ -154,4 +154,48 @@ class ContentTemplate:
             "effectiveness_score": self.effectiveness_score,
             "created_at": self.created_at,
             "updated_at": self.updated_at
-        } 
+        }
+
+class VirtualTopicContent:
+    def __init__(self,
+                 virtual_topic_id: str,
+                 student_id: str,
+                 content_type: str,
+                 content: str,
+                 content_id: Optional[str] = None,
+                 template_id: Optional[str] = None,
+                 personalization_data: Optional[Dict] = None,
+                 status: str = "active",
+                 interaction_tracking: Optional[Dict] = None):
+        self.virtual_topic_id = ObjectId(virtual_topic_id)
+        self.student_id = ObjectId(student_id)
+        self.content_type = content_type
+        self.content = content
+        self.content_id = ObjectId(content_id) if content_id else None
+        self.template_id = ObjectId(template_id) if template_id else None
+        self.personalization_data = personalization_data or {}
+        self.status = status
+        self.interaction_tracking = interaction_tracking or {
+            "completion_status": "not_started",
+            "completion_percentage": 0.0,
+        }
+        self.created_at = datetime.now()
+        self.updated_at = datetime.now()
+
+    def to_dict(self) -> dict:
+        data = {
+            "virtual_topic_id": self.virtual_topic_id,
+            "student_id": self.student_id,
+            "content_type": self.content_type,
+            "content": self.content,
+            "personalization_data": self.personalization_data,
+            "status": self.status,
+            "interaction_tracking": self.interaction_tracking,
+            "created_at": self.created_at,
+            "updated_at": self.updated_at,
+        }
+        if self.content_id:
+            data["content_id"] = self.content_id
+        if self.template_id:
+            data["template_id"] = self.template_id
+        return data 
