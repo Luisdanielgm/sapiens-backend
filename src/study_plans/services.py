@@ -1573,8 +1573,9 @@ class TopicContentService(VerificationBaseService):
             if not content_type:
                 return False, "Falta content_type"
             
-            content_payload = data.get("content", "")
-            interactive_data = data.get("interactive_data")
+            content_payload = data.get("content")
+            if content_payload is None:
+                return False, "Falta el campo 'content'"
 
             # 2. Validaciones de existencia en la BD
             topic = get_db().topics.find_one({"_id": ObjectId(topic_id)})
@@ -1602,7 +1603,6 @@ class TopicContentService(VerificationBaseService):
                 topic_id=topic_id,
                 content=content_payload,
                 content_type=content_type,
-                interactive_data=interactive_data,
                 status=data.get('status', 'draft'),
                 ai_credits=data.get('ai_credits', True),
                 generation_prompt=data.get('generation_prompt'),

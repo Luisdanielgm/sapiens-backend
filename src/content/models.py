@@ -1,7 +1,7 @@
 import logging
 from datetime import datetime
 from bson import ObjectId
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Union
 from src.shared.constants import STATUS
 
 class ContentType:
@@ -69,7 +69,7 @@ class TopicContent:
     """
     def __init__(self,
                  topic_id: str,
-                 content: str,
+                 content: Union[str, Dict],  # Puede ser texto o estructura compleja
                  content_type: str,  # Código del tipo de contenido (text, feynman, diagram, etc.)
                  interactive_data: Optional[Dict] = None,  # Para quizzes, simulaciones, etc.
                  learning_methodologies: List[str] = None,
