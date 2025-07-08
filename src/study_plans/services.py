@@ -2387,7 +2387,8 @@ class TopicReadinessService(VerificationBaseService):
 
     def check_readiness(self, topic_id: str) -> Dict[str, Any]:
         """
-        Verifica si un tema cumple con los requisitos mínimos para ser publicado.
+        Verifica si un tema cumple con los requisitos mínimos para ser publicado,
+        asegurando una rica variedad de contenidos para diferentes estilos de aprendizaje.
 
         Args:
             topic_id: ID del tema a verificar.
@@ -2401,44 +2402,53 @@ class TopicReadinessService(VerificationBaseService):
                 raise AppException("Tema no encontrado", ErrorCodes.NOT_FOUND)
 
             contents = self.content_service.get_topic_contents(topic_id)
-            
-            # --- Reglas de Validación ---
-            min_content_count = 1
-            required_categories = ["theoretical", "interactive"]  # Requiere al menos un contenido teórico y uno interactivo
+            content_types_present = {c.get('content_type') for c in contents}
 
-            # 1. Validar número mínimo de contenidos
-            is_content_sufficient = len(contents) >= min_content_count
+            # --- Reglas de Validación Multisensorial ---
+            missing_requirements = []
             
-            # 2. Validar variedad de contenido
-            content_categories = set()
+            # 1. Requisito Teórico (Base fundamental)
             type_map = ContentTypes.get_categories()
-            for c in contents:
-                ctype = c.get('content_type')
-                for cat, types in type_map.items():
-                    if ctype in types:
-                        content_categories.add(cat)
-                        break
-            missing_categories = [cat for cat in required_categories if cat not in content_categories]
+            theoretical_types = set(type_map.get("theoretical", []))
+            has_theoretical = any(ct in theoretical_types for ct in content_types_present)
+            if not has_theoretical:
+                types_str = ", ".join(theoretical_types)
+                message = f"Falta un contenido teórico base. Puedes crear uno de los siguientes tipos: {types_str}."
+                missing_requirements.append(message)
+
+            # 2. Requisitos Específicos por Estilo de Aprendizaje
+            checks = {
+                "quiz": ("evaluación", "quiz"),
+                "slides": ("lecto-escritura/visual", "slides"),
+                "diagram": ("visual", "diagram"),
+                "video": ("auditivo/visual", "video"),
+            }
+
+            for content_key, (style, type_name) in checks.items():
+                if content_key not in content_types_present:
+                    message = f"Falta un contenido de tipo {style}. Se requiere un '{type_name}'."
+                    missing_requirements.append(message)
             
-            is_variety_sufficient = not missing_categories
+            # 3. Requisito Kinestésico (Juego o Simulación)
+            has_kinesthetic = ("game" in content_types_present) or ("simulation" in content_types_present)
+            if not has_kinesthetic:
+                message = "Falta un contenido kinestésico/interactivo. Se requiere un 'game' o 'simulation'."
+                missing_requirements.append(message)
 
             # --- Construir Respuesta ---
-            is_ready = is_content_sufficient and is_variety_sufficient
+            is_ready = not missing_requirements
             
-            missing_requirements = []
-            if not is_content_sufficient:
-                missing_requirements.append(f"El tema debe tener al menos {min_content_count} contenido(s).")
-            if not is_variety_sufficient:
-                missing_requirements.append(f"Faltan contenidos de las siguientes categorías: {', '.join(missing_categories)}.")
-
             return {
                 "ready": is_ready,
                 "topic_id": topic_id,
                 "checks": {
-                    "min_content_passed": is_content_sufficient,
-                    "category_variety_passed": is_variety_sufficient,
-                    "found_contents": len(contents),
-                    "found_categories": list(content_categories)
+                    "has_theoretical": has_theoretical,
+                    "has_quiz": "quiz" in content_types_present,
+                    "has_slides": "slides" in content_types_present,
+                    "has_diagram": "diagram" in content_types_present,
+                    "has_video": "video" in content_types_present,
+                    "has_kinesthetic": has_kinesthetic,
+                    "found_content_types": list(content_types_present)
                 },
                 "missing_requirements": missing_requirements
             }
