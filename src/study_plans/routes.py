@@ -11,7 +11,8 @@ from .services import (
     ContentTypeService,
     LearningMethodologyService,
     ContentService,
-    EvaluationResourceService
+    EvaluationResourceService,
+    TopicReadinessService
 )
 from src.resources.services import ResourceService, ResourceFolderService
 import logging
@@ -39,6 +40,7 @@ topic_content_service = ContentService()
 resource_service = ResourceService()
 evaluation_resource_service = EvaluationResourceService()
 folder_service = ResourceFolderService()
+topic_readiness_service = TopicReadinessService()
 
 # Rutas para Plan de Estudio
 @study_plan_bp.route('/', methods=['POST'])
@@ -879,6 +881,18 @@ def delete_topic_theory():
             str(e),
             status_code=500
         )
+
+@study_plan_bp.route('/topic/<topic_id>/readiness-status', methods=['GET'])
+@APIRoute.standard(auth_required_flag=True, roles=[ROLES["TEACHER"]])
+def get_topic_readiness_status(topic_id):
+    """
+    Obtiene el estado de preparación de un tema para ser publicado.
+    """
+    try:
+        readiness_info = topic_readiness_service.check_readiness(topic_id)
+        return APIRoute.success(data=readiness_info)
+    except Exception as e:
+        return APIRoute.error(ErrorCodes.SERVER_ERROR, str(e), status_code=getattr(e, 'code', 500))
 
 # Rutas para Tipos de Contenido
 @study_plan_bp.route('/content-types', methods=['GET'])

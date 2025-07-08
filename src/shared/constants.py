@@ -133,8 +133,7 @@ COLLECTIONS = {
     
     # Sistema de contenido unificado (NUEVO)
     "CONTENT_TYPES_COLL": "content_types",
-    "CONTENT_RESULTS": "content_results", 
-    "CONTENT_TEMPLATES": "content_templates",
+    "CONTENT_RESULTS": "content_results",
     
     # Analíticas
     "STUDENT_PERFORMANCE": "student_performance",

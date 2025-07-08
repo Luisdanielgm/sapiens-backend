@@ -8,12 +8,14 @@ import logging
 
 from .services import VirtualModuleService, VirtualTopicService, ServerlessQueueService, FastVirtualModuleGenerator, ContentChangeDetector
 from src.content.models import ContentTypes, LearningMethodologyTypes
+from src.study_plans.services import TopicService
 
 virtual_bp = APIBlueprint('virtual', __name__)
 # quiz_bp eliminado - ahora los quizzes se manejan como TopicContent
 
 virtual_module_service = VirtualModuleService()
 virtual_topic_service = VirtualTopicService()
+topic_service = TopicService()
 # quiz_service eliminado - funcionalidad migrada a ContentService
 queue_service = ServerlessQueueService()
 fast_generator = FastVirtualModuleGenerator()
@@ -1482,196 +1484,6 @@ def detect_module_changes(module_id):
             status_code=500
         )
 
-@virtual_bp.route('/trigger-next-topic', methods=['POST'])
-@APIRoute.standard(auth_required_flag=True, required_fields=['current_topic_id', 'student_id', 'progress'])
-def trigger_next_topic():
-    """
-    Disparado cuando el progreso de un tema supera el 80%.
-    Genera hasta 2 temas por delante para mantener el flujo progresivo optimizado.
-    """
-    try:
-        data = request.get_json()
-        current_topic_id = data.get('current_topic_id')
-        student_id = data.get('student_id')
-        progress = data.get('progress', 0)
-        batch_size = data.get('batch_size', 2)  # Permitir configurar el lote
-        
-        # 1. Validar progreso mínimo
-        if progress < 80:
-            return APIRoute.error(
-                ErrorCodes.BAD_REQUEST,
-                "El progreso debe ser mayor al 80% para activar siguiente tema",
-                status_code=400
-            )
-        
-        # 2. Obtener información del tema actual y módulo virtual en una sola consulta optimizada
-        current_topic = get_db().topics.find_one({"_id": ObjectId(current_topic_id)})
-        if not current_topic:
-            return APIRoute.error(
-                ErrorCodes.NOT_FOUND,
-                "Tema actual no encontrado",
-                status_code=404
-            )
-        
-        module_id = current_topic["module_id"]
-        
-        # Obtener módulo virtual y perfil cognitivo del estudiante en paralelo
-        virtual_module = get_db().virtual_modules.find_one({
-            "student_id": ObjectId(student_id),
-            "module_id": module_id
-        })
-        
-        student = get_db().users.find_one({"_id": ObjectId(student_id)})
-        
-        if not virtual_module:
-            return APIRoute.error(
-                ErrorCodes.NOT_FOUND,
-                "Módulo virtual no encontrado para este estudiante",
-                status_code=404
-            )
-        
-        cognitive_profile = student.get("cognitive_profile", {}) if student else {}
-        virtual_module_id = str(virtual_module["_id"])
-        
-        # 3. Algoritmo optimizado: obtener todos los datos necesarios en consultas eficientes
-        # Consulta única para obtener temas publicados ordenados
-        all_published_topics = list(get_db().topics.find({
-            "module_id": module_id,
-            "published": True
-        }).sort("created_at", 1))
-        
-        if not all_published_topics:
-            return APIRoute.success(
-                data={
-                    "message": "No hay temas publicados disponibles en este módulo",
-                    "has_next": False,
-                    "generated_topics": []
-                },
-                message="No hay temas para generar"
-            )
-        
-        # Consulta única para obtener temas virtuales ya generados
-        generated_virtual_topics = list(get_db().virtual_topics.find({
-            "student_id": ObjectId(student_id),
-            "virtual_module_id": ObjectId(virtual_module_id)
-        }, {"topic_id": 1}))
-        
-        generated_topic_ids = {vt["topic_id"] for vt in generated_virtual_topics}
-        
-        # 4. Implementar lógica "dos temas por delante"
-        # Encontrar posición del tema actual y determinar cuántos temas generar
-        current_index = None
-        for i, topic in enumerate(all_published_topics):
-            if topic["_id"] == ObjectId(current_topic_id):
-                current_index = i
-                break
-        
-        if current_index is None:
-            return APIRoute.error(
-                ErrorCodes.BAD_REQUEST,
-                "Tema actual no encontrado en la lista de temas publicados",
-                status_code=400
-            )
-        
-        # Calcular qué temas deben estar disponibles (actual + 2 por delante)
-        topics_should_be_available = all_published_topics[current_index:current_index + batch_size + 1]
-        topics_to_generate = [
-            topic for topic in topics_should_be_available 
-            if topic["_id"] not in generated_topic_ids
-        ]
-        
-        if not topics_to_generate:
-            # Verificar si hay más temas pendientes de publicar
-            remaining_topics = all_published_topics[current_index + batch_size + 1:]
-            return APIRoute.success(
-                data={
-                    "message": "Todos los temas disponibles ya están generados",
-                    "has_next": len(remaining_topics) > 0,
-                    "generated_topics": [],
-                    "remaining_unpublished": len(remaining_topics)
-                },
-                message="Generación de lote completada"
-            )
-        
-        # 5. Generar temas en lote de forma optimizada
-        generated_topics = []
-        errors = []
-        
-        for topic in topics_to_generate:
-            try:
-                topic_id = str(topic["_id"])
-                
-                # Crear tema virtual básico
-                virtual_topic_data = {
-                    "topic_id": topic["_id"],
-                    "student_id": ObjectId(student_id),
-                    "virtual_module_id": ObjectId(virtual_module_id),
-                    "name": topic.get("name"),
-                    "description": topic.get("theory_content", ""),
-                    "adaptations": {
-                        "cognitive_profile": cognitive_profile,
-                        "difficulty_adjustment": calculate_difficulty_adjustment(topic, cognitive_profile),
-                        "batch_generated": True,
-                        "batch_timestamp": datetime.now()
-                    },
-                    "status": "active",
-                    "progress": 0.0,
-                    "completion_status": "not_started",
-                    "created_at": datetime.now()
-                }
-                
-                # Insertar tema virtual
-                result = get_db().virtual_topics.insert_one(virtual_topic_data)
-                virtual_topic_id = str(result.inserted_id)
-                
-                # Generar contenido personalizado (optimizado para lotes)
-                generate_personalized_content(topic_id, virtual_topic_id, cognitive_profile)
-                
-                generated_topics.append({
-                    "id": topic_id,
-                    "virtual_topic_id": virtual_topic_id,
-                    "name": topic.get("name", ""),
-                    "order": all_published_topics.index(topic)
-                })
-                
-                logging.info(f"Tema generado en lote: {topic.get('name')} para estudiante {student_id}")
-                
-            except Exception as generation_error:
-                error_msg = f"Error generando tema {topic.get('_id')}: {str(generation_error)}"
-                logging.error(error_msg)
-                errors.append({
-                    "topic_id": str(topic.get("_id")),
-                    "error": str(generation_error)
-                })
-        
-        # 6. Calcular estado de disponibilidad futura
-        total_topics = len(all_published_topics)
-        current_position = current_index + 1
-        has_more = current_position + len(generated_topics) < total_topics
-        
-        return APIRoute.success(
-            data={
-                "generated_topics": generated_topics,
-                "total_generated": len(generated_topics),
-                "errors": errors,
-                "has_next": has_more,
-                "progress_info": {
-                    "current_position": current_position,
-                    "total_topics": total_topics,
-                    "completion_percentage": round((current_position / total_topics) * 100, 1)
-                },
-                "next_batch_available": has_more
-            },
-            message=f"Lote de {len(generated_topics)} temas generado exitosamente"
-        )
-        
-    except Exception as e:
-        logging.error(f"Error al activar siguiente tema: {str(e)}")
-        return APIRoute.error(
-            ErrorCodes.SERVER_ERROR,
-            str(e),
-            status_code=500
-        )
 
 @virtual_bp.route('/content-results/student/<student_id>', methods=['GET'])
 @APIRoute.standard(auth_required_flag=True)

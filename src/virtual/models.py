@@ -124,38 +124,6 @@ class VirtualGenerationTask:
             "estimated_duration": self.estimated_duration
         }
 
-class ContentTemplate:
-    """
-    Templates pre-generados para acelerar la creación de módulos virtuales.
-    """
-    def __init__(self,
-                 template_type: str,  # "module", "topic", "content"
-                 content_type: str,  # "text", "diagram", "quiz", etc.
-                 methodology: str,   # "visual", "kinesthetic", etc.
-                 template_data: Dict,
-                 usage_count: int = 0,
-                 effectiveness_score: float = 0.5):
-        self.template_type = template_type
-        self.content_type = content_type
-        self.methodology = methodology
-        self.template_data = template_data
-        self.usage_count = usage_count
-        self.effectiveness_score = effectiveness_score
-        self.created_at = datetime.now()
-        self.updated_at = datetime.now()
-        
-    def to_dict(self) -> dict:
-        return {
-            "template_type": self.template_type,
-            "content_type": self.content_type,
-            "methodology": self.methodology,
-            "template_data": self.template_data,
-            "usage_count": self.usage_count,
-            "effectiveness_score": self.effectiveness_score,
-            "created_at": self.created_at,
-            "updated_at": self.updated_at
-        }
-
 class VirtualTopicContent:
     def __init__(self,
                  virtual_topic_id: str,
@@ -198,4 +166,4 @@ class VirtualTopicContent:
             data["content_id"] = self.content_id
         if self.template_id:
             data["template_id"] = self.template_id
-        return data 
+        return data

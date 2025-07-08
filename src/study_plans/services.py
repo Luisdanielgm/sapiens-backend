@@ -2391,3 +2391,68 @@ class EvaluationResourceService(VerificationBaseService):
         except Exception as e:
             log_error(f"Error al eliminar vinculación recurso {resource_id} evaluación {evaluation_id}: {str(e)}")
             return False, str(e)
+
+class TopicReadinessService(VerificationBaseService):
+    """
+    Servicio para verificar si un tema está listo para ser publicado y virtualizado.
+    """
+    def __init__(self):
+        super().__init__(collection_name="topics")
+        self.content_service = ContentService()
+
+    def check_readiness(self, topic_id: str) -> Dict[str, Any]:
+        """
+        Verifica si un tema cumple con los requisitos mínimos para ser publicado.
+
+        Args:
+            topic_id: ID del tema a verificar.
+
+        Returns:
+            Un diccionario con el estado de preparación y los requisitos faltantes.
+        """
+        try:
+            topic = self.collection.find_one({"_id": ObjectId(topic_id)})
+            if not topic:
+                raise AppException("Tema no encontrado", ErrorCodes.NOT_FOUND)
+
+            contents = self.content_service.get_topic_contents(topic_id)
+            
+            # --- Reglas de Validación ---
+            min_content_count = 1
+            required_categories = ["theoretical", "interactive"] # Ejemplo: requiere al menos uno teórico y uno interactivo
+
+            # 1. Validar número mínimo de contenidos
+            is_content_sufficient = len(contents) >= min_content_count
+            
+            # 2. Validar variedad de contenido
+            content_categories = {c.get('category', 'unknown') for c in contents}
+            missing_categories = [cat for cat in required_categories if cat not in content_categories]
+            
+            is_variety_sufficient = not missing_categories
+
+            # --- Construir Respuesta ---
+            is_ready = is_content_sufficient and is_variety_sufficient
+            
+            missing_requirements = []
+            if not is_content_sufficient:
+                missing_requirements.append(f"El tema debe tener al menos {min_content_count} contenido(s).")
+            if not is_variety_sufficient:
+                missing_requirements.append(f"Faltan contenidos de las siguientes categorías: {', '.join(missing_categories)}.")
+
+            return {
+                "ready": is_ready,
+                "topic_id": topic_id,
+                "checks": {
+                    "min_content_passed": is_content_sufficient,
+                    "category_variety_passed": is_variety_sufficient,
+                    "found_contents": len(contents),
+                    "found_categories": list(content_categories)
+                },
+                "missing_requirements": missing_requirements
+            }
+
+        except AppException as e:
+            raise e
+        except Exception as e:
+            log_error(f"Error al verificar la preparación del tema {topic_id}: {e}")
+            raise AppException("Error interno del servidor al verificar el tema.", ErrorCodes.SERVER_ERROR)

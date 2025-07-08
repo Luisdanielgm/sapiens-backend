@@ -196,33 +196,33 @@ class ContentResult:
 
 class ContentTemplate:
     """
-    Plantillas para generar contenido interactivo.
+    Define plantillas de contenido que pueden ser usadas para generar VirtualTopicContent.
     """
     def __init__(self,
                  name: str,
-                 content_type: str,
-                 template_code: str, # HTML, JS, CSS
-                 variables: List[str],
-                 description: Optional[str] = None,
+                 content_type: str,  # Tipo de contenido al que aplica esta plantilla (e.g., "text", "quiz")
+                 template_content: Dict, # El contenido de la plantilla (ej. estructura de un quiz, texto base)
+                 active: bool = True,
                  _id: Optional[ObjectId] = None,
-                 created_at: Optional[datetime] = None):
+                 created_at: Optional[datetime] = None,
+                 updated_at: Optional[datetime] = None):
         self._id = _id or ObjectId()
         self.name = name
         self.content_type = content_type
-        self.template_code = template_code
-        self.variables = variables
-        self.description = description
+        self.template_content = template_content
+        self.active = active
         self.created_at = created_at or datetime.now()
+        self.updated_at = updated_at or datetime.now()
 
     def to_dict(self) -> dict:
         return {
             "_id": self._id,
             "name": self.name,
             "content_type": self.content_type,
-            "template_code": self.template_code,
-            "variables": self.variables,
-            "description": self.description,
+            "template_content": self.template_content,
+            "active": self.active,
             "created_at": self.created_at,
+            "updated_at": self.updated_at
         }
 
 class ContentTypes:
@@ -337,4 +337,4 @@ class LearningMethodologyTypes:
             "memory": [cls.SPACED_REPETITION, cls.RETRIEVAL_PRACTICE, cls.FEYNMAN,
                      cls.MIND_MAP, cls.SOCRATIC],
             "adaptations": [cls.ADHD_ADAPTED, cls.DYSLEXIA_ADAPTED, cls.AUTISM_ADAPTED]
-        } 
+        }

@@ -11,7 +11,6 @@ from .models import (
     VirtualModule,
     VirtualTopic,
     VirtualGenerationTask,
-    ContentTemplate,
     VirtualTopicContent
 )
 # Quiz y QuizResult eliminados - ahora se usan TopicContent y ContentResult
@@ -706,7 +705,6 @@ class FastVirtualModuleGenerator(VerificationBaseService):
     """
     def __init__(self):
         super().__init__(collection_name="virtual_modules")
-        self.templates_collection = self.db["content_templates"]
         
     def generate_single_module(self, student_id: str, module_id: str, 
                              timeout: int = 45) -> Tuple[bool, str]:
@@ -764,7 +762,7 @@ class FastVirtualModuleGenerator(VerificationBaseService):
             # 5. Generar temas virtuales de forma optimizada
             self._generate_virtual_topics_fast(
                 module_id, student_id, virtual_module_id, 
-                cognitive_profile, timeout - 10
+                cognitive_profile
             )
             
             # 6. Actualizar estado del módulo virtual
@@ -790,7 +788,7 @@ class FastVirtualModuleGenerator(VerificationBaseService):
     
     def _generate_virtual_topics_fast(self, module_id: str, student_id: str, 
                                     virtual_module_id: str, cognitive_profile: Dict,
-                                    remaining_time: int, initial_batch_size: int = 2):
+                                    initial_batch_size: int = 2):
         """
         Genera temas virtuales optimizados para velocidad.
         """
@@ -828,7 +826,7 @@ class FastVirtualModuleGenerator(VerificationBaseService):
                                 topic, cognitive_profile
                             )
                         },
-                        "status": "locked",
+                        "status": "active", # Los temas del lote inicial deben estar activos
                         "progress": 0.0,
                         "completion_status": "not_started"
                     }
@@ -839,11 +837,9 @@ class FastVirtualModuleGenerator(VerificationBaseService):
                     virtual_topic_id = str(result.inserted_id)
                     
                     # Generar contenido personalizado para el tema
-                    # Llamada corregida para pasar el ID del tema virtual y del estudiante
-                    self._generate_basic_content_from_templates(
+                    self._generate_topic_contents_for_sync(
                         topic_id=topic_id,
                         virtual_topic_id=virtual_topic_id,
-                        student_id=student_id,
                         cognitive_profile=cognitive_profile
                     )
                 except Exception as e_topic:
@@ -851,6 +847,146 @@ class FastVirtualModuleGenerator(VerificationBaseService):
 
         except Exception as e:
             logging.error(f"Error en _generate_virtual_topics_fast: {str(e)}")
+
+    def trigger_next_topic_generation(self, student_id: str, current_topic_id: str, progress: float) -> Tuple[bool, Dict]:
+        """
+        Desencadena la generación del siguiente lote de temas virtuales para un estudiante.
+        Se llama cuando el estudiante completa un tema (progreso > 80%).
+        
+        Args:
+            student_id: ID del estudiante
+            current_topic_id: ID del tema virtual actual que el estudiante está completando
+            progress: Progreso del tema actual (debe ser >= 0.8)
+            
+        Returns:
+            Tuple[bool, Dict]: (Éxito, información de los temas generados o error)
+        """
+        try:
+            if progress < 0.8:
+                return False, {"message": "El progreso del tema debe ser al menos 80% para desbloquear el siguiente."}
+
+            # 1. Encontrar el VirtualTopic actual y su VirtualModule
+            current_virtual_topic = self.db.virtual_topics.find_one({"_id": ObjectId(current_topic_id), "student_id": ObjectId(student_id)})
+            if not current_virtual_topic:
+                return False, {"message": "Tema virtual actual no encontrado."}
+            
+            virtual_module_id = current_virtual_topic["virtual_module_id"]
+            original_module_id = current_virtual_topic["module_id"] # Asumiendo que VirtualTopic guarda module_id original
+            
+            # Si VirtualTopic no guarda module_id original, obtenerlo del VirtualModule
+            if not original_module_id:
+                virtual_module = self.db.virtual_modules.find_one({"_id": virtual_module_id})
+                if not virtual_module:
+                    return False, {"message": "Módulo virtual asociado no encontrado."}
+                original_module_id = virtual_module["module_id"]
+
+            # 2. Obtener todos los temas originales publicados del módulo, ordenados
+            all_original_topics = list(self.db.topics.find({
+                "module_id": ObjectId(original_module_id),
+                "published": True
+            }).sort("order", 1)) # Asumiendo un campo 'order' o usar 'created_at'
+
+            if not all_original_topics:
+                return False, {"message": "No hay temas publicados en el módulo original."}
+
+            # 3. Identificar el índice del tema actual en la lista de temas originales
+            current_topic_original_id = current_virtual_topic["topic_id"]
+            current_topic_index = -1
+            for i, topic in enumerate(all_original_topics):
+                if str(topic["_id"]) == str(current_topic_original_id):
+                    current_topic_index = i
+                    break
+            
+            if current_topic_index == -1:
+                return False, {"message": "El tema original del tema virtual actual no fue encontrado o no está publicado."}
+
+            # 4. Determinar los próximos temas a generar (manteniendo "dos por delante")
+            # Temas ya generados para este virtual_module
+            generated_virtual_topics = list(self.db.virtual_topics.find({
+                "virtual_module_id": virtual_module_id,
+                "student_id": ObjectId(student_id)
+            }, {"topic_id": 1}))
+            generated_original_topic_ids = {str(vt["topic_id"]) for vt in generated_virtual_topics}
+
+            topics_to_generate_now = []
+            # Empezar a buscar desde el siguiente tema al actual
+            for i in range(current_topic_index + 1, len(all_original_topics)):
+                topic = all_original_topics[i]
+                if str(topic["_id"]) not in generated_original_topic_ids:
+                    topics_to_generate_now.append(topic)
+                    # Generar hasta 2 temas por delante
+                    if len(topics_to_generate_now) >= 2: 
+                        break
+            
+            if not topics_to_generate_now:
+                return True, {"message": "No hay más temas publicados para generar en este módulo.", "generated_topics": [], "has_next": False}
+
+            # 5. Obtener perfil cognitivo del estudiante
+            student = self.db.users.find_one({"_id": ObjectId(student_id)})
+            cognitive_profile = student.get("cognitive_profile", {}) if student else {}
+
+            # 6. Generar los nuevos VirtualTopics y sus contenidos
+            newly_generated_topics_info = []
+            for topic in topics_to_generate_now:
+                try:
+                    topic_id = str(topic["_id"])
+                    
+                    virtual_topic_data = {
+                        "topic_id": ObjectId(topic_id),
+                        "student_id": ObjectId(student_id),
+                        "virtual_module_id": virtual_module_id,
+                        "name": topic.get("name"), # Añadir nombre y descripción para facilitar la UI
+                        "description": topic.get("theory_content", ""),
+                        "adaptations": {
+                            "cognitive_profile": cognitive_profile,
+                            "difficulty_adjustment": self._calculate_quick_difficulty_adjustment(
+                                topic, cognitive_profile
+                            )
+                        },
+                        "status": "active", # Estos temas se generan como activos
+                        "progress": 0.0,
+                        "completion_status": "not_started",
+                        "created_at": datetime.now()
+                    }
+                    
+                    virtual_topic = VirtualTopic(**virtual_topic_data)
+                    result = self.db.virtual_topics.insert_one(virtual_topic.to_dict())
+                    new_virtual_topic_id = str(result.inserted_id)
+                    
+                    self._generate_topic_contents_for_sync(
+                        topic_id=topic_id,
+                        virtual_topic_id=new_virtual_topic_id,
+                        cognitive_profile=cognitive_profile
+                    )
+                    
+                    newly_generated_topics_info.append({
+                        "original_topic_id": topic_id,
+                        "virtual_topic_id": new_virtual_topic_id,
+                        "name": topic.get("name"),
+                        "status": "active"
+                    })
+                    logging.info(f"Nuevo tema virtual generado: {new_virtual_topic_id} para el tema original {topic_id}")
+
+                except Exception as e_gen:
+                    logging.error(f"Error generando tema virtual {topic.get('_id')}: {e_gen}")
+                    # Continuar con el siguiente tema si hay un error en uno
+            
+            # 7. Actualizar el estado del current_virtual_topic a "completed" si el progreso es 100%
+            if progress >= 1.0: # Si el progreso es 100%
+                self.db.virtual_topics.update_one(
+                    {"_id": ObjectId(current_topic_id)},
+                    {"$set": {"progress": 1.0, "completion_status": "completed", "updated_at": datetime.now()}}
+                )
+
+            return True, {
+                "message": f"Se generaron {len(newly_generated_topics_info)} nuevos temas virtuales.",
+                "generated_topics": newly_generated_topics_info,
+                "has_next": len(all_original_topics) > (current_topic_index + 1 + len(newly_generated_topics_info))
+            }
+
+        except Exception as e:
+            logging.error(f"Error en trigger_next_topic_generation: {str(e)}")
+            return False, {"message": f"Error interno al intentar generar el siguiente tema: {str(e)}"}
 
     def synchronize_module_content(self, virtual_module_id: str) -> Tuple[bool, Dict]:
         """
@@ -1036,70 +1172,6 @@ class FastVirtualModuleGenerator(VerificationBaseService):
             "adjusted": final_difficulty,
             "factor": adjustment
         }
-    
-    def _generate_basic_content_from_templates(self, topic_id: str, 
-                                             virtual_topic_id: str,
-                                             student_id: str,
-                                             cognitive_profile: Dict):
-        """
-        Genera contenido básico usando templates pre-generados.
-        """
-        try:
-            # Determinar tipos de contenido preferidos según perfil
-            preferred_types = self._get_preferred_content_types(cognitive_profile)
-            
-            # Obtener templates disponibles
-            for content_type in preferred_types[:3]:  # Limitar a 3 tipos
-                template = self._get_cached_template(content_type, cognitive_profile)
-                
-                if template:
-                    # Crear contenido usando el modelo VirtualTopicContent
-                    content_data = VirtualTopicContent(
-                        virtual_topic_id=virtual_topic_id,
-                        student_id=student_id,
-                        content_type=content_type,
-                        content=template["template_data"].get("content", ""),
-                        template_id=str(template.get("_id"))
-                    )
-                    
-                    self.db.virtual_topic_contents.insert_one(content_data.to_dict())
-                    
-        except Exception as e:
-            logging.error(f"Error al generar contenido desde templates: {str(e)}")
-    
-    def _get_preferred_content_types(self, cognitive_profile: Dict) -> List[str]:
-        """
-        Determina tipos de contenido preferidos según perfil cognitivo.
-        """
-        types = ["text"]  # Siempre incluir texto como base
-        
-        # Añadir tipos según fortalezas
-        if cognitive_profile.get("visual_strength", 0) > 0.6:
-            types.extend(["diagram", "infographic"])
-        if cognitive_profile.get("auditory_strength", 0) > 0.6:
-            types.append("audio")
-        if cognitive_profile.get("kinesthetic_strength", 0) > 0.6:
-            types.append("interactive_exercise")
-            
-        return types
-    
-    def _get_cached_template(self, content_type: str, cognitive_profile: Dict) -> Optional[Dict]:
-        """
-        Obtiene un template cacheado para el tipo de contenido especificado.
-        """
-        try:
-            # Buscar template que coincida con tipo y perfil
-            template = self.templates_collection.find_one({
-                "content_type": content_type,
-                "template_type": "content",
-                "status": "active"
-            })
-            
-            return template
-            
-        except Exception as e:
-            logging.error(f"Error al obtener template cacheado: {str(e)}")
-            return None
 
     def _generate_topic_contents_for_sync(self, topic_id: str, virtual_topic_id: str, cognitive_profile: Dict):
         """
