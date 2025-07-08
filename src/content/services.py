@@ -112,8 +112,12 @@ class ContentService(VerificationBaseService):
                 return False, f"Tipo de contenido '{content_type}' no válido"
 
             # Crear contenido explícitamente para mapear campos
+            # Convertir content a string si es dict para el extractor de marcadores
+            content_for_markers = content_data.get("content", "")
+            if isinstance(content_for_markers, dict):
+                content_for_markers = json.dumps(content_for_markers, ensure_ascii=False)
             markers = ContentPersonalizationService.extract_markers(
-                content_data.get("content", "") or json.dumps(content_data.get("interactive_data", {}))
+                content_for_markers or json.dumps(content_data.get("interactive_data", {}))
             )
             content = TopicContent(
                 topic_id=topic_id,
@@ -212,8 +216,12 @@ class ContentService(VerificationBaseService):
             update_data["updated_at"] = datetime.now()
 
             if "content" in update_data or "interactive_data" in update_data:
+                # Convertir content a string si es dict para el extractor de marcadores
+                content_for_markers = update_data.get("content", "")
+                if isinstance(content_for_markers, dict):
+                    content_for_markers = json.dumps(content_for_markers, ensure_ascii=False)
                 markers = ContentPersonalizationService.extract_markers(
-                    update_data.get("content", "") or json.dumps(update_data.get("interactive_data", {}))
+                    content_for_markers or json.dumps(update_data.get("interactive_data", {}))
                 )
                 update_data["personalization_markers"] = markers
 
