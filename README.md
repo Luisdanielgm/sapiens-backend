@@ -36,6 +36,11 @@ Se han realizado las siguientes mejoras para optimizar el funcionamiento y mante
    - Estandarización de respuestas
    - Mejor documentación de parámetros
 
+7. **Personalización de Contenidos**:
+   - Eliminada la lógica de plantillas de contenido
+   - Nuevos campos para marcadores de personalización en `TopicContent`
+   - Extracción automática de marcadores al crear o actualizar contenido
+
 ## Variables de Entorno Requeridas
 
 El proyecto usa las siguientes variables de entorno que deben configurarse en un archivo `.env`:

@@ -12,13 +12,11 @@ class ContentType:
     def __init__(self,
                  code: str,  # Identificador único (text, feynman, diagram, etc.)
                  name: str,
-                 category: str,  # teórico, visual, multimedia, interactivo, evaluación
                  description: str,
                  compatible_methodologies: List[str] = None,
                  status: str = "active"):
         self.code = code
         self.name = name
-        self.category = category
         self.description = description
         self.compatible_methodologies = compatible_methodologies or []
         self.created_at = datetime.now()
@@ -28,7 +26,6 @@ class ContentType:
         return {
             "code": self.code,
             "name": self.name,
-            "category": self.category,
             "description": self.description,
             "compatible_methodologies": self.compatible_methodologies,
             "created_at": self.created_at,
@@ -81,6 +78,7 @@ class TopicContent:
                  web_resources: List[Dict] = None,
                  generation_prompt: str = None,
                  ai_credits: bool = True,
+                 personalization_markers: Dict = None,
                  status: str = "draft",
                  _id: Optional[ObjectId] = None,
                  created_at: Optional[datetime] = None,
@@ -97,6 +95,7 @@ class TopicContent:
         self.web_resources = web_resources or []
         self.generation_prompt = generation_prompt
         self.ai_credits = ai_credits
+        self.personalization_markers = personalization_markers or {}
         self.status = status
         self.created_at = created_at or datetime.now()
         self.updated_at = updated_at or datetime.now()
@@ -117,6 +116,7 @@ class TopicContent:
             "web_resources": self.web_resources,
             "generation_prompt": self.generation_prompt,
             "ai_credits": self.ai_credits,
+            "personalization_markers": self.personalization_markers,
             "status": self.status,
             "created_at": self.created_at,
             "updated_at": self.updated_at
@@ -194,36 +194,6 @@ class ContentResult:
             "recorded_at": self.recorded_at,
         }
 
-class ContentTemplate:
-    """
-    Define plantillas de contenido que pueden ser usadas para generar VirtualTopicContent.
-    """
-    def __init__(self,
-                 name: str,
-                 content_type: str,  # Tipo de contenido al que aplica esta plantilla (e.g., "text", "quiz")
-                 template_content: Dict, # El contenido de la plantilla (ej. estructura de un quiz, texto base)
-                 active: bool = True,
-                 _id: Optional[ObjectId] = None,
-                 created_at: Optional[datetime] = None,
-                 updated_at: Optional[datetime] = None):
-        self._id = _id or ObjectId()
-        self.name = name
-        self.content_type = content_type
-        self.template_content = template_content
-        self.active = active
-        self.created_at = created_at or datetime.now()
-        self.updated_at = updated_at or datetime.now()
-
-    def to_dict(self) -> dict:
-        return {
-            "_id": self._id,
-            "name": self.name,
-            "content_type": self.content_type,
-            "template_content": self.template_content,
-            "active": self.active,
-            "created_at": self.created_at,
-            "updated_at": self.updated_at
-        }
 
 class ContentTypes:
     # Contenido Teórico

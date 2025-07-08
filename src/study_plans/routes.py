@@ -900,8 +900,7 @@ def get_topic_readiness_status(topic_id):
 def list_content_types():
     """Lista todos los tipos de contenido disponibles"""
     try:
-        category = request.args.get('category')
-        content_types = content_type_service.list_content_types(category)
+        content_types = content_type_service.list_content_types()
         return APIRoute.success(data=content_types)
     except Exception as e:
         logging.error(f"Error al listar tipos de contenido: {str(e)}")
@@ -912,7 +911,7 @@ def list_content_types():
         )
 
 @study_plan_bp.route('/content-types', methods=['POST'])
-@APIRoute.standard(auth_required_flag=True, roles=[ROLES["INSTITUTE_ADMIN"]], required_fields=['code', 'name', 'category', 'description'])
+@APIRoute.standard(auth_required_flag=True, roles=[ROLES["INSTITUTE_ADMIN"]], required_fields=['code', 'name', 'description'])
 def create_content_type():
     """Crea un nuevo tipo de contenido"""
     try:

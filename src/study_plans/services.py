@@ -1386,20 +1386,17 @@ class ContentTypeService(VerificationBaseService):
             logging.error(f"Error al crear tipo de contenido: {str(e)}")
             return False, str(e)
             
-    def list_content_types(self, category: str = None) -> List[Dict]:
+    def list_content_types(self) -> List[Dict]:
         """
-        Lista todos los tipos de contenido disponibles, opcionalmente filtrados por categoría.
+        Lista todos los tipos de contenido disponibles.
         
         Args:
-            category: Categoría para filtrar (opcional)
             
         Returns:
             Lista de tipos de contenido
         """
         try:
             filter_query = {"status": "active"}
-            if category:
-                filter_query["category"] = category
                 
             content_types = list(self.collection.find(filter_query))
             
@@ -2209,9 +2206,6 @@ class TopicContentService(VerificationBaseService):
             # Ordenar por relevancia
             relevant_diagrams.sort(key=lambda x: x.get("relevance_score", 0), reverse=True)
             
-            # Recomendar plantillas de diagramas según el tema
-            templates = diagram_service.list_templates()
-            
             # Determinar qué tipos de diagramas serían más útiles según las palabras clave
             # Palabras clave que sugieren diferentes tipos de diagramas
             process_keywords = ['proceso', 'flujo', 'pasos', 'etapas', 'procedimiento', 'secuencia']
@@ -2232,23 +2226,14 @@ class TopicContentService(VerificationBaseService):
             if not recommended_types:
                 recommended_types = ["mindmap"]
                 
-            # Filtrar plantillas por tipos recomendados
-            suggested_templates = []
-            for template in templates:
-                if template.get("template_type") in recommended_types:
-                    template["suggestion_reason"] = f"Apropiado para explicar {topic_name}"
-                    suggested_templates.append(template)
-                    
             return {
                 "existing_diagrams": relevant_diagrams,
-                "suggested_templates": suggested_templates[:3],
                 "recommended_types": list(set(recommended_types))
             }
         except Exception as e:
             logging.error(f"Error al recomendar diagramas: {str(e)}")
             return {
                 "existing_diagrams": [],
-                "suggested_templates": [],
                 "recommended_types": []
             }
 
@@ -2419,13 +2404,20 @@ class TopicReadinessService(VerificationBaseService):
             
             # --- Reglas de Validación ---
             min_content_count = 1
-            required_categories = ["theoretical", "interactive"] # Ejemplo: requiere al menos uno teórico y uno interactivo
+            required_categories = ["theoretical", "interactive"]  # Requiere al menos un contenido teórico y uno interactivo
 
             # 1. Validar número mínimo de contenidos
             is_content_sufficient = len(contents) >= min_content_count
             
             # 2. Validar variedad de contenido
-            content_categories = {c.get('category', 'unknown') for c in contents}
+            content_categories = set()
+            type_map = ContentTypes.get_categories()
+            for c in contents:
+                ctype = c.get('content_type')
+                for cat, types in type_map.items():
+                    if ctype in types:
+                        content_categories.add(cat)
+                        break
             missing_categories = [cat for cat in required_categories if cat not in content_categories]
             
             is_variety_sufficient = not missing_categories

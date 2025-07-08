@@ -148,7 +148,6 @@ def verify_indexes():
         "virtual_modules", 
         "modules",
         "virtual_topics",
-        "content_templates",
         "topics",
         "evaluations",
         "users"
