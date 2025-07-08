@@ -1576,6 +1576,12 @@ class TopicContentService(VerificationBaseService):
             content_payload = data.get("content")
             if content_payload is None:
                 return False, "Falta el campo 'content'"
+            
+            # Convertir diccionario a JSON string si es necesario
+            if isinstance(content_payload, dict):
+                content_payload = json.dumps(content_payload, ensure_ascii=False)
+            elif not isinstance(content_payload, str):
+                content_payload = str(content_payload)
 
             # 2. Validaciones de existencia en la BD
             topic = get_db().topics.find_one({"_id": ObjectId(topic_id)})
