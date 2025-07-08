@@ -514,8 +514,7 @@ def get_personalized_recommendations(student_id):
                 "from_topic": topic_id,
                 "pdfs": topic_recommendations.get("pdfs", [])[:3],
                 "web_resources": topic_recommendations.get("web_resources", [])[:3],
-                "diagrams": topic_recommendations.get("diagrams", {}).get("existing_diagrams", [])[:2],
-                "suggested_templates": topic_recommendations.get("diagrams", {}).get("suggested_templates", [])[:2]
+                "diagrams": topic_recommendations.get("diagrams", {}).get("existing_diagrams", [])[:2]
             }
         elif module_id:
             # Si se proporciona módulo, obtener sus temas
@@ -536,8 +535,7 @@ def get_personalized_recommendations(student_id):
                     "from_module": module_id,
                     "pdfs": topic_recommendations.get("pdfs", [])[:3],
                     "web_resources": topic_recommendations.get("web_resources", [])[:3],
-                    "diagrams": topic_recommendations.get("diagrams", {}).get("existing_diagrams", [])[:2],
-                    "suggested_templates": topic_recommendations.get("diagrams", {}).get("suggested_templates", [])[:2]
+                    "diagrams": topic_recommendations.get("diagrams", {}).get("existing_diagrams", [])[:2]
                 }
         
         return APIRoute.success(data={

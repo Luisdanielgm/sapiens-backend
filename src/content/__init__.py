@@ -10,7 +10,7 @@ Reemplaza los módulos separados de games, simulations, y quizzes,
 proporcionando una API unificada y consistente.
 """
 
-from .models import ContentType, TopicContent, VirtualTopicContent, ContentResult, ContentTemplate
+from .models import ContentType, TopicContent, VirtualTopicContent, ContentResult
 from .services import ContentService, ContentTypeService, VirtualContentService, ContentResultService
 from .routes import content_bp
 
@@ -19,7 +19,6 @@ __all__ = [
     'TopicContent', 
     'VirtualTopicContent',
     'ContentResult',
-    'ContentTemplate',
     'ContentService',
     'ContentTypeService',
     'VirtualContentService', 

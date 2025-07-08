@@ -8,7 +8,8 @@ from src.shared.database import get_db
 from src.shared.constants import STATUS
 from src.shared.standardization import VerificationBaseService, ErrorCodes
 from src.shared.exceptions import AppException
-from .models import ContentType, TopicContent, VirtualTopicContent, ContentResult, ContentTemplate
+from .models import ContentType, TopicContent, VirtualTopicContent, ContentResult, ContentTypes
+import re
 
 class ContentTypeService(VerificationBaseService):
     """
@@ -42,20 +43,17 @@ class ContentTypeService(VerificationBaseService):
             logging.error(f"Error creando tipo de contenido: {str(e)}")
             return False, f"Error interno: {str(e)}"
 
-    def get_content_types(self, category: str = None, subcategory: str = None) -> List[Dict]:
+    def get_content_types(self, subcategory: str = None) -> List[Dict]:
         """
         Obtiene tipos de contenido filtrados.
         
         Args:
-            category: Categoría a filtrar ("static", "interactive", "immersive")
             subcategory: Subcategoría a filtrar ("game", "simulation", "quiz", etc.)
             
         Returns:
             Lista de tipos de contenido
         """
         query = {"status": "active"}
-        if category:
-            query["category"] = category
         if subcategory:
             query["subcategory"] = subcategory
             
@@ -114,6 +112,9 @@ class ContentService(VerificationBaseService):
                 return False, f"Tipo de contenido '{content_type}' no válido"
 
             # Crear contenido explícitamente para mapear campos
+            markers = ContentPersonalizationService.extract_markers(
+                content_data.get("content", "") or json.dumps(content_data.get("interactive_data", {}))
+            )
             content = TopicContent(
                 topic_id=topic_id,
                 content_type=content_type,
@@ -125,6 +126,7 @@ class ContentService(VerificationBaseService):
                 web_resources=content_data.get("web_resources"),
                 generation_prompt=content_data.get("generation_prompt"),
                 ai_credits=content_data.get("ai_credits", True),
+                personalization_markers=markers,
                 status=content_data.get("status", "draft")
             )
             result = self.collection.insert_one(content.to_dict())
@@ -167,8 +169,6 @@ class ContentService(VerificationBaseService):
             for content in contents:
                 content["_id"] = str(content["_id"])
                 content["topic_id"] = str(content["topic_id"])
-                if content.get("template_id"):
-                    content["template_id"] = str(content["template_id"])
                 if content.get("creator_id"):
                     content["creator_id"] = str(content["creator_id"])
                     
@@ -184,8 +184,7 @@ class ContentService(VerificationBaseService):
         """
         try:
             # Obtener tipos interactivos
-            interactive_types = self.content_type_service.get_content_types(category="interactive")
-            type_codes = [ct["code"] for ct in interactive_types]
+            type_codes = ContentTypes.get_categories().get("interactive", [])
             
             query = {
                 "topic_id": ObjectId(topic_id),
@@ -211,7 +210,13 @@ class ContentService(VerificationBaseService):
         """
         try:
             update_data["updated_at"] = datetime.now()
-            
+
+            if "content" in update_data or "interactive_data" in update_data:
+                markers = ContentPersonalizationService.extract_markers(
+                    update_data.get("content", "") or json.dumps(update_data.get("interactive_data", {}))
+                )
+                update_data["personalization_markers"] = markers
+
             result = self.collection.update_one(
                 {"_id": ObjectId(content_id)},
                 {"$set": update_data}
@@ -254,8 +259,6 @@ class ContentService(VerificationBaseService):
 
             content["_id"] = str(content["_id"])
             content["topic_id"] = str(content["topic_id"])
-            if content.get("template_id"):
-                content["template_id"] = str(content["template_id"])
             if content.get("creator_id"):
                 content["creator_id"] = str(content["creator_id"])
 
@@ -498,4 +501,25 @@ class ContentResultService(VerificationBaseService):
             
         except Exception as e:
             logging.error(f"Error obteniendo resultados del estudiante: {str(e)}")
-            return [] 
+            return []
+
+
+class ContentPersonalizationService:
+    """Procesa contenido para identificar marcadores de personalización"""
+
+    marker_pattern = re.compile(r"{{(.*?)}}")
+
+    @classmethod
+    def extract_markers(cls, text: str) -> Dict:
+        segments = []
+        last_idx = 0
+        for match in cls.marker_pattern.finditer(text):
+            start, end = match.span()
+            if start > last_idx:
+                segments.append({"type": "static", "content": text[last_idx:start]})
+            marker_id = match.group(1)
+            segments.append({"type": "marker", "id": marker_id})
+            last_idx = end
+        if last_idx < len(text):
+            segments.append({"type": "static", "content": text[last_idx:]})
+        return {"segments": segments}

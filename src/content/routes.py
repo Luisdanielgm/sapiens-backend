@@ -30,13 +30,12 @@ content_result_service = ContentResultService()
 def get_content_types():
     """
     Obtiene todos los tipos de contenido disponibles.
-    Query params: category, subcategory
+    Query params: subcategory
     """
     try:
-        category = request.args.get('category')  # static, interactive, immersive
         subcategory = request.args.get('subcategory')  # game, simulation, quiz, diagram, etc.
-        
-        content_types = content_type_service.get_content_types(category, subcategory)
+
+        content_types = content_type_service.get_content_types(subcategory)
 
         return APIRoute.success(data={"content_types": content_types})
         
@@ -96,7 +95,6 @@ def create_content():
         "description": "Descripción",
         "content_data": {...},  // Contenido específico según tipo
         "interactive_config": {...},  // Para tipos interactivos
-        "template_id": "ObjectId",  // Opcional
         "difficulty": "easy|medium|hard",
         "estimated_duration": 15,
         "learning_objectives": [...],

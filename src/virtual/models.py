@@ -131,7 +131,6 @@ class VirtualTopicContent:
                  content_type: str,
                  content: str,
                  content_id: Optional[str] = None,
-                 template_id: Optional[str] = None,
                  personalization_data: Optional[Dict] = None,
                  status: str = "active",
                  interaction_tracking: Optional[Dict] = None):
@@ -140,7 +139,6 @@ class VirtualTopicContent:
         self.content_type = content_type
         self.content = content
         self.content_id = ObjectId(content_id) if content_id else None
-        self.template_id = ObjectId(template_id) if template_id else None
         self.personalization_data = personalization_data or {}
         self.status = status
         self.interaction_tracking = interaction_tracking or {
@@ -164,6 +162,4 @@ class VirtualTopicContent:
         }
         if self.content_id:
             data["content_id"] = self.content_id
-        if self.template_id:
-            data["template_id"] = self.template_id
         return data
