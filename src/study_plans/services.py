@@ -2401,7 +2401,7 @@ class TopicReadinessService(VerificationBaseService):
             if not topic:
                 raise AppException("Tema no encontrado", ErrorCodes.NOT_FOUND)
 
-            contents = self.content_service.get_topic_contents(topic_id)
+            contents = self.content_service.get_topic_content(topic_id)
             content_types_present = {c.get('content_type') for c in contents}
 
             # --- Reglas de Validación Multisensorial ---
