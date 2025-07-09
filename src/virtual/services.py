@@ -840,7 +840,8 @@ class FastVirtualModuleGenerator(VerificationBaseService):
                     self._generate_topic_contents_for_sync(
                         topic_id=topic_id,
                         virtual_topic_id=virtual_topic_id,
-                        cognitive_profile=cognitive_profile
+                        cognitive_profile=cognitive_profile,
+                        student_id=student_id
                     )
                 except Exception as e_topic:
                     logging.error(f"Error generando tema virtual para {topic['_id']}: {e_topic}")
@@ -956,7 +957,8 @@ class FastVirtualModuleGenerator(VerificationBaseService):
                     self._generate_topic_contents_for_sync(
                         topic_id=topic_id,
                         virtual_topic_id=new_virtual_topic_id,
-                        cognitive_profile=cognitive_profile
+                        cognitive_profile=cognitive_profile,
+                        student_id=student_id
                     )
                     
                     newly_generated_topics_info.append({
@@ -1047,7 +1049,8 @@ class FastVirtualModuleGenerator(VerificationBaseService):
                     self._generate_topic_contents_for_sync(
                         topic_id=str(topic["_id"]),
                         virtual_topic_id=virtual_topic_id,
-                        cognitive_profile=cognitive_profile
+                        cognitive_profile=cognitive_profile,
+                        student_id=str(student_id)
                     )
                     
                     report["added"].append({"type": "topic", "id": str(topic["_id"]), "virtual_topic_id": virtual_topic_id})
@@ -1173,7 +1176,7 @@ class FastVirtualModuleGenerator(VerificationBaseService):
             "factor": adjustment
         }
 
-    def _generate_topic_contents_for_sync(self, topic_id: str, virtual_topic_id: str, cognitive_profile: Dict):
+    def _generate_topic_contents_for_sync(self, topic_id: str, virtual_topic_id: str, cognitive_profile: Dict, student_id: str):
         """
         Genera contenidos virtuales para un tema específico durante sincronización.
         
@@ -1186,7 +1189,7 @@ class FastVirtualModuleGenerator(VerificationBaseService):
             # Obtener contenidos originales del tema
             original_contents = list(self.db.topic_contents.find({
                 "topic_id": ObjectId(topic_id),
-                "status": "active"
+                "status": {"$in": ["active", "draft", "approved"]} # Incluir borradores y aprobados
             }))
             
             if not original_contents:
@@ -1199,7 +1202,7 @@ class FastVirtualModuleGenerator(VerificationBaseService):
                     virtual_content_data = {
                         "virtual_topic_id": ObjectId(virtual_topic_id),
                         "content_id": content["_id"],
-                        "student_id": ObjectId(cognitive_profile.get("student_id")) if cognitive_profile.get("student_id") else None,
+                        "student_id": ObjectId(student_id),
                         "personalization_data": {
                             "adapted_for_profile": cognitive_profile,
                             "sync_generated": True,
