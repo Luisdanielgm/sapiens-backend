@@ -197,17 +197,59 @@ class VirtualTopicService(VerificationBaseService):
         Obtiene todos los contenidos de un tema virtual específico.
         """
         try:
-            contents = list(self.db.virtual_topic_contents.find(
+            # 1. Obtener el tema virtual para conseguir el ID del tema original
+            virtual_topic = self.db.virtual_topics.find_one(
+                {"_id": ObjectId(virtual_topic_id)}
+            )
+            if not virtual_topic:
+                logging.warning(f"No se encontró el tema virtual con ID: {virtual_topic_id}")
+                return []
+
+            original_topic_id = virtual_topic.get("topic_id")
+
+            # 2. Obtener los contenidos virtuales (el nuevo sistema)
+            virtual_contents = list(self.db.virtual_topic_contents.find(
                 {"virtual_topic_id": ObjectId(virtual_topic_id)}
             ).sort("created_at", 1))
+
+            # 3. Obtener los recursos del tema original (sistema legacy para compatibilidad)
+            # Esto evita que el frontend entre en un bucle si todavía depende de 'topic_resources'
+            topic_resources = list(self.db.topic_resources.find(
+                {"topic_id": ObjectId(original_topic_id)}
+            ).sort("created_at", 1))
             
-            # Convertir ObjectIds a strings para la respuesta JSON
-            for content in contents:
-                for key, value in content.items():
-                    if isinstance(value, ObjectId):
-                        content[key] = str(value)
-            
-            return contents
+            # 4. Unificar los resultados en una sola lista
+            all_content = []
+
+            # Formatear contenidos virtuales
+            for content in virtual_contents:
+                content["_id"] = str(content["_id"])
+                content["virtual_topic_id"] = str(content["virtual_topic_id"])
+                content["content_id"] = str(content["content_id"])
+                content["student_id"] = str(content["student_id"])
+                # Añadir un campo para distinguir el tipo de contenido en el frontend
+                content["source_type"] = "virtual_content"
+                all_content.append(content)
+
+            # Formatear y añadir recursos legacy
+            for resource in topic_resources:
+                resource["_id"] = str(resource["_id"])
+                resource["topic_id"] = str(resource["topic_id"])
+                # Simular la estructura de un contenido virtual para que el frontend lo pueda renderizar
+                all_content.append({
+                    "_id": resource["_id"],
+                    "content_id": resource["_id"],  # Usar el mismo ID para referencia
+                    "virtual_topic_id": virtual_topic_id,
+                    "student_id": str(virtual_topic.get("student_id")),
+                    "personalization_data": {
+                        "content_type": resource.get("type", "resource"),
+                    },
+                    "interaction_tracking": {"completion_status": "not_started"},
+                    "legacy_resource_data": resource, # Incluir todos los datos originales
+                    "source_type": "legacy_resource"
+                })
+
+            return all_content
         except Exception as e:
             logging.error(f"Error al obtener contenidos del tema virtual: {str(e)}")
             return []
