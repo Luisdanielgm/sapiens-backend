@@ -54,6 +54,7 @@ class VirtualTopic:
                  adaptations: Optional[Dict] = None,
                  order: int = 0,
                  status: str = "locked",
+                 locked: bool = True,  # Campo explícito para control de acceso
                  progress: float = 0.0,
                  completion_status: str = "not_started"):
         self.virtual_module_id = ObjectId(virtual_module_id)
@@ -62,6 +63,7 @@ class VirtualTopic:
         self.adaptations = adaptations or {}
         self.order = order
         self.status = status
+        self.locked = locked
         self.progress = progress
         self.completion_status = completion_status
         self.created_at = datetime.now()
@@ -74,6 +76,7 @@ class VirtualTopic:
             "adaptations": self.adaptations,
             "order": self.order,
             "status": self.status,
+            "locked": self.locked,
             "progress": self.progress,
             "completion_status": self.completion_status,
             "created_at": self.created_at

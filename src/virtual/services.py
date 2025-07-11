@@ -227,6 +227,17 @@ class VirtualTopicService(VerificationBaseService):
                 content["virtual_topic_id"] = str(content["virtual_topic_id"])
                 content["content_id"] = str(content["content_id"])
                 content["student_id"] = str(content["student_id"])
+                
+                # NUEVO: Enriquecer con datos del contenido original
+                original_content = self.db.topic_contents.find_one({"_id": content["content_id"]})
+                if original_content:
+                    # Incluir personalization_markers y slide_template del contenido original
+                    content["original_personalization_markers"] = original_content.get("personalization_markers", {})
+                    content["original_slide_template"] = original_content.get("slide_template", {})
+                    content["original_content_type"] = original_content.get("content_type", "unknown")
+                    content["original_content"] = original_content.get("content", "")
+                    content["original_interactive_data"] = original_content.get("interactive_data", {})
+                
                 # Añadir un campo para distinguir el tipo de contenido en el frontend
                 content["source_type"] = "virtual_content"
                 all_content.append(content)
@@ -246,7 +257,11 @@ class VirtualTopicService(VerificationBaseService):
                     },
                     "interaction_tracking": {"completion_status": "not_started"},
                     "legacy_resource_data": resource, # Incluir todos los datos originales
-                    "source_type": "legacy_resource"
+                    "source_type": "legacy_resource",
+                    # Para recursos legacy, no hay marcadores ni plantillas
+                    "original_personalization_markers": {},
+                    "original_slide_template": {},
+                    "original_content_type": "legacy_resource"
                 })
 
             return all_content
@@ -869,6 +884,7 @@ class FastVirtualModuleGenerator(VerificationBaseService):
                             )
                         },
                         "status": "active", # Los temas del lote inicial deben estar activos
+                        "locked": False,  # Los temas del lote inicial están desbloqueados
                         "progress": 0.0,
                         "completion_status": "not_started"
                     }
@@ -914,20 +930,18 @@ class FastVirtualModuleGenerator(VerificationBaseService):
                 return False, {"message": "Tema virtual actual no encontrado."}
             
             virtual_module_id = current_virtual_topic["virtual_module_id"]
-            original_module_id = current_virtual_topic["module_id"] # Asumiendo que VirtualTopic guarda module_id original
             
-            # Si VirtualTopic no guarda module_id original, obtenerlo del VirtualModule
-            if not original_module_id:
-                virtual_module = self.db.virtual_modules.find_one({"_id": virtual_module_id})
-                if not virtual_module:
-                    return False, {"message": "Módulo virtual asociado no encontrado."}
-                original_module_id = virtual_module["module_id"]
+            # Obtener el module_id original del VirtualModule (VirtualTopic no tiene module_id)
+            virtual_module = self.db.virtual_modules.find_one({"_id": virtual_module_id})
+            if not virtual_module:
+                return False, {"message": "Módulo virtual asociado no encontrado."}
+            original_module_id = virtual_module["module_id"]
 
             # 2. Obtener todos los temas originales publicados del módulo, ordenados
             all_original_topics = list(self.db.topics.find({
                 "module_id": ObjectId(original_module_id),
                 "published": True
-            }).sort("order", 1)) # Asumiendo un campo 'order' o usar 'created_at'
+            }).sort("created_at", 1))  # Usar created_at ya que Topic no tiene campo 'order'
 
             if not all_original_topics:
                 return False, {"message": "No hay temas publicados en el módulo original."}
@@ -987,6 +1001,7 @@ class FastVirtualModuleGenerator(VerificationBaseService):
                             )
                         },
                         "status": "active", # Estos temas se generan como activos
+                        "locked": False,  # Los nuevos temas están desbloqueados para acceso inmediato
                         "progress": 0.0,
                         "completion_status": "not_started",
                         "created_at": datetime.now()
@@ -1007,7 +1022,8 @@ class FastVirtualModuleGenerator(VerificationBaseService):
                         "original_topic_id": topic_id,
                         "virtual_topic_id": new_virtual_topic_id,
                         "name": topic.get("name"),
-                        "status": "active"
+                        "status": "active",
+                        "locked": False
                     })
                     logging.info(f"Nuevo tema virtual generado: {new_virtual_topic_id} para el tema original {topic_id}")
 
@@ -1078,6 +1094,7 @@ class FastVirtualModuleGenerator(VerificationBaseService):
                             )
                         },
                         "status": "locked",
+                        "locked": True,  # Los temas añadidos por sincronización están bloqueados por defecto
                         "progress": 0.0,
                         "completion_status": "not_started",
                         "created_at": datetime.now()

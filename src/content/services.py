@@ -111,6 +111,18 @@ class ContentService(VerificationBaseService):
             if not content_type_def:
                 return False, f"Tipo de contenido '{content_type}' no válido"
 
+            # Validaciones específicas para diapositivas
+            if content_type == "slides":
+                slide_template = content_data.get("slide_template", {})
+                if not slide_template:
+                    return False, "El contenido de tipo 'slides' requiere un campo 'slide_template' con la plantilla de fondo"
+                
+                # Validar estructura básica de slide_template
+                required_template_fields = ["background", "styles"]
+                for field in required_template_fields:
+                    if field not in slide_template:
+                        return False, f"El slide_template debe incluir el campo '{field}'"
+
             # Crear contenido explícitamente para mapear campos
             # Convertir content a string si es dict para el extractor de marcadores
             content_for_markers = content_data.get("content", "")
@@ -131,6 +143,7 @@ class ContentService(VerificationBaseService):
                 generation_prompt=content_data.get("generation_prompt"),
                 ai_credits=content_data.get("ai_credits", True),
                 personalization_markers=markers,
+                slide_template=content_data.get("slide_template", {}),  # Incluir slide_template
                 status=content_data.get("status", "draft")
             )
             result = self.collection.insert_one(content.to_dict())
@@ -213,6 +226,22 @@ class ContentService(VerificationBaseService):
         Actualiza contenido existente.
         """
         try:
+            # Obtener contenido actual para validaciones
+            current_content = self.get_content(content_id)
+            if not current_content:
+                return False, "Contenido no encontrado"
+
+            # Validaciones específicas para diapositivas
+            content_type = update_data.get("content_type", current_content.get("content_type"))
+            if content_type == "slides" and "slide_template" in update_data:
+                slide_template = update_data.get("slide_template", {})
+                if slide_template:  # Solo validar si se proporciona slide_template
+                    # Validar estructura básica de slide_template
+                    required_template_fields = ["background", "styles"]
+                    for field in required_template_fields:
+                        if field not in slide_template:
+                            return False, f"El slide_template debe incluir el campo '{field}'"
+
             update_data["updated_at"] = datetime.now()
 
             if "content" in update_data or "interactive_data" in update_data:

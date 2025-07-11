@@ -1149,6 +1149,58 @@ def trigger_next_generation():
             status_code=500
         )
 
+@virtual_bp.route('/trigger-next-topic', methods=['POST'])
+@APIRoute.standard(auth_required_flag=True, required_fields=['current_topic_id', 'student_id', 'progress'])
+def trigger_next_topic():
+    """
+    Disparado cuando el progreso de un tema supera el 80%.
+    Genera el siguiente lote de temas disponibles para el estudiante.
+    """
+    try:
+        data = request.get_json()
+        current_topic_id = data.get('current_topic_id')
+        student_id = data.get('student_id')
+        progress = data.get('progress', 0)
+        
+        # 1. Validar progreso mínimo
+        if progress < 0.8:
+            return APIRoute.error(
+                ErrorCodes.BAD_REQUEST,
+                "El progreso debe ser mayor al 80% para activar siguiente generación de temas",
+                status_code=400
+            )
+        
+        # 2. Llamar al servicio de generación de temas
+        success, result = virtual_topic_service.trigger_next_topic_generation(
+            student_id=student_id,
+            current_topic_id=current_topic_id,
+            progress=progress
+        )
+        
+        if not success:
+            return APIRoute.error(
+                ErrorCodes.OPERATION_FAILED,
+                result.get("message", "Error desconocido"),
+                status_code=400
+            )
+        
+        return APIRoute.success(
+            data={
+                "generated_topics": result.get("generated_topics", []),
+                "has_next": result.get("has_next", False),
+                "message": result.get("message", "")
+            },
+            message=f"Generación de temas completada: {len(result.get('generated_topics', []))} nuevos temas"
+        )
+        
+    except Exception as e:
+        logging.error(f"Error al activar siguiente generación de temas: {str(e)}")
+        return APIRoute.error(
+            ErrorCodes.SERVER_ERROR,
+            str(e),
+            status_code=500
+        )
+
 @virtual_bp.route('/process-queue', methods=['POST'])
 @APIRoute.standard(auth_required_flag=True, roles=[ROLES.get("TEACHER", "TEACHER"), "SYSTEM"])
 def process_generation_queue():
@@ -1218,7 +1270,7 @@ def process_generation_queue():
                     if not virtual_module_id:
                         raise ValueError("La tarea de actualización no tiene virtual_module_id en el payload")
 
-                    success, result = fast_generator.synchronize_module_content(virtual_module_id)
+                    success, result = virtual_topic_service.synchronize_module_content(virtual_module_id)
                     
                     if success:
                         queue_service.complete_task(

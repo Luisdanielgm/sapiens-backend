@@ -79,6 +79,7 @@ class TopicContent:
                  generation_prompt: str = None,
                  ai_credits: bool = True,
                  personalization_markers: Dict = None,
+                 slide_template: Optional[Dict] = None,  # Plantilla de fondo para diapositivas
                  status: str = "draft",
                  _id: Optional[ObjectId] = None,
                  created_at: Optional[datetime] = None,
@@ -96,6 +97,7 @@ class TopicContent:
         self.generation_prompt = generation_prompt
         self.ai_credits = ai_credits
         self.personalization_markers = personalization_markers or {}
+        self.slide_template = slide_template or {}
         self.status = status
         self.created_at = created_at or datetime.now()
         self.updated_at = updated_at or datetime.now()
@@ -117,6 +119,7 @@ class TopicContent:
             "generation_prompt": self.generation_prompt,
             "ai_credits": self.ai_credits,
             "personalization_markers": self.personalization_markers,
+            "slide_template": self.slide_template,
             "status": self.status,
             "created_at": self.created_at,
             "updated_at": self.updated_at
