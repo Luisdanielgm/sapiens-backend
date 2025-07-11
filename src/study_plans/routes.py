@@ -1277,6 +1277,29 @@ def create_topic_content():
             status_code=500
         )
 
+@study_plan_bp.route('/topic/content/<content_id>', methods=['GET'])
+@APIRoute.standard(auth_required_flag=True)
+def get_topic_content_by_id(content_id):
+    """Obtiene un contenido específico por su ID"""
+    try:
+        content = topic_content_service.get_content(content_id)
+        
+        if not content:
+            return APIRoute.error(
+                ErrorCodes.NOT_FOUND,
+                "Contenido no encontrado",
+                status_code=404
+            )
+            
+        return APIRoute.success(data=content)
+    except Exception as e:
+        logging.error(f"Error al obtener contenido por ID: {str(e)}")
+        return APIRoute.error(
+            ErrorCodes.SERVER_ERROR,
+            str(e),
+            status_code=500
+        )
+
 @study_plan_bp.route('/topic/content/<content_id>', methods=['PUT'])
 @APIRoute.standard(auth_required_flag=True, roles=[ROLES["TEACHER"]])
 def update_topic_content(content_id):
