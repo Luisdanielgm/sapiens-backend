@@ -366,7 +366,7 @@ def get_evaluation_resources_route(evaluation_id):
     # Lógica de permisos para estudiantes vs. profesores...
     resources = evaluation_resource_service.get_evaluation_resources(
         evaluation_id=evaluation_id,
-        role=role_filter, 
+        role=role_filter,
         student_id=student_id_filter
     )
     return APIRoute.success(data={"resources": resources})
@@ -388,7 +388,7 @@ def upload_evaluation_submission(evaluation_id):
     student_id = request.user_id
     if 'file' not in request.files:
         return APIRoute.error(ErrorCodes.MISSING_FIELD, "No se encontró el archivo en la solicitud", status_code=400)
-    
+
     file = request.files['file']
     if file.filename == '':
         return APIRoute.error(ErrorCodes.INVALID_DATA, "No se seleccionó ningún archivo", status_code=400)
