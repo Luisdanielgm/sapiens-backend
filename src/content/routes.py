@@ -6,12 +6,14 @@ import logging
 from src.shared.decorators import role_required
 from src.shared.database import get_db
 from src.shared.standardization import APIRoute, ErrorCodes
-from .services import (
+from src.content.services import (
     ContentService,
     ContentTypeService,
     VirtualContentService,
     ContentResultService,
+    ContentGenerationService,
 )
+from src.shared.constants import ROLES
 
 content_bp = Blueprint('content', __name__, url_prefix='/api/content')
 
@@ -525,3 +527,72 @@ def create_quiz_legacy():
             "Error interno del servidor",
             status_code=500,
         )
+
+# ============================================
+# ENDPOINTS PARA GENERACIÓN ASÍNCRONA DE CONTENIDO
+# ============================================
+
+generation_service = ContentGenerationService()
+
+@content_bp.route('/generate-batch', methods=['POST'])
+@jwt_required()
+@role_required(ROLES["TEACHER"])
+def generate_content_batch():
+    """
+    Inicia una tarea de generación de contenido en lote de forma asíncrona.
+    
+    Body:
+    {
+        "topic_id": "ObjectId",
+        "content_types": ["slides", "diagram", "quiz"]
+    }
+    """
+    try:
+        data = request.json
+        topic_id = data.get('topic_id')
+        content_types = data.get('content_types')
+        user_id = get_jwt_identity()
+
+        if not topic_id or not content_types:
+            return APIRoute.error(ErrorCodes.MISSING_FIELDS, "Se requieren topic_id y content_types.")
+
+        success, result = generation_service.create_generation_task(topic_id, user_id, content_types)
+
+        if success:
+            return APIRoute.success(
+                data={"task_id": result},
+                message="Tarea de generación iniciada. Consulta el estado para ver el progreso.",
+                status_code=202  # Accepted
+            )
+        else:
+            return APIRoute.error(ErrorCodes.OPERATION_FAILED, result)
+            
+    except Exception as e:
+        logging.error(f"Error en endpoint generate-batch: {str(e)}")
+        return APIRoute.error(ErrorCodes.SERVER_ERROR, "Error interno del servidor.")
+
+@content_bp.route('/generation-task/<task_id>', methods=['GET'])
+@jwt_required()
+def get_generation_task_status(task_id):
+    """
+    Consulta el estado y progreso de una tarea de generación de contenido.
+    """
+    try:
+        task_status = generation_service.get_task_status(task_id)
+
+        if task_status:
+            # Verificar que el usuario que consulta es quien creó la tarea (o un admin)
+            user_id = get_jwt_identity()
+            # Asumiendo que el rol está disponible en `g` gracias a un decorador
+            user_roles = getattr(g, 'user_roles', []) 
+            
+            if str(task_status.get('user_id')) != user_id and ROLES["ADMIN"] not in user_roles:
+                return APIRoute.error(ErrorCodes.PERMISSION_DENIED, "No tienes permiso para ver esta tarea.")
+
+            return APIRoute.success(data=task_status)
+        else:
+            return APIRoute.error(ErrorCodes.NOT_FOUND, "Tarea de generación no encontrada.", status_code=404)
+            
+    except Exception as e:
+        logging.error(f"Error en endpoint get_generation_task_status: {str(e)}")
+        return APIRoute.error(ErrorCodes.SERVER_ERROR, "Error interno del servidor.")

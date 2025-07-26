@@ -13,55 +13,41 @@ from src.shared.exceptions import AppException
 from src.shared.database import get_db
 from src.shared.logging import log_error, log_info, log_warning
 from src.profiles.services import ProfileService
+from src.members.services import MembershipService
 
 users_bp = APIBlueprint('users', __name__)
 user_service = UserService()
 cognitive_profile_service = CognitiveProfileService()
 profile_service = ProfileService()
+membership_service = MembershipService()
 
 @users_bp.route('/register', methods=['POST'])
-@APIRoute.standard(required_fields=['email', 'name', 'role'])
-def register_user():
-    """
-    Registra un nuevo usuario en el sistema.
-    
-    Body:
-        email: Email del usuario
-        name: Nombre del usuario
-        role: Rol del usuario (STUDENT, TEACHER, ADMIN, INSTITUTE_ADMIN)
-        picture: URL de la imagen de perfil (opcional)
-        institute_name: Nombre del instituto (requerido para INSTITUTE_ADMIN)
-    """
-    data = request.get_json()
-    
-    # Mapear camelCase a snake_case para compatibilidad con frontend
-    if 'birthDate' in data:
-        data['birth_date'] = data.pop('birthDate')
-    if 'instituteName' in data:
-        data['institute_name'] = data.pop('instituteName')
-    
-    # Validar campos
-    if data.get('role') == 'INSTITUTE_ADMIN' and not data.get('institute_name'):
-        return APIRoute.error(
-            ErrorCodes.MISSING_FIELDS, 
-            "Se requiere el nombre del instituto para el rol INSTITUTE_ADMIN",
-            status_code=400
-        )
+@APIRoute.standard(required_fields=['email', 'password', 'name', 'role'])
+def register():
+    """Registro de un nuevo usuario con email y contraseña."""
+    try:
+        data = request.get_json()
         
-    success, result = user_service.register_user(data, data.get('institute_name'))
-    
-    if success:
-        return APIRoute.success(
-            data={"id": result},
-            message="Usuario registrado correctamente",
-            status_code=201
-        )
-    else:
-        return APIRoute.error(
-            ErrorCodes.BAD_REQUEST,
-            result,
-            status_code=400
-        )
+        # Verificar si el usuario ya existe
+        if user_service.verify_user_exists(data['email']):
+            return APIRoute.error(ErrorCodes.ALREADY_EXISTS, "El correo electrónico ya está registrado.")
+
+        success, user_id_or_error = user_service.register_user(data)
+
+        if success:
+            # Generar token de sesión inmediatamente después del registro
+            access_token = create_access_token(identity=user_id_or_error)
+            user_info = user_service.get_user_info(data['email'])
+            return APIRoute.success(
+                data={"token": access_token, "user": user_info},
+                message="Usuario registrado exitosamente.",
+                status_code=201
+            )
+        else:
+            return APIRoute.error(ErrorCodes.CREATION_ERROR, user_id_or_error)
+    except Exception as e:
+        log_error(f"Error en el endpoint de registro: {str(e)}", e, "users.routes")
+        return APIRoute.error(ErrorCodes.SERVER_ERROR, "Ocurrió un error inesperado durante el registro.")
 
 @users_bp.route('/profile/<email>', methods=['GET'])
 @APIRoute.standard(auth_required_flag=True)
@@ -292,76 +278,31 @@ def get_user_profile_by_id(user_id):
         )
 
 @users_bp.route('/login', methods=['POST'])
-@APIRoute.standard(required_fields=['email'])
+@APIRoute.standard(required_fields=['email', 'password'])
 def login():
-    """Login de usuario y generación de token JWT"""
+    """Login de usuario con email/contraseña y generación de token JWT."""
     try:
         data = request.get_json()
         email = data.get('email')
         password = data.get('password')
-        google_login = data.get('google_login', False)
-        google_credential = data.get('credential')
-        
-        # Verificar si es login normal o con Google
-        if google_login:
-            if not email or not google_credential:
-                return APIRoute.error(
-                    ErrorCodes.MISSING_FIELDS,
-                    "Email y credential son requeridos para inicio de sesión con Google",
-                    status_code=400
-                )
-                
-            # Aquí se implementaría la lógica de verificación del token de Google
-            # Por ahora, simplemente buscamos al usuario por email
-            db = get_db()
-            user = db.users.find_one({"email": email})
-            
-            if not user:
-                return APIRoute.error(
-                    ErrorCodes.USER_NOT_FOUND,
-                    "Usuario no encontrado",
-                    status_code=404
-                )
+
+        # Usar el nuevo servicio de login
+        user_info = user_service.login_user(email, password)
+
+        if user_info:
+            access_token = create_access_token(identity=user_info['id'])
+            return APIRoute.success(
+                data={"token": access_token, "user": user_info},
+                message="Inicio de sesión exitoso."
+            )
         else:
-            # Login normal con contraseña
-            if not email or not password:
-                return APIRoute.error(
-                    ErrorCodes.MISSING_FIELDS,
-                    "Email y contraseña son requeridos",
-                    status_code=400
-                )
+            # Manejar también el caso de login social (si se quiere mantener)
+            # Por ahora, solo devolvemos error de credenciales.
+            return APIRoute.error(ErrorCodes.AUTHENTICATION_ERROR, "Credenciales inválidas o el usuario se registró con un proveedor social.")
             
-            # Verificar credenciales
-            db = get_db()
-            user = db.users.find_one({"email": email})
-            
-            if not user or not user_service.verify_password(password, user.get('password', '')):
-                return APIRoute.error(
-                    ErrorCodes.AUTHENTICATION_ERROR,
-                    "Credenciales inválidas",
-                    status_code=401
-                )
-        
-        # Generar token
-        access_token = create_access_token(identity=str(user['_id']))
-        
-        return APIRoute.success(
-            data={
-                "token": access_token,
-                "user": {
-                    "id": str(user['_id']),
-                    "name": user.get('name', ''),
-                    "email": user.get('email', ''),
-                    "role": user.get('role', '')
-                }
-            }
-        )
     except Exception as e:
-        return APIRoute.error(
-            ErrorCodes.SERVER_ERROR,
-            str(e),
-            status_code=500
-        )
+        log_error(f"Error en el endpoint de login: {str(e)}", e, "users.routes")
+        return APIRoute.error(ErrorCodes.SERVER_ERROR, "Ocurrió un error inesperado durante el inicio de sesión.")
 
 @users_bp.route('/by-email', methods=['GET'])
 @APIRoute.standard(auth_required_flag=True)
@@ -443,3 +384,25 @@ def verify_token():
             str(e),
             status_code=500
         )
+
+@users_bp.route('/my-institutes', methods=['GET'])
+@APIRoute.standard(auth_required_flag=True)
+def get_my_institutes():
+    """
+    Obtiene la lista de institutos a los que pertenece el usuario autenticado,
+    incluyendo su rol en cada uno.
+    """
+    try:
+        user_id = get_jwt_identity()
+        
+        # Usar el servicio de membresía para obtener los institutos
+        institutes = membership_service.get_user_institutes(user_id)
+        
+        # Asegurarse de que los datos son serializables
+        institutes = ensure_json_serializable(institutes)
+        
+        return APIRoute.success(data={"institutes": institutes})
+            
+    except Exception as e:
+        log_error(f"Error obteniendo los institutos del usuario: {str(e)}", e, "users.routes")
+        return APIRoute.error(ErrorCodes.SERVER_ERROR, "Ocurrió un error al recuperar los institutos.")

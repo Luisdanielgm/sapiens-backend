@@ -9,6 +9,9 @@ import logging
 from src.shared.exceptions import AppException
 from .models import User
 from src.profiles.services import ProfileService
+import bcrypt
+from src.classes.services import ClassService
+from src.institute.services import GenericAcademicService
 
 # Función auxiliar para hacer objetos serializables
 def make_json_serializable(obj):
@@ -26,9 +29,20 @@ class UserService(VerificationBaseService):
     def __init__(self):
         super().__init__(collection_name="users")
         self.profile_service = ProfileService()
+        self.class_service = ClassService()
+        self.generic_academic_service = GenericAcademicService()
 
     def register_user(self, user_data: dict, institute_name: Optional[str] = None) -> Tuple[bool, str]:
         try:
+            # Hashear contraseña si se proporciona
+            if 'password' in user_data and user_data['password']:
+                salt = bcrypt.gensalt()
+                hashed_password = bcrypt.hashpw(user_data['password'].encode('utf-8'), salt)
+                user_data['password'] = hashed_password.decode('utf-8')
+                user_data['provider'] = 'email' # Indicar que es un registro local
+            else:
+                user_data['password'] = None # No guardar contraseña para logins sociales
+
             # Extraer institute_name localmente sin afectar user_data original
             institute_name_local = institute_name or user_data.get('institute_name')
             # Crear usuario
@@ -38,8 +52,11 @@ class UserService(VerificationBaseService):
             result = self.collection.insert_one(user.to_dict())
             user_id = result.inserted_id
 
-            # Si es INSTITUTE_ADMIN, crear instituto
-            if user.role == 'INSTITUTE_ADMIN' and institute_name_local:
+            # --- LÓGICA PARA ROLES INDIVIDUALES Y DE INSTITUTO ---
+            user_role = user.role
+            
+            # Flujo para Administrador de Instituto
+            if user_role == 'INSTITUTE_ADMIN' and institute_name_local:
                 db = get_db()
                 institute_result = db.institutes.insert_one({
                     'name': institute_name_local,
@@ -77,6 +94,45 @@ class UserService(VerificationBaseService):
                     logging.error(f"Error al crear los perfiles de instituto: {str(profile_error)}")
                     # Continuar a pesar del error en la creación del perfil
 
+            # Flujo para Usuarios Individuales (Profesores y Estudiantes)
+            elif user_role in ['INDIVIDUAL_TEACHER', 'INDIVIDUAL_STUDENT']:
+                db = get_db()
+                
+                # 1. Obtener/Crear Instituto y Entidades Académicas Genéricas
+                generic_entities = self.generic_academic_service.get_or_create_generic_entities()
+                institute_id = ObjectId(generic_entities["institute_id"])
+                
+                # 2. Vincular al usuario como miembro del instituto genérico
+                db.institute_members.insert_one({
+                    'institute_id': institute_id,
+                    'user_id': user_id,
+                    'role': user_role, # Mantener su rol específico
+                    'joined_at': datetime.now()
+                })
+
+                # 3. Flujo especial para profesores individuales: crear una clase personal
+                if user_role == 'INDIVIDUAL_TEACHER':
+                    # Usar los IDs de las entidades genéricas para crear la clase
+                    class_data = {
+                        "name": f"Clase Personal de {user.name}",
+                        "description": "Tu espacio para crear y gestionar tus propios planes de estudio.",
+                        "institute_id": generic_entities["institute_id"],
+                        "level_id": generic_entities["level_id"],
+                        "academic_period_id": generic_entities["academic_period_id"],
+                        "subject_id": generic_entities["subject_id"],
+                        "section_id": generic_entities["section_id"],
+                        "created_by": str(user_id)
+                    }
+                    try:
+                        success, class_id_or_msg = self.class_service.create_class(class_data)
+                        if success:
+                            logging.info(f"Clase personal creada para profesor individual {user_id}: {class_id_or_msg}")
+                        else:
+                            logging.warning(f"No se pudo crear la clase personal para {user_id}: {class_id_or_msg}")
+                    except Exception as e:
+                        logging.error(f"Error creando clase para profesor individual: {str(e)}")
+
+
             # Crear perfiles para el usuario según su rol
             try:
                 # Usar el servicio de perfiles para crear el perfil adecuado
@@ -97,6 +153,41 @@ class UserService(VerificationBaseService):
                 self.collection.delete_one({'_id': user_id})
             logging.error(f"Error en register_user: {str(e)}")
             return False, str(e)
+
+    def login_user(self, email: str, password: str) -> Optional[Dict]:
+        """
+        Autentica a un usuario por email y contraseña.
+        
+        Args:
+            email: Email del usuario
+            password: Contraseña en texto plano
+            
+        Returns:
+            Diccionario con datos del usuario si las credenciales son correctas, de lo contrario None.
+        """
+        try:
+            user = self.collection.find_one({"email": email})
+            
+            if not user:
+                return None # Usuario no encontrado
+
+            hashed_password = user.get('password')
+            if not hashed_password:
+                return None # El usuario no tiene contraseña (es de un proveedor social)
+                
+            if self.verify_password(password, hashed_password):
+                # Contraseña correcta, devolver datos del usuario
+                return {
+                    "id": str(user["_id"]),
+                    "name": user["name"],
+                    "email": user["email"],
+                    "role": user["role"]
+                }
+            
+            return None # Contraseña incorrecta
+        except Exception as e:
+            logging.error(f"Error en login_user: {str(e)}")
+            return None
 
     def get_user_profile(self, email_or_id: str) -> Optional[Dict]:
         """
@@ -184,7 +275,6 @@ class UserService(VerificationBaseService):
     def verify_password(self, plain_password, hashed_password):
         """Verifica si la contraseña en texto plano coincide con el hash almacenado"""
         try:
-            import bcrypt
             # Verifica si el hash tiene el formato correcto para bcrypt
             if hashed_password and hashed_password.startswith('$2b$'):
                 return bcrypt.checkpw(plain_password.encode('utf-8'), hashed_password.encode('utf-8'))

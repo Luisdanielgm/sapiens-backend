@@ -58,10 +58,24 @@ def create_study_plan():
 @study_plan_bp.route('/', methods=['GET'])
 @APIRoute.standard(auth_required_flag=True)
 def list_study_plans():
-    """Lista todos los planes de estudio"""
-    email = request.args.get('email')
-    study_plans = study_plan_service.list_study_plans(email)
-    return APIRoute.success(data=study_plans)
+    """
+    Lista todos los planes de estudio, con filtros opcionales.
+    - `email`: Filtra por el email del autor.
+    - `institute_id`: Filtra por el instituto al que están asociados los planes.
+    """
+    try:
+        email = request.args.get('email')
+        institute_id = request.args.get('institute_id')
+        
+        study_plans = study_plan_service.list_study_plans(email=email, institute_id=institute_id)
+        
+        return APIRoute.success(data=study_plans)
+    except Exception as e:
+        return APIRoute.error(
+            ErrorCodes.SERVER_ERROR,
+            str(e),
+            status_code=500
+        )
 
 @study_plan_bp.route('/<plan_id>', methods=['GET'])
 @APIRoute.standard(auth_required_flag=True)

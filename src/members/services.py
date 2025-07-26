@@ -346,16 +346,38 @@ class MembershipService(VerificationBaseService):
     # ========== UTILIDADES ==========
     def get_user_institutes(self, user_id: str) -> List[Dict]:
         """
-        Obtiene todos los institutos de los que un usuario es miembro
+        Obtiene todos los institutos de los que un usuario es miembro,
+        incluyendo el rol del usuario en cada instituto.
         """
         try:
             memberships = list(self.collection.find({"user_id": ObjectId(user_id)}))
+            
+            if not memberships:
+                return []
+            
             institute_ids = [membership["institute_id"] for membership in memberships]
             
+            # Crear un mapa de membresía para un acceso rápido
+            membership_map = {str(m["institute_id"]): m for m in memberships}
+            
             institutes = list(get_db().institutes.find({"_id": {"$in": institute_ids}}))
-            return institutes
+
+            # Enriquecer la información del instituto con los datos de la membresía
+            enriched_institutes = []
+            for institute in institutes:
+                institute_id_str = str(institute["_id"])
+                membership_info = membership_map.get(institute_id_str)
+                
+                if membership_info:
+                    institute["user_role"] = membership_info.get("role")
+                    institute["user_permissions"] = membership_info.get("permissions", {})
+                    institute["joined_at"] = membership_info.get("joined_at")
+                
+                enriched_institutes.append(institute)
+            
+            return enriched_institutes
         except Exception as e:
-            print(f"Error al obtener institutos: {str(e)}")
+            print(f"Error al obtener institutos del usuario: {str(e)}")
             return []
 
     def get_user_classes(self, user_id: str) -> List[Dict]:

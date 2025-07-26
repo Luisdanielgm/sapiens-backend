@@ -2,6 +2,7 @@ from typing import Tuple, List, Dict, Optional
 from bson import ObjectId
 from datetime import datetime
 import json
+import logging
 
 from src.shared.database import get_db
 from src.shared.constants import ROLES, COLLECTIONS, STATUS
@@ -419,3 +420,83 @@ class LevelService(VerificationBaseService):
             return False, "No se encontró el nivel"
         except Exception as e:
             return False, str(e)
+
+class GenericAcademicService(VerificationBaseService):
+    """
+    Servicio para crear y gestionar las entidades académicas genéricas
+    necesarias para los usuarios individuales.
+    """
+    def __init__(self):
+        super().__init__(collection_name="institutes") # Usa institutes como referencia
+        self.generic_institute_name = "Academia Sapiens"
+
+    def get_or_create_generic_entities(self) -> Dict:
+        """
+        Asegura que el instituto genérico y todas sus entidades académicas
+        asociadas existan, y las devuelve.
+
+        Returns:
+            Un diccionario con los IDs de todas las entidades genéricas.
+        """
+        try:
+            # 1. Obtener o crear el Instituto Genérico
+            institute = self.db.institutes.find_one({"name": self.generic_institute_name})
+            if not institute:
+                institute_res = self.db.institutes.insert_one({
+                    'name': self.generic_institute_name,
+                    'description': 'Instituto genérico para usuarios individuales.',
+                    'status': 'active',
+                    'created_at': datetime.now()
+                })
+                institute_id = institute_res.inserted_id
+            else:
+                institute_id = institute['_id']
+
+            # 2. Obtener o crear Nivel Genérico
+            level = self.db.levels.find_one({"institute_id": institute_id, "name": "Nivel General"})
+            if not level:
+                level_res = self.db.levels.insert_one({"institute_id": institute_id, "name": "Nivel General"})
+                level_id = level_res.inserted_id
+            else:
+                level_id = level['_id']
+            
+            # 3. Obtener o crear Período Académico Genérico
+            period = self.db.academic_periods.find_one({"institute_id": institute_id, "name": "Período Continuo"})
+            if not period:
+                period_res = self.db.academic_periods.insert_one({
+                    "institute_id": institute_id,
+                    "name": "Período Continuo",
+                    "start_date": datetime(2024, 1, 1),
+                    "end_date": datetime(2099, 12, 31)
+                })
+                period_id = period_res.inserted_id
+            else:
+                period_id = period['_id']
+
+            # 4. Obtener o crear Materia Genérica
+            subject = self.db.subjects.find_one({"level_id": level_id, "name": "Materia General"})
+            if not subject:
+                subject_res = self.db.subjects.insert_one({"level_id": level_id, "name": "Materia General"})
+                subject_id = subject_res.inserted_id
+            else:
+                subject_id = subject['_id']
+
+            # 5. Obtener o crear Sección Genérica
+            section = self.db.sections.find_one({"academic_period_id": period_id, "code": "A-101"})
+            if not section:
+                section_res = self.db.sections.insert_one({"academic_period_id": period_id, "code": "A-101"})
+                section_id = section_res.inserted_id
+            else:
+                section_id = section['_id']
+                
+            return {
+                "institute_id": str(institute_id),
+                "level_id": str(level_id),
+                "academic_period_id": str(period_id),
+                "subject_id": str(subject_id),
+                "section_id": str(section_id)
+            }
+
+        except Exception as e:
+            logging.error(f"Error al crear/obtener entidades genéricas: {str(e)}")
+            raise AppException("No se pudieron generar las entidades académicas genéricas.", ErrorCodes.SERVER_ERROR)

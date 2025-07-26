@@ -3,6 +3,7 @@ from datetime import datetime
 from bson import ObjectId
 from typing import Dict, List, Optional, Union
 from src.shared.constants import STATUS
+from pydantic import BaseModel, Field
 
 class ContentType:
     """
@@ -198,6 +199,35 @@ class ContentResult:
         }
 
 
+class ContentGenerationTask(BaseModel):
+    """
+    Representa una tarea de generación de contenido en lote, que puede incluir
+    múltiples tipos de contenido para un mismo tema.
+    """
+    id: ObjectId = Field(default_factory=ObjectId, alias="_id")
+    topic_id: ObjectId
+    user_id: ObjectId
+    requested_content_types: List[str]
+    
+    status: str = "pending"  # pending, processing, completed, partially_completed, failed
+    created_at: datetime = Field(default_factory=datetime.now)
+    updated_at: datetime = Field(default_factory=datetime.now)
+    
+    # Tracking de sub-tareas
+    subtasks: List[Dict] = []
+    # Ejemplo de subtask:
+    # { "content_type": "slides", "status": "completed", "content_id": ObjectId(...) }
+    # { "content_type": "diagram", "status": "processing" }
+
+    class Config:
+        arbitrary_types_allowed = True
+        json_encoders = {ObjectId: str}
+
+    def to_db(self) -> Dict:
+        """Convierte el modelo Pydantic a un diccionario para MongoDB."""
+        data = self.model_dump(by_alias=True)
+        return data
+
 class ContentTypes:
     # Contenido Teórico
     TEXT = "text"
@@ -236,8 +266,11 @@ class ContentTypes:
     AR = "ar"
     MINI_GAME = "mini_game"
     INTERACTIVE_EXERCISE = "interactive_exercise"
+    COMPLETION_EXERCISE = "completion_exercise"
+    MATH_EXERCISE = "math_exercise"
     CHALLENGE = "challenge"
     FLASHCARDS = "flashcards"
+    GEMINI_LIVE = "gemini_live"
     
     # Contenido de Evaluación
     QUIZ = "quiz"
@@ -258,7 +291,8 @@ class ContentTypes:
             "multimedia": [cls.VIDEO, cls.AUDIO, cls.MUSIC, cls.ANIMATION, 
                          cls.SCREENCAST, cls.NARRATED_PRESENTATION],
             "interactive": [cls.GAME, cls.SIMULATION, cls.VIRTUAL_LAB, cls.AR, 
-                          cls.MINI_GAME, cls.INTERACTIVE_EXERCISE, cls.CHALLENGE, cls.FLASHCARDS],
+                          cls.MINI_GAME, cls.INTERACTIVE_EXERCISE, cls.COMPLETION_EXERCISE, 
+                          cls.MATH_EXERCISE, cls.CHALLENGE, cls.FLASHCARDS, cls.GEMINI_LIVE],
             "evaluation": [cls.QUIZ, cls.EXAM, cls.PROJECT, cls.RUBRIC, 
                          cls.FORMATIVE_TEST, cls.PEER_REVIEW, cls.PORTFOLIO]
         }
