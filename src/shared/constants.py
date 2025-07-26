@@ -14,10 +14,12 @@ APP_PREFIX = "/api"
 
 # Roles de usuario
 ROLES = {
-    "ADMIN": "ADMIN",               # Administrador de toda la plataforma
-    "INSTITUTE_ADMIN": "INSTITUTE_ADMIN",  # Administrador de instituto
-    "TEACHER": "TEACHER",           # Profesor
-    "STUDENT": "STUDENT"            # Estudiante
+    "STUDENT": "student",
+    "TEACHER": "teacher",
+    "INSTITUTE_ADMIN": "institute_admin",
+    "ADMIN": "admin",
+    "SUPER_ADMIN": "super_admin", # Rol para administración total del sistema
+    "SYSTEM": "system"             # Rol para procesos internos y automáticos
 }
 
 # Niveles de dificultad

@@ -200,55 +200,6 @@ def submit_content_result():
             status_code=500
         )
 
-
-@virtual_bp.route('/contents/<virtual_content_id>/auto-complete', methods=['POST'])
-@APIRoute.standard(auth_required_flag=True, roles=[ROLES['STUDENT']])
-def auto_complete_content(virtual_content_id):
-    """Marca un contenido estático como completado y registra ContentResult."""
-    try:
-        student_id = request.get_json(silent=True).get('student_id') if request.get_json(silent=True) else request.user_id
-
-        virtual_content = get_db().virtual_topic_contents.find_one({"_id": ObjectId(virtual_content_id)})
-        if not virtual_content:
-            return APIRoute.error(ErrorCodes.NOT_FOUND, "Contenido virtual no encontrado", status_code=404)
-
-        if str(virtual_content.get("student_id")) != student_id:
-            return APIRoute.error(ErrorCodes.PERMISSION_DENIED, "No tienes permiso para modificar este contenido", status_code=403)
-
-        from src.content.services import ContentResultService
-        content_result_service = ContentResultService()
-
-        content_result_service.collection.update_one(
-            {"student_id": ObjectId(student_id), "virtual_content_id": ObjectId(virtual_content_id)},
-            {"$set": {
-                "student_id": ObjectId(student_id),
-                "virtual_content_id": ObjectId(virtual_content_id),
-                "score": 100,
-                "session_type": "auto_complete",
-                "session_data": {"auto_completed": True},
-                "learning_metrics": {},
-                "feedback": None,
-                "created_at": datetime.now()
-            }},
-            upsert=True
-        )
-
-        get_db().virtual_topic_contents.update_one(
-            {"_id": ObjectId(virtual_content_id)},
-            {"$set": {
-                "interaction_tracking.completion_status": "completed",
-                "interaction_tracking.completion_percentage": 100,
-                "interaction_tracking.last_accessed": datetime.now(),
-                "updated_at": datetime.now()
-            }, "$inc": {"interaction_tracking.access_count": 1}}
-        )
-
-        return APIRoute.success(data={"status": "completed"}, message="Contenido completado")
-
-    except Exception as e:
-        logging.error(f"Error auto-completando contenido: {str(e)}")
-        return APIRoute.error(ErrorCodes.SERVER_ERROR, str(e), status_code=500)
-
 @virtual_bp.route('/generate', methods=['POST'])
 @APIRoute.standard(auth_required_flag=True, roles=[ROLES["STUDENT"], ROLES["TEACHER"]], required_fields=['class_id', 'study_plan_id'])
 def generate_virtual_modules():
@@ -1486,55 +1437,6 @@ def incremental_update_virtual_module(virtual_module_id):
             status_code=500
         )
 
-@virtual_bp.route('/modules/<module_id>/detect-changes', methods=['POST'])
-@APIRoute.standard(auth_required_flag=True, roles=[ROLES.get("TEACHER", "TEACHER"), "SYSTEM"])
-def detect_module_changes(module_id):
-    """
-    Detecta cambios en un módulo y programa actualizaciones incrementales.
-    Diseñado para ser llamado manualmente o por webhooks.
-    """
-    try:
-        # 1. Detectar cambios en el módulo
-        change_info = change_detector.detect_changes(module_id)
-        
-        if change_info.get("error"):
-            return APIRoute.error(
-                ErrorCodes.SERVER_ERROR,
-                f"Error detectando cambios: {change_info['error']}",
-                status_code=500
-            )
-        
-        # 2. Si hay cambios, programar actualizaciones incrementales
-        if change_info.get("has_changes"):
-            task_ids = change_detector.schedule_incremental_updates(module_id, change_info)
-            
-            return APIRoute.success(
-                data={
-                    "changes_detected": True,
-                    "change_info": change_info,
-                    "scheduled_updates": len(task_ids),
-                    "task_ids": task_ids
-                },
-                message=f"Cambios detectados. {len(task_ids)} actualizaciones programadas."
-            )
-        else:
-            return APIRoute.success(
-                data={
-                    "changes_detected": False,
-                    "change_info": change_info
-                },
-                message="No se detectaron cambios en el módulo."
-            )
-        
-    except Exception as e:
-        logging.error(f"Error en detección de cambios: {str(e)}")
-        return APIRoute.error(
-            ErrorCodes.SERVER_ERROR,
-            str(e),
-            status_code=500
-        )
-
-
 @virtual_bp.route('/content-results/student/<student_id>', methods=['GET'])
 @APIRoute.standard(auth_required_flag=True)
 def get_student_content_results(student_id):
@@ -1625,6 +1527,813 @@ def get_student_content_results(student_id):
         
     except Exception as e:
         logging.error(f"Error al obtener resultados del estudiante: {str(e)}")
+        return APIRoute.error(
+            ErrorCodes.SERVER_ERROR,
+            str(e),
+            status_code=500
+        )
+
+# ===== ENDPOINTS PARA CONTENTRESULT AUTOMÁTICO =====
+
+@virtual_bp.route('/content/<virtual_content_id>/complete-auto', methods=['POST'])
+@APIRoute.standard(auth_required_flag=True, roles=[ROLES["STUDENT"]])
+def auto_complete_content(virtual_content_id):
+    """
+    Completa automáticamente un contenido virtual y crea ContentResult.
+    Para contenidos de lectura, visualización, etc.
+    """
+    try:
+        from flask_jwt_extended import get_jwt_identity
+        from .services import VirtualContentProgressService
+        
+        student_id = get_jwt_identity()
+        data = request.get_json() or {}
+        
+        # Datos de completación opcionales
+        completion_data = {
+            "session_data": {
+                "time_spent": data.get("time_spent", 0),
+                "scroll_percentage": data.get("scroll_percentage", 100),
+                "interactions": data.get("interactions", 1),
+                "completion_method": data.get("completion_method", "auto")
+            }
+        }
+        
+        # Si se proporciona un score específico, usarlo
+        if "score" in data:
+            completion_data["score"] = data["score"]
+        
+        progress_service = VirtualContentProgressService()
+        success, result = progress_service.complete_content_automatically(
+            virtual_content_id, student_id, completion_data
+        )
+        
+        if success:
+            return APIRoute.success(
+                data={
+                    "content_result_id": result,
+                    "status": "completed",
+                    "auto_generated": True
+                },
+                message="Contenido completado automáticamente",
+                status_code=200
+            )
+        else:
+            return APIRoute.error(
+                ErrorCodes.OPERATION_FAILED,
+                result,
+                status_code=400
+            )
+            
+    except Exception as e:
+        logging.error(f"Error en auto-complete: {str(e)}")
+        return APIRoute.error(
+            ErrorCodes.SERVER_ERROR,
+            str(e),
+            status_code=500
+        )
+
+@virtual_bp.route('/content/<virtual_content_id>/complete-reading', methods=['POST'])
+@APIRoute.standard(auth_required_flag=True, roles=[ROLES["STUDENT"]])
+def auto_complete_reading_content(virtual_content_id):
+    """
+    Completa automáticamente contenidos de lectura (texto, slides, videos).
+    Optimizado para contenidos que solo requieren visualización.
+    """
+    try:
+        from flask_jwt_extended import get_jwt_identity
+        from .services import VirtualContentProgressService
+        
+        student_id = get_jwt_identity()
+        data = request.get_json() or {}
+        
+        # Datos específicos de lectura
+        reading_data = {
+            "time_spent": data.get("time_spent", 0),
+            "scroll_percentage": data.get("scroll_percentage", 100),
+            "reading_speed": data.get("reading_speed", 0),  # palabras por minuto
+            "pauses": data.get("pauses", 0),  # número de pausas
+            "interactions": data.get("interactions", 1)
+        }
+        
+        progress_service = VirtualContentProgressService()
+        success, result = progress_service.auto_complete_reading_content(
+            virtual_content_id, student_id, reading_data
+        )
+        
+        if success:
+            return APIRoute.success(
+                data={
+                    "content_result_id": result,
+                    "status": "completed",
+                    "completion_method": "reading"
+                },
+                message="Contenido de lectura completado automáticamente",
+                status_code=200
+            )
+        else:
+            return APIRoute.error(
+                ErrorCodes.OPERATION_FAILED,
+                result,
+                status_code=400
+            )
+            
+    except Exception as e:
+        logging.error(f"Error en auto-complete reading: {str(e)}")
+        return APIRoute.error(
+            ErrorCodes.SERVER_ERROR,
+            str(e),
+            status_code=500
+        )
+
+@virtual_bp.route('/student/progress', methods=['GET'])
+@APIRoute.standard(auth_required_flag=True, roles=[ROLES["STUDENT"], ROLES["TEACHER"]])
+def get_student_progress():
+    """
+    Obtiene resumen completo del progreso del estudiante.
+    Los estudiantes ven su propio progreso, los profesores pueden especificar student_id.
+    """
+    try:
+        from flask_jwt_extended import get_jwt_identity
+        from .services import VirtualContentProgressService
+        
+        current_user_id = get_jwt_identity()
+        user_roles = getattr(request, 'user_roles', [])
+        
+        # Determinar student_id
+        if ROLES["TEACHER"] in user_roles:
+            # Profesores pueden ver progreso de cualquier estudiante
+            student_id = request.args.get('student_id', current_user_id)
+        else:
+            # Estudiantes solo ven su propio progreso
+            student_id = current_user_id
+        
+        # Filtro opcional por módulo
+        virtual_module_id = request.args.get('virtual_module_id')
+        
+        progress_service = VirtualContentProgressService()
+        progress_summary = progress_service.get_student_progress_summary(
+            student_id, virtual_module_id
+        )
+        
+        # Enriquecer con información adicional si es necesario
+        if virtual_module_id:
+            # Obtener información del módulo virtual
+            virtual_module = get_db().virtual_modules.find_one({
+                "_id": ObjectId(virtual_module_id)
+            })
+            if virtual_module:
+                progress_summary["module_info"] = {
+                    "name": virtual_module.get("name", ""),
+                    "status": virtual_module.get("completion_status", "not_started"),
+                    "overall_progress": virtual_module.get("progress", 0)
+                }
+        
+        return APIRoute.success(data=progress_summary)
+        
+    except Exception as e:
+        logging.error(f"Error obteniendo progreso del estudiante: {str(e)}")
+        return APIRoute.error(
+            ErrorCodes.SERVER_ERROR,
+            str(e),
+            status_code=500
+        )
+
+@virtual_bp.route('/content/<virtual_content_id>/trigger-next', methods=['POST'])
+@APIRoute.standard(auth_required_flag=True, roles=[ROLES["STUDENT"], ROLES["SYSTEM"]])
+def trigger_next_topic_generation(virtual_content_id):
+    """
+    Endpoint manual para activar la generación del siguiente tema.
+    Útil para testing y casos especiales.
+    """
+    try:
+        from .services import VirtualContentProgressService
+        
+        # Obtener contenido virtual
+        virtual_content = get_db().virtual_topic_contents.find_one({
+            "_id": ObjectId(virtual_content_id)
+        })
+        
+        if not virtual_content:
+            return APIRoute.error(
+                ErrorCodes.NOT_FOUND,
+                "Contenido virtual no encontrado",
+                status_code=404
+            )
+        
+        # Usar el servicio para trigger
+        progress_service = VirtualContentProgressService()
+        progress_service._trigger_next_topic_generation(virtual_content)
+        
+        return APIRoute.success(
+            data={"status": "triggered"},
+            message="Generación del siguiente tema activada"
+        )
+        
+    except Exception as e:
+        logging.error(f"Error activando generación siguiente tema: {str(e)}")
+        return APIRoute.error(
+            ErrorCodes.SERVER_ERROR,
+            str(e),
+            status_code=500
+        )
+
+# ===== ENDPOINTS DE BULK OPERATIONS =====
+
+@virtual_bp.route('/student/<student_id>/complete-reading-contents', methods=['POST'])
+@APIRoute.standard(auth_required_flag=True, roles=[ROLES["TEACHER"], ROLES["SYSTEM"]])
+def bulk_complete_reading_contents(student_id):
+    """
+    Completa en lote todos los contenidos de lectura pendientes de un estudiante.
+    Útil para migración de datos o casos especiales.
+    """
+    try:
+        from .services import VirtualContentProgressService
+        data = request.get_json() or {}
+        
+        # Obtener filtros opcionales
+        virtual_module_id = data.get("virtual_module_id")
+        content_types = data.get("content_types", ["text", "slides", "video", "audio", "diagram"])
+        
+        # Construir filtro
+        content_filter = {
+            "student_id": ObjectId(student_id),
+            "content_type": {"$in": content_types},
+            "interaction_tracking.completion_status": {"$ne": "completed"}
+        }
+        
+        if virtual_module_id:
+            # Obtener temas del módulo específico
+            virtual_topics = list(get_db().virtual_topics.find({
+                "virtual_module_id": ObjectId(virtual_module_id)
+            }))
+            topic_ids = [vt["_id"] for vt in virtual_topics]
+            content_filter["virtual_topic_id"] = {"$in": topic_ids}
+        
+        # Obtener contenidos pendientes
+        pending_contents = list(get_db().virtual_topic_contents.find(content_filter))
+        
+        # Completar cada contenido
+        progress_service = VirtualContentProgressService()
+        completed_count = 0
+        errors = []
+        
+        for content in pending_contents:
+            try:
+                success, result = progress_service.auto_complete_reading_content(
+                    str(content["_id"]), student_id
+                )
+                if success:
+                    completed_count += 1
+                else:
+                    errors.append(f"Contenido {content['_id']}: {result}")
+            except Exception as content_error:
+                errors.append(f"Contenido {content['_id']}: {str(content_error)}")
+        
+        return APIRoute.success(
+            data={
+                "total_processed": len(pending_contents),
+                "completed_count": completed_count,
+                "errors_count": len(errors),
+                "errors": errors[:10]  # Solo primeros 10 errores
+            },
+            message=f"Procesados {len(pending_contents)} contenidos, {completed_count} completados"
+        )
+        
+    except Exception as e:
+        logging.error(f"Error en bulk complete: {str(e)}")
+        return APIRoute.error(
+            ErrorCodes.SERVER_ERROR,
+            str(e),
+            status_code=500
+        )
+
+# ===== ENDPOINTS PARA SINCRONIZACIÓN AUTOMÁTICA =====
+
+@virtual_bp.route('/module/<virtual_module_id>/sync-auto', methods=['POST'])
+@APIRoute.standard(auth_required_flag=True, roles=[ROLES["TEACHER"], ROLES["SYSTEM"]])
+def auto_sync_module(virtual_module_id):
+    """
+    Sincroniza automáticamente un módulo virtual si es necesario.
+    Detecta cambios y solo sincroniza cuando es apropiado.
+    """
+    try:
+        from src.virtual.services import AutoSyncService
+        
+        data = request.get_json() or {}
+        force = data.get("force", False)
+        
+        auto_sync_service = AutoSyncService()
+        synced, report = auto_sync_service.check_and_sync_if_needed(virtual_module_id, force)
+        
+        if synced:
+            return APIRoute.success(
+                data={
+                    "synchronized": True,
+                    "report": report,
+                    "timestamp": datetime.now()
+                },
+                message="Módulo sincronizado exitosamente"
+            )
+        elif report.get("skipped"):
+            return APIRoute.success(
+                data={
+                    "synchronized": False,
+                    "skipped": True,
+                    "reason": report.get("reason"),
+                    "details": report
+                },
+                message="Sincronización omitida"
+            )
+        else:
+            return APIRoute.error(
+                ErrorCodes.OPERATION_FAILED,
+                report.get("error", "Error desconocido en sincronización"),
+                status_code=400
+            )
+            
+    except Exception as e:
+        logging.error(f"Error en auto-sync: {str(e)}")
+        return APIRoute.error(
+            ErrorCodes.SERVER_ERROR,
+            str(e),
+            status_code=500
+        )
+
+@virtual_bp.route('/sync/bulk', methods=['POST'])
+@APIRoute.standard(auth_required_flag=True, roles=[ROLES["TEACHER"], ROLES["INSTITUTE_ADMIN"], ROLES["SYSTEM"]])
+def bulk_auto_sync():
+    """
+    Sincroniza múltiples módulos virtuales en lote.
+    Permite filtrar por estudiante o módulo específico.
+    """
+    try:
+        from src.virtual.services import AutoSyncService
+        
+        data = request.get_json() or {}
+        student_id = data.get("student_id")
+        module_id = data.get("module_id") 
+        max_modules = data.get("max_modules", 50)
+        
+        # Validaciones
+        if max_modules > 200:
+            max_modules = 200  # Límite máximo de seguridad
+        
+        auto_sync_service = AutoSyncService()
+        stats = auto_sync_service.bulk_check_and_sync(
+            student_id=student_id,
+            module_id=module_id,
+            max_modules=max_modules
+        )
+        
+        return APIRoute.success(
+            data=stats,
+            message=f"Procesados {stats['processed']} módulos, {stats['synchronized']} sincronizados"
+        )
+        
+    except Exception as e:
+        logging.error(f"Error en bulk sync: {str(e)}")
+        return APIRoute.error(
+            ErrorCodes.SERVER_ERROR,
+            str(e),
+            status_code=500
+        )
+
+@virtual_bp.route('/sync/schedule', methods=['POST'])
+@APIRoute.standard(auth_required_flag=True, roles=[ROLES["SYSTEM"], ROLES["INSTITUTE_ADMIN"]])
+def schedule_auto_sync():
+    """
+    Programa sincronización automática periódica.
+    Ejecuta un ciclo de sincronización de todos los módulos que lo necesiten.
+    """
+    try:
+        from src.virtual.services import AutoSyncService
+        
+        data = request.get_json() or {}
+        interval_hours = data.get("interval_hours", 6)
+        
+        # Validar intervalo
+        if interval_hours < 1:
+            interval_hours = 1
+        elif interval_hours > 24:
+            interval_hours = 24
+        
+        auto_sync_service = AutoSyncService()
+        result = auto_sync_service.schedule_auto_sync(interval_hours)
+        
+        if result.get("scheduled"):
+            return APIRoute.success(
+                data=result,
+                message=f"Sincronización automática programada cada {interval_hours} horas"
+            )
+        else:
+            return APIRoute.success(
+                data=result,
+                message=result.get("reason", "No se programó sincronización")
+            )
+            
+    except Exception as e:
+        logging.error(f"Error en schedule sync: {str(e)}")
+        return APIRoute.error(
+            ErrorCodes.SERVER_ERROR,
+            str(e),
+            status_code=500
+        )
+
+@virtual_bp.route('/module/<virtual_module_id>/sync-status', methods=['GET'])
+@APIRoute.standard(auth_required_flag=True)
+def get_sync_status(virtual_module_id):
+    """
+    Obtiene el estado de sincronización de un módulo virtual.
+    """
+    try:
+        from src.virtual.services import ContentChangeDetector
+        
+        # Obtener módulo virtual
+        virtual_module = get_db().virtual_modules.find_one({
+            "_id": ObjectId(virtual_module_id)
+        })
+        
+        if not virtual_module:
+            return APIRoute.error(
+                ErrorCodes.NOT_FOUND,
+                "Módulo virtual no encontrado",
+                status_code=404
+            )
+        
+        # Obtener información de sincronización
+        module_id = str(virtual_module["module_id"])
+        change_detector = ContentChangeDetector()
+        change_report = change_detector.detect_changes(module_id)
+        
+        # Preparar respuesta
+        sync_status = {
+            "virtual_module_id": virtual_module_id,
+            "last_sync_date": virtual_module.get("last_sync_date"),
+            "sync_count": virtual_module.get("sync_count", 0),
+            "last_sync_report": virtual_module.get("last_sync_report", {}),
+            "current_module_hash": change_report.get("current_hash"),
+            "has_changes": change_report.get("has_changes", False),
+            "needs_sync": False
+        }
+        
+        # Determinar si necesita sincronización
+        from src.virtual.services import AutoSyncService
+        auto_sync = AutoSyncService()
+        sync_status["needs_sync"] = auto_sync._needs_synchronization(virtual_module, change_report)
+        
+        # Información adicional
+        if change_report.get("has_changes"):
+            sync_status["change_details"] = {
+                "previous_hash": change_report.get("previous_hash"),
+                "change_timestamp": change_report.get("change_timestamp")
+            }
+        
+        return APIRoute.success(data=sync_status)
+        
+    except Exception as e:
+        logging.error(f"Error obteniendo estado de sync: {str(e)}")
+        return APIRoute.error(
+            ErrorCodes.SERVER_ERROR,
+            str(e),
+            status_code=500
+        )
+
+@virtual_bp.route('/sync/detect-changes/<module_id>', methods=['POST'])
+@APIRoute.standard(auth_required_flag=True, roles=[ROLES["TEACHER"], ROLES["SYSTEM"]])
+def detect_module_changes(module_id):
+    """
+    Detecta cambios en un módulo original específico.
+    Útil para verificar qué módulos virtuales necesitarían sincronización.
+    """
+    try:
+        from src.virtual.services import ContentChangeDetector
+        
+        change_detector = ContentChangeDetector()
+        change_report = change_detector.detect_changes(module_id)
+        
+        # Obtener módulos virtuales afectados
+        affected_modules = list(get_db().virtual_modules.find({
+            "module_id": ObjectId(module_id),
+            "completion_status": {"$ne": "completed"}
+        }))
+        
+        # Preparar información de módulos afectados
+        affected_info = []
+        for vm in affected_modules:
+            affected_info.append({
+                "virtual_module_id": str(vm["_id"]),
+                "student_id": str(vm["student_id"]),
+                "progress": vm.get("progress", 0),
+                "last_sync": vm.get("last_sync_date"),
+                "sync_count": vm.get("sync_count", 0)
+            })
+        
+        return APIRoute.success(
+            data={
+                "module_id": module_id,
+                "change_report": change_report,
+                "affected_virtual_modules": len(affected_modules),
+                "modules_info": affected_info
+            },
+            message=f"{'Cambios detectados' if change_report.get('has_changes') else 'Sin cambios'} en módulo {module_id}"
+        )
+        
+    except Exception as e:
+        logging.error(f"Error detectando cambios: {str(e)}")
+        return APIRoute.error(
+            ErrorCodes.SERVER_ERROR,
+            str(e),
+            status_code=500
+        )
+
+# ===== ENDPOINTS PARA COLA OPTIMIZADA =====
+
+@virtual_bp.route('/module/<virtual_module_id>/queue/maintain', methods=['POST'])
+@APIRoute.standard(auth_required_flag=True, roles=[ROLES["STUDENT"], ROLES["TEACHER"], ROLES["SYSTEM"]])
+def maintain_topic_queue(virtual_module_id):
+    """
+    Mantiene la cola de temas virtuales asegurando que siempre haya 2 temas disponibles.
+    """
+    try:
+        from src.virtual.services import OptimizedQueueService
+        
+        data = request.get_json() or {}
+        current_progress = data.get("current_progress", 0)
+        
+        queue_service = OptimizedQueueService()
+        result = queue_service.maintain_topic_queue(virtual_module_id, current_progress)
+        
+        if result.get("error"):
+            return APIRoute.error(
+                ErrorCodes.OPERATION_FAILED,
+                result["error"],
+                status_code=400
+            )
+        
+        return APIRoute.success(
+            data=result,
+            message=f"Cola mantenida: {result.get('generated_topics', 0)} temas generados"
+        )
+        
+    except Exception as e:
+        logging.error(f"Error manteniendo cola: {str(e)}")
+        return APIRoute.error(
+            ErrorCodes.SERVER_ERROR,
+            str(e),
+            status_code=500
+        )
+
+@virtual_bp.route('/topic/<virtual_topic_id>/trigger-progress', methods=['POST'])
+@APIRoute.standard(auth_required_flag=True, roles=[ROLES["STUDENT"], ROLES["SYSTEM"]])
+def trigger_progress(virtual_topic_id):
+    """
+    Activa el trigger de progreso para un tema específico.
+    Usado cuando el tema alcanza 80% o 100% de progreso.
+    """
+    try:
+        from src.virtual.services import OptimizedQueueService
+        
+        data = request.get_json()
+        if not data or "progress_percentage" not in data:
+            return APIRoute.error(
+                ErrorCodes.BAD_REQUEST,
+                "Se requiere progress_percentage",
+                status_code=400
+            )
+        
+        progress_percentage = data["progress_percentage"]
+        
+        # Validar progreso
+        if not (0 <= progress_percentage <= 100):
+            return APIRoute.error(
+                ErrorCodes.BAD_REQUEST,
+                "progress_percentage debe estar entre 0 y 100",
+                status_code=400
+            )
+        
+        queue_service = OptimizedQueueService()
+        result = queue_service.trigger_on_progress(virtual_topic_id, progress_percentage)
+        
+        if result.get("error"):
+            return APIRoute.error(
+                ErrorCodes.OPERATION_FAILED,
+                result["error"],
+                status_code=400
+            )
+        
+        return APIRoute.success(
+            data=result,
+            message=f"Trigger {'ejecutado' if result.get('triggered') else 'no ejecutado'}: {progress_percentage}%"
+        )
+        
+    except Exception as e:
+        logging.error(f"Error en trigger de progreso: {str(e)}")
+        return APIRoute.error(
+            ErrorCodes.SERVER_ERROR,
+            str(e),
+            status_code=500
+        )
+
+@virtual_bp.route('/module/<virtual_module_id>/queue/status', methods=['GET'])
+@APIRoute.standard(auth_required_flag=True)
+def get_queue_status(virtual_module_id):
+    """
+    Obtiene el estado actual de la cola de temas virtuales.
+    """
+    try:
+        from src.virtual.services import OptimizedQueueService
+        
+        queue_service = OptimizedQueueService()
+        status = queue_service.get_queue_status(virtual_module_id)
+        
+        if status.get("error"):
+            return APIRoute.error(
+                ErrorCodes.NOT_FOUND,
+                status["error"],
+                status_code=404
+            )
+        
+        return APIRoute.success(data=status)
+        
+    except Exception as e:
+        logging.error(f"Error obteniendo estado de cola: {str(e)}")
+        return APIRoute.error(
+            ErrorCodes.SERVER_ERROR,
+            str(e),
+            status_code=500
+        )
+
+@virtual_bp.route('/queue/bulk-initialize', methods=['POST'])
+@APIRoute.standard(auth_required_flag=True, roles=[ROLES["TEACHER"], ROLES["INSTITUTE_ADMIN"], ROLES["SYSTEM"]])
+def bulk_initialize_queues():
+    """
+    Inicializa colas para múltiples módulos virtuales en lote.
+    Útil para setup masivo o mantenimiento del sistema.
+    """
+    try:
+        from src.virtual.services import OptimizedQueueService
+        
+        data = request.get_json() or {}
+        max_modules = data.get("max_modules", 100)
+        
+        # Validar límites
+        if max_modules > 500:
+            max_modules = 500  # Límite de seguridad
+        
+        queue_service = OptimizedQueueService()
+        stats = queue_service.bulk_initialize_queues(max_modules)
+        
+        if stats.get("error"):
+            return APIRoute.error(
+                ErrorCodes.OPERATION_FAILED,
+                stats["error"],
+                status_code=500
+            )
+        
+        return APIRoute.success(
+            data=stats,
+            message=f"Procesados {stats['processed']} módulos, {stats['initialized']} inicializados"
+        )
+        
+    except Exception as e:
+        logging.error(f"Error en inicialización bulk: {str(e)}")
+        return APIRoute.error(
+            ErrorCodes.SERVER_ERROR,
+            str(e),
+            status_code=500
+        )
+
+@virtual_bp.route('/topic/<virtual_topic_id>/unlock', methods=['POST'])
+@APIRoute.standard(auth_required_flag=True, roles=[ROLES["TEACHER"], ROLES["SYSTEM"]])
+def unlock_topic_manual(virtual_topic_id):
+    """
+    Desbloquea manualmente un tema virtual.
+    Útil para casos especiales o resolución de problemas.
+    """
+    try:
+        # Verificar que el tema existe
+        virtual_topic = get_db().virtual_topics.find_one({
+            "_id": ObjectId(virtual_topic_id)
+        })
+        
+        if not virtual_topic:
+            return APIRoute.error(
+                ErrorCodes.NOT_FOUND,
+                "Tema virtual no encontrado",
+                status_code=404
+            )
+        
+        # Desbloquear tema
+        get_db().virtual_topics.update_one(
+            {"_id": ObjectId(virtual_topic_id)},
+            {"$set": {
+                "locked": False,
+                "status": "active",
+                "updated_at": datetime.now()
+            }}
+        )
+        
+        return APIRoute.success(
+            data={
+                "virtual_topic_id": virtual_topic_id,
+                "unlocked": True,
+                "timestamp": datetime.now()
+            },
+            message="Tema desbloqueado exitosamente"
+        )
+        
+    except Exception as e:
+        logging.error(f"Error desbloqueando tema manual: {str(e)}")
+        return APIRoute.error(
+            ErrorCodes.SERVER_ERROR,
+            str(e),
+            status_code=500
+        )
+
+@virtual_bp.route('/queue/health-check', methods=['GET'])
+@APIRoute.standard(auth_required_flag=True, roles=[ROLES["SYSTEM"], ROLES["INSTITUTE_ADMIN"]])
+def queue_health_check():
+    """
+    Verifica el estado de salud del sistema de colas.
+    Proporciona métricas y estadísticas del sistema.
+    """
+    try:
+        # Estadísticas de módulos virtuales
+        total_modules = get_db().virtual_modules.count_documents({})
+        active_modules = get_db().virtual_modules.count_documents({
+            "completion_status": {"$in": ["not_started", "in_progress"]}
+        })
+        completed_modules = get_db().virtual_modules.count_documents({
+            "completion_status": "completed"
+        })
+        
+        # Estadísticas de temas virtuales
+        total_topics = get_db().virtual_topics.count_documents({})
+        locked_topics = get_db().virtual_topics.count_documents({"locked": True})
+        completed_topics = get_db().virtual_topics.count_documents({
+            "completion_status": "completed"
+        })
+        
+        # Estadísticas de contenidos virtuales
+        total_contents = get_db().virtual_topic_contents.count_documents({})
+        completed_contents = get_db().virtual_topic_contents.count_documents({
+            "interaction_tracking.completion_status": "completed"
+        })
+        
+        # Módulos que necesitan mantenimiento de cola
+        modules_needing_queue = get_db().virtual_modules.aggregate([
+            {"$match": {"completion_status": {"$ne": "completed"}}},
+            {"$lookup": {
+                "from": "virtual_topics",
+                "localField": "_id",
+                "foreignField": "virtual_module_id",
+                "as": "topics"
+            }},
+            {"$match": {"$expr": {"$lt": [{"$size": "$topics"}, 3]}}},
+            {"$count": "modules_needing_queue"}
+        ])
+        
+        modules_needing_queue_count = list(modules_needing_queue)
+        modules_needing_queue_count = modules_needing_queue_count[0].get("modules_needing_queue", 0) if modules_needing_queue_count else 0
+        
+        health_status = {
+            "system_health": "healthy" if modules_needing_queue_count < (active_modules * 0.1) else "needs_attention",
+            "modules": {
+                "total": total_modules,
+                "active": active_modules,
+                "completed": completed_modules,
+                "needing_queue_maintenance": modules_needing_queue_count
+            },
+            "topics": {
+                "total": total_topics,
+                "locked": locked_topics,
+                "completed": completed_topics,
+                "completion_rate": round((completed_topics / total_topics) * 100, 2) if total_topics > 0 else 0
+            },
+            "contents": {
+                "total": total_contents,
+                "completed": completed_contents,
+                "completion_rate": round((completed_contents / total_contents) * 100, 2) if total_contents > 0 else 0
+            },
+            "recommendations": []
+        }
+        
+        # Generar recomendaciones
+        if modules_needing_queue_count > 0:
+            health_status["recommendations"].append(
+                f"Ejecutar bulk_initialize_queues para {modules_needing_queue_count} módulos"
+            )
+        
+        if locked_topics > (total_topics * 0.8):
+            health_status["recommendations"].append(
+                "Alto número de temas bloqueados - verificar triggers de progreso"
+            )
+        
+        return APIRoute.success(data=health_status)
+        
+    except Exception as e:
+        logging.error(f"Error en health check: {str(e)}")
         return APIRoute.error(
             ErrorCodes.SERVER_ERROR,
             str(e),

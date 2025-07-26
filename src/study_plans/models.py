@@ -216,4 +216,164 @@ class EvaluationResource:
             "created_by": self.created_by,
             "status": self.status,
             "created_at": self.created_at
-        } 
+        }
+
+class EvaluationSubmission:
+    """
+    Modelo para las entregas de estudiantes para evaluaciones.
+    """
+    def __init__(self,
+                 evaluation_id: str,
+                 student_id: str,
+                 submission_type: str = "file",  # "file", "text", "url"
+                 content: Optional[str] = None,
+                 file_path: Optional[str] = None,
+                 url: Optional[str] = None,
+                 grade: Optional[float] = None,
+                 feedback: Optional[str] = None,
+                 graded_by: Optional[str] = None,
+                 graded_at: Optional[datetime] = None,
+                 is_late: bool = False,
+                 attempts: int = 1,
+                 status: str = "submitted",
+                 _id: Optional[ObjectId] = None,
+                 created_at: Optional[datetime] = None,
+                 updated_at: Optional[datetime] = None):
+        self._id = _id or ObjectId()
+        self.evaluation_id = ObjectId(evaluation_id)
+        self.student_id = student_id  # Keep as string to match database storage
+        self.submission_type = submission_type
+        self.content = content
+        self.file_path = file_path
+        self.url = url
+        self.grade = grade
+        self.feedback = feedback
+        self.graded_by = ObjectId(graded_by) if graded_by else None
+        self.graded_at = graded_at
+        self.is_late = is_late
+        self.attempts = attempts
+        self.status = status
+        self.created_at = created_at or datetime.now()
+        self.updated_at = updated_at or datetime.now()
+
+    def to_dict(self) -> dict:
+        return {
+            "_id": self._id,
+            "evaluation_id": self.evaluation_id,
+            "student_id": self.student_id,
+            "submission_type": self.submission_type,
+            "content": self.content,
+            "file_path": self.file_path,
+            "url": self.url,
+            "grade": self.grade,
+            "feedback": self.feedback,
+            "graded_by": self.graded_by,
+            "graded_at": self.graded_at,
+            "is_late": self.is_late,
+            "attempts": self.attempts,
+            "status": self.status,
+            "created_at": self.created_at,
+            "updated_at": self.updated_at
+        }
+
+class EvaluationRubric:
+    """
+    Modelo para las rúbricas de evaluación.
+    """
+    def __init__(self,
+                 evaluation_id: str,
+                 title: str,
+                 description: str = "",
+                 criteria: List[Dict] = None,
+                 total_points: float = 100.0,
+                 created_by: str = None,
+                 status: str = STATUS["ACTIVE"],
+                 _id: Optional[ObjectId] = None,
+                 created_at: Optional[datetime] = None,
+                 updated_at: Optional[datetime] = None):
+        self._id = _id or ObjectId()
+        self.evaluation_id = ObjectId(evaluation_id)
+        self.title = title
+        self.description = description
+        self.criteria = criteria or []
+        self.total_points = total_points
+        self.created_by = ObjectId(created_by) if created_by else None
+        self.status = status
+        self.created_at = created_at or datetime.now()
+        self.updated_at = updated_at or datetime.now()
+
+    def to_dict(self) -> dict:
+        return {
+            "_id": self._id,
+            "evaluation_id": self.evaluation_id,
+            "title": self.title,
+            "description": self.description,
+            "criteria": self.criteria,
+            "total_points": self.total_points,
+            "created_by": self.created_by,
+            "status": self.status,
+            "created_at": self.created_at,
+            "updated_at": self.updated_at
+        }
+
+    def calculate_grade(self, criteria_scores: Dict[str, float]) -> Dict:
+        """
+        Calcula una calificación basada en los puntajes de criterios.
+        
+        Args:
+            criteria_scores: Diccionario con puntajes por criterio
+            
+        Returns:
+            Diccionario con el resultado del cálculo
+        """
+        try:
+            total_score = 0
+            max_possible = 0
+            detailed_scores = []
+            
+            for criterion in self.criteria:
+                criterion_id = criterion.get("id")
+                max_points = criterion.get("points", 0)
+                score = criteria_scores.get(criterion_id, 0)
+                
+                # Validar que el puntaje no exceda el máximo
+                if score > max_points:
+                    score = max_points
+                    
+                total_score += score
+                max_possible += max_points
+                
+                detailed_scores.append({
+                    "criterion_id": criterion_id,
+                    "criterion_name": criterion.get("name", ""),
+                    "score": score,
+                    "max_points": max_points,
+                    "percentage": (score / max_points) * 100 if max_points > 0 else 0
+                })
+            
+            # Calcular porcentaje final
+            final_percentage = (total_score / max_possible) * 100 if max_possible > 0 else 0
+            
+            return {
+                "total_score": total_score,
+                "max_possible": max_possible,
+                "final_percentage": round(final_percentage, 2),
+                "grade": self._percentage_to_letter_grade(final_percentage),
+                "detailed_scores": detailed_scores
+            }
+            
+        except Exception as e:
+            return {"error": f"Error al calcular calificación: {str(e)}"}
+    
+    def _percentage_to_letter_grade(self, percentage: float) -> str:
+        """Convierte un porcentaje a calificación letra"""
+        if percentage >= 90:
+            return "A"
+        elif percentage >= 80:
+            return "B"
+        elif percentage >= 70:
+            return "C"
+        elif percentage >= 60:
+            return "D"
+        else:
+            return "F" 

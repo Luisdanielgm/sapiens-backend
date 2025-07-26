@@ -12,7 +12,7 @@ from src.shared.database import get_db
 from src.classes.services import ClassService
 from src.study_plans.models import (
     StudyPlanPerSubject, StudyPlanAssignment, Module, Topic, Evaluation, 
-    EvaluationResource
+    EvaluationResource, EvaluationRubric, EvaluationSubmission
 )
 from src.content.models import (
     TopicContent, ContentType, ContentTypes
@@ -1235,11 +1235,11 @@ class EvaluationService(VerificationBaseService):
     
     def record_result(self, result_data: dict) -> Tuple[bool, str]:
         """
-        Registra la calificación de una evaluación.
+        Registra la calificación de una evaluación, ya sea por score directo o
+        basado en una entrega (submission) que es un Recurso.
         Utiliza el servicio unificado de ContentResult.
         """
         try:
-            # Validaciones
             evaluation_id = result_data.get("evaluation_id")
             student_id = result_data.get("student_id")
             graded_by = result_data.get("graded_by")
@@ -1251,17 +1251,26 @@ class EvaluationService(VerificationBaseService):
             if not self.check_teacher_exists(graded_by):
                 return False, "Evaluador no encontrado"
 
+            # Si el resultado viene de una 'submission', esta será el ID de un Recurso
+            submission_resource_id = result_data.get("submission_resource_id")
+            
             # Preparar datos para ContentResult
             unified_result_data = {
-                "evaluation_id": evaluation_id,
+                "content_id": evaluation_id, # La evaluación es el "contenido"
                 "student_id": student_id,
-                "graded_by": graded_by,
-                "score": result_data.get("score"),
+                "score": result_data.get("score") / 100.0 if result_data.get("score") is not None else None, # Normalizar a 0-1
                 "feedback": result_data.get("feedback"),
-                "session_type": "assessment"
+                "session_type": "assessment",
+                "recorded_at": datetime.now(),
+                "metrics": {
+                    "graded_by": graded_by,
+                    "is_submission": bool(submission_resource_id)
+                }
             }
+
+            if submission_resource_id:
+                unified_result_data["metrics"]["submission_resource_id"] = submission_resource_id
             
-            # Usar el servicio unificado
             content_result_service = ContentResultService()
             success, result_id_or_msg = content_result_service.record_result(unified_result_data)
 
@@ -1353,6 +1362,408 @@ class EvaluationService(VerificationBaseService):
         except Exception:
             return False
 
+    # ===== MÉTODOS PARA SUBMISSIONS (ENTREGAS) =====
+    
+    def create_submission(self, submission_data: dict) -> Tuple[bool, str]:
+        """
+        Crea una nueva entrega de estudiante para una evaluación.
+        
+        Args:
+            submission_data: Datos de la entrega
+            
+        Returns:
+            Tuple[bool, str]: (éxito, mensaje/ID)
+        """
+        try:
+            # Validaciones básicas
+            evaluation_id = submission_data.get("evaluation_id")
+            student_id = submission_data.get("student_id")
+            
+            if not evaluation_id or not student_id:
+                return False, "evaluation_id y student_id son requeridos"
+            
+            # Validar IDs
+            validate_object_id(evaluation_id)
+            
+            # Verificar que la evaluación existe
+            evaluation = self.collection.find_one({"_id": ObjectId(evaluation_id)})
+            if not evaluation:
+                return False, "Evaluación no encontrada"
+            
+            # Verificar que el estudiante existe (student_id puede ser string o ObjectId)
+            db = get_db()
+            student = None
+            try:
+                # Intentar buscar por ObjectId primero
+                student = db.users.find_one({"_id": ObjectId(student_id)})
+            except:
+                # Si falla, buscar por string (email u otro identificador)
+                student = db.users.find_one({"email": student_id}) or db.users.find_one({"_id": student_id})
+            
+            if not student:
+                return False, "Estudiante no encontrado"
+            
+            # Verificar fecha límite si está configurada
+            due_date = evaluation.get("due_date")
+            is_late = False
+            if due_date and isinstance(due_date, datetime):
+                is_late = datetime.now() > due_date
+                submission_data["is_late"] = is_late
+            
+            # Verificar si ya existe una entrega (usar student_id como string)
+            existing_submission = db.evaluation_submissions.find_one({
+                "evaluation_id": ObjectId(evaluation_id),
+                "student_id": str(student["_id"])  # Usar el ID del estudiante encontrado como string
+            })
+            
+            if existing_submission:
+                # Incrementar número de intentos
+                attempts = existing_submission.get("attempts", 1) + 1
+                submission_data["attempts"] = attempts
+                
+                # Actualizar entrega existente
+                submission_data["updated_at"] = datetime.now()
+                submission_data["status"] = "resubmitted"
+                
+                result = db.evaluation_submissions.update_one(
+                    {"_id": existing_submission["_id"]},
+                    {"$set": submission_data}
+                )
+                
+                return True, str(existing_submission["_id"])
+            else:
+                # Asegurar que student_id sea string para crear nueva entrega
+                submission_data["student_id"] = str(student["_id"])
+                
+                # Crear nueva entrega
+                submission = EvaluationSubmission(**submission_data)
+                result = db.evaluation_submissions.insert_one(submission.to_dict())
+                
+                return True, str(result.inserted_id)
+                
+        except Exception as e:
+            logging.error(f"Error creando submission: {str(e)}")
+            return False, f"Error interno: {str(e)}"
+    
+    def get_submissions_by_evaluation(self, evaluation_id: str) -> List[Dict]:
+        """
+        Obtiene todas las entregas de una evaluación específica.
+        """
+        try:
+            # Validar el evaluation_id
+            validate_object_id(evaluation_id)
+            
+            db = get_db()
+            submissions = list(db.evaluation_submissions.find({
+                "evaluation_id": ObjectId(evaluation_id)
+            }))
+            
+            # Convertir ObjectIds y enriquecer con datos de estudiante
+            for submission in submissions:
+                submission["_id"] = str(submission["_id"])
+                submission["evaluation_id"] = str(submission["evaluation_id"])
+                
+                # Asegurar que student_id sea string
+                if isinstance(submission["student_id"], ObjectId):
+                    submission["student_id"] = str(submission["student_id"])
+                
+                # Agregar información del estudiante
+                student = None
+                try:
+                    # Intentar buscar por ObjectId si student_id puede convertirse
+                    student = db.users.find_one({"_id": ObjectId(submission["student_id"])})
+                except:
+                    # Si falla, buscar por string
+                    student = db.users.find_one({"_id": submission["student_id"]})
+                
+                if student:
+                    submission["student"] = {
+                        "name": student.get("name", ""),
+                        "email": student.get("email", ""),
+                        "picture": student.get("picture", "")
+                    }
+                
+                # Agregar información del evaluador si existe
+                if submission.get("graded_by"):
+                    try:
+                        grader = db.users.find_one({"_id": ObjectId(submission["graded_by"])})
+                        if grader:
+                            submission["grader"] = {
+                                "name": grader.get("name", ""),
+                                "email": grader.get("email", "")
+                            }
+                    except Exception as e:
+                        logging.warning(f"Error obteniendo datos del evaluador: {e}")
+            
+            return submissions
+            
+        except Exception as e:
+            logging.error(f"Error obteniendo submissions: {str(e)}")
+            return []
+    
+    def get_submission_by_student(self, evaluation_id: str, student_id: str) -> Optional[Dict]:
+        """
+        Obtiene la entrega de un estudiante específico para una evaluación.
+        """
+        try:
+            # Validar el evaluation_id
+            validate_object_id(evaluation_id)
+            
+            # Buscar primero con student_id como string (storage format)
+            submission = get_db().evaluation_submissions.find_one({
+                "evaluation_id": ObjectId(evaluation_id),
+                "student_id": student_id  # Keep as string to match database storage
+            })
+            
+            # Si no se encuentra, intentar con ObjectId por compatibilidad con datos antiguos
+            if not submission:
+                try:
+                    submission = get_db().evaluation_submissions.find_one({
+                        "evaluation_id": ObjectId(evaluation_id),
+                        "student_id": ObjectId(student_id)
+                    })
+                except:
+                    # Si student_id no puede convertirse a ObjectId, mantener como None
+                    pass
+            
+            if not submission:
+                return None
+            
+            # Convertir ObjectIds a strings para serialización
+            submission["_id"] = str(submission["_id"])
+            submission["evaluation_id"] = str(submission["evaluation_id"])
+            # student_id ya debería ser string, pero asegurar conversión si es ObjectId
+            if isinstance(submission["student_id"], ObjectId):
+                submission["student_id"] = str(submission["student_id"])
+            
+            return submission
+            
+        except Exception as e:
+            logging.error(f"Error obteniendo submission del estudiante: {str(e)}")
+            return None
+    
+    def grade_submission(self, submission_id: str, grade_data: dict) -> Tuple[bool, str]:
+        """
+        Califica una entrega de estudiante.
+        
+        Args:
+            submission_id: ID de la entrega
+            grade_data: Datos de calificación (grade, feedback, graded_by)
+            
+        Returns:
+            Tuple[bool, str]: (éxito, mensaje)
+        """
+        try:
+            # Validar el submission_id
+            validate_object_id(submission_id)
+            
+            db = get_db()
+            # Verificar que la entrega existe
+            submission = db.evaluation_submissions.find_one({"_id": ObjectId(submission_id)})
+            if not submission:
+                return False, "Entrega no encontrada"
+            
+            # Datos de calificación
+            grade_update = {
+                "grade": grade_data.get("grade"),
+                "feedback": grade_data.get("feedback", ""),
+                "graded_by": ObjectId(grade_data["graded_by"]) if grade_data.get("graded_by") else None,
+                "graded_at": datetime.now(),
+                "status": "graded",
+                "updated_at": datetime.now()
+            }
+            
+            # Validar calificación
+            if grade_update["grade"] is not None:
+                if not (0 <= grade_update["grade"] <= 100):
+                    return False, "La calificación debe estar entre 0 y 100"
+            
+            # Actualizar entrega
+            result = db.evaluation_submissions.update_one(
+                {"_id": ObjectId(submission_id)},
+                {"$set": grade_update}
+            )
+            
+            if result.modified_count > 0:
+                # Crear ContentResult si la evaluación está vinculada a contenido virtual
+                evaluation = self.collection.find_one({"_id": submission["evaluation_id"]})
+                if evaluation and evaluation.get("linked_quiz_id"):
+                    self._create_content_result_from_submission(submission, grade_update)
+                
+                return True, "Entrega calificada exitosamente"
+            
+            return False, "No se pudo calificar la entrega"
+            
+        except Exception as e:
+            logging.error(f"Error calificando submission: {str(e)}")
+            return False, f"Error interno: {str(e)}"
+    
+    # ===== MÉTODOS PARA RUBRICS =====
+    
+    def create_rubric(self, rubric_data: dict) -> Tuple[bool, str]:
+        """
+        Crea una nueva rúbrica de evaluación.
+        """
+        try:
+            # Validar criterios si se proporcionan
+            criteria = rubric_data.get("criteria", [])
+            if criteria:
+                for i, criterion in enumerate(criteria):
+                    if not criterion.get("id"):
+                        criterion["id"] = f"criterion_{i+1}"
+                    if not criterion.get("name"):
+                        return False, f"Criterio {i+1} debe tener nombre"
+                    if not isinstance(criterion.get("points", 0), (int, float)):
+                        return False, f"Criterio {i+1} debe tener puntos válidos"
+            
+            rubric = EvaluationRubric(**rubric_data)
+            result = get_db().evaluation_rubrics.insert_one(rubric.to_dict())
+            
+            return True, str(result.inserted_id)
+            
+        except Exception as e:
+            logging.error(f"Error creando rubric: {str(e)}")
+            return False, f"Error interno: {str(e)}"
+    
+    def get_rubric_by_evaluation(self, evaluation_id: str) -> Optional[Dict]:
+        """
+        Obtiene la rúbrica asociada a una evaluación.
+        """
+        try:
+            # Validar el evaluation_id
+            validate_object_id(evaluation_id)
+            
+            rubric = get_db().evaluation_rubrics.find_one({
+                "evaluation_id": ObjectId(evaluation_id)
+            })
+            
+            if not rubric:
+                return None
+            
+            # Convertir ObjectIds
+            rubric["_id"] = str(rubric["_id"])
+            rubric["evaluation_id"] = str(rubric["evaluation_id"])
+            
+            return rubric
+            
+        except Exception as e:
+            logging.error(f"Error obteniendo rubric: {str(e)}")
+            return None
+    
+    def calculate_grade_with_rubric(self, rubric_id: str, criteria_scores: Dict[str, float]) -> Dict:
+        """
+        Calcula una calificación usando una rúbrica específica.
+        """
+        try:
+            # Validar el rubric_id
+            validate_object_id(rubric_id)
+            
+            # Obtener rúbrica
+            rubric_data = get_db().evaluation_rubrics.find_one({"_id": ObjectId(rubric_id)})
+            if not rubric_data:
+                return {"error": "Rúbrica no encontrada"}
+            
+            # Recrear objeto para usar método calculate_grade
+            rubric = EvaluationRubric(**rubric_data)
+            result = rubric.calculate_grade(criteria_scores)
+            
+            return result
+            
+        except Exception as e:
+            logging.error(f"Error calculando calificación con rubric: {str(e)}")
+            return {"error": f"Error interno: {str(e)}"}
+    
+    # ===== MÉTODOS DE INTEGRACIÓN =====
+    
+    def _create_content_result_from_submission(self, submission: Dict, grade_data: Dict):
+        """
+        Crea un ContentResult basado en una entrega calificada.
+        Integra las evaluaciones con el sistema de contenidos virtuales.
+        """
+        try:
+            from src.content.services import ContentResultService
+            
+            # Solo crear si hay calificación válida
+            if grade_data.get("grade") is None:
+                return
+            
+            # Datos para ContentResult
+            content_result_data = {
+                "content_id": str(submission["evaluation_id"]),  # Usar evaluation como content
+                "student_id": str(submission["student_id"]),
+                "score": grade_data["grade"] / 100.0,  # Normalizar a 0-1
+                "feedback": grade_data.get("feedback", ""),
+                "metrics": {
+                    "submission_type": submission.get("submission_type", "file"),
+                    "attempts": submission.get("attempts", 1),
+                    "is_late": submission.get("is_late", False),
+                    "graded_at": grade_data.get("graded_at").isoformat() if grade_data.get("graded_at") else None
+                },
+                "session_type": "evaluation_submission"
+            }
+            
+            # Crear ContentResult
+            content_result_service = ContentResultService()
+            success, result_id = content_result_service.record_result(content_result_data)
+            
+            if success:
+                logging.info(f"ContentResult creado: {result_id} para submission {submission['_id']}")
+            else:
+                logging.warning(f"No se pudo crear ContentResult: {result_id}")
+                
+        except Exception as e:
+            logging.error(f"Error creando ContentResult desde submission: {str(e)}")
+    
+    def get_evaluation_statistics(self, evaluation_id: str) -> Dict:
+        """
+        Obtiene estadísticas completas de una evaluación.
+        """
+        try:
+            # Obtener todas las entregas
+            submissions = self.get_submissions_by_evaluation(evaluation_id)
+            
+            if not submissions:
+                return {
+                    "total_submissions": 0,
+                    "graded_submissions": 0,
+                    "pending_submissions": 0,
+                    "average_grade": 0,
+                    "grade_distribution": {},
+                    "late_submissions": 0
+                }
+            
+            # Calcular estadísticas
+            total = len(submissions)
+            graded = len([s for s in submissions if s.get("grade") is not None])
+            pending = total - graded
+            late = len([s for s in submissions if s.get("is_late", False)])
+            
+            # Calcular promedio de calificaciones
+            grades = [s["grade"] for s in submissions if s.get("grade") is not None]
+            average_grade = sum(grades) / len(grades) if grades else 0
+            
+            # Distribución de calificaciones
+            grade_distribution = {
+                "A (90-100)": len([g for g in grades if g >= 90]),
+                "B (80-89)": len([g for g in grades if 80 <= g < 90]),
+                "C (70-79)": len([g for g in grades if 70 <= g < 80]),
+                "D (60-69)": len([g for g in grades if 60 <= g < 70]),
+                "F (0-59)": len([g for g in grades if g < 60])
+            }
+            
+            return {
+                "total_submissions": total,
+                "graded_submissions": graded,
+                "pending_submissions": pending,
+                "average_grade": round(average_grade, 2),
+                "grade_distribution": grade_distribution,
+                "late_submissions": late,
+                "completion_rate": round((graded / total) * 100, 2) if total > 0 else 0
+            }
+            
+        except Exception as e:
+            logging.error(f"Error obteniendo estadísticas de evaluación: {str(e)}")
+            return {}
 
 class ContentTypeService(VerificationBaseService):
     """
