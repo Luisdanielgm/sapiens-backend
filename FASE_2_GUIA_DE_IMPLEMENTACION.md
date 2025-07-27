@@ -25,13 +25,37 @@ A continuación se detalla cada nueva funcionalidad, explicando las responsabili
         *   **Respuesta Exitosa**: El backend devolverá un `token` de sesión y el objeto `user`. El frontend debe guardar este token y redirigir al usuario a su dashboard, ya autenticado.
         *   **Manejo de Errores**: El endpoint validará si el email ya existe y devolverá un error `409 Conflict` (código `ALREADY_EXISTS`) que la UI debe mostrar al usuario.
 
-2.  **Formulario de Inicio de Sesión**:
-    *   Actualizar el formulario de login para que acepte `email` y `contraseña`.
-    *   Al enviar, realizar una llamada a:
+2.  **Formulario de Inicio de Sesión (Lógica Actualizada)**:
+    *   El frontend debe manejar **dos flujos de login** que apuntan al **mismo endpoint**. La diferencia está en el `body` de la petición.
+
+    *   **CASO A: Login con Email y Contraseña**
+        *   Cuando el usuario ingresa su correo y contraseña y hace clic en "Iniciar Sesión":
         *   **Endpoint**: `POST /api/users/login`
-        *   **Body (JSON)**: `{ "email": "...", "password": "..." }`
-        *   **Respuesta Exitosa**: El backend devolverá un `token` y el objeto `user`, que el frontend debe almacenar.
-        *   **Manejo de Errores**: Si las credenciales son incorrectas, el backend devolverá un error `401 Unauthorized` (código `AUTHENTICATION_ERROR`). La UI debe mostrar un mensaje como "Email o contraseña incorrectos".
+        *   **Body (JSON)**:
+            ```json
+            {
+              "email": "usuario@ejemplo.com",
+              "password": "la_contraseña_del_usuario"
+            }
+            ```
+
+    *   **CASO B: Login con Google**
+        *   Cuando el usuario hace clic en "Iniciar Sesión con Google" y la librería de Google devuelve el token/credencial:
+        *   **Endpoint**: `POST /api/users/login`
+        *   **Body (JSON)**:
+            ```json
+            {
+              "email": "email_del_usuario_google@gmail.com",
+              "credential": "el_token_o_credencial_recibido_de_google"
+            }
+            ```
+    *   **Respuesta del Backend**: En ambos casos, si el login es exitoso, la respuesta del backend será idéntica: un `token` JWT y el objeto `user`.
+        ```json
+        {
+          "token": "ey...",
+          "user": { "id": "...", "name": "...", "email": "...", "role": "..." }
+        }
+        ```
 
 ### **2.2 Generación Paralela de Contenidos (Asíncrona)**
 

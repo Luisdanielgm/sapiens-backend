@@ -4,6 +4,7 @@ from bson.objectid import ObjectId
 import json
 import logging
 from typing import Dict, List
+from datetime import datetime
 
 from .services import UserService, CognitiveProfileService
 from src.shared.standardization import APIBlueprint, APIRoute, ErrorCodes
@@ -63,11 +64,24 @@ def login():
         user_info = None
 
         if google_credential:
-            # --- Flujo de Login con Google ---
-            # Aquí iría la lógica de verificación del token de Google en un entorno real.
-            # Por ahora, confiamos en que el frontend ya lo ha verificado.
-            user = user_service.collection.find_one({"email": email, "provider": "google"})
+            # --- Flujo de Login con Google (Corregido) ---
+            user = user_service.collection.find_one({
+                "email": email,
+                # El usuario debe ser de Google o no tener un proveedor definido (para usuarios antiguos)
+                "$or": [
+                    {"provider": "google"},
+                    {"provider": {"$exists": False}}
+                ]
+            })
+
             if user:
+                # Si el usuario es antiguo y no tiene proveedor, actualizarlo
+                if not user.get("provider"):
+                    user_service.collection.update_one(
+                        {"_id": user["_id"]},
+                        {"$set": {"provider": "google", "updated_at": datetime.now()}}
+                    )
+
                 user_info = {
                     "id": str(user["_id"]),
                     "name": user["name"],
