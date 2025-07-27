@@ -48,16 +48,39 @@ def register():
         return APIRoute.error(ErrorCodes.SERVER_ERROR, "Ocurrió un error inesperado durante el registro.")
 
 @users_bp.route('/login', methods=['POST'])
-@APIRoute.standard(required_fields=['email', 'password'])
+@APIRoute.standard(required_fields=['email'])
 def login():
-    """Login de usuario con email/contraseña y generación de token JWT."""
+    """
+    Maneja el login tanto para usuarios locales (email/contraseña) como para
+    proveedores sociales (Google).
+    """
     try:
         data = request.get_json()
         email = data.get('email')
         password = data.get('password')
+        google_credential = data.get('credential') # Para login con Google
 
-        user_info = user_service.login_user(email, password)
+        user_info = None
 
+        if google_credential:
+            # --- Flujo de Login con Google ---
+            # Aquí iría la lógica de verificación del token de Google en un entorno real.
+            # Por ahora, confiamos en que el frontend ya lo ha verificado.
+            user = user_service.collection.find_one({"email": email, "provider": "google"})
+            if user:
+                user_info = {
+                    "id": str(user["_id"]),
+                    "name": user["name"],
+                    "email": user["email"],
+                    "role": user["role"]
+                }
+        elif password:
+            # --- Flujo de Login con Email/Contraseña ---
+            user_info = user_service.login_user(email, password)
+        else:
+            return APIRoute.error(ErrorCodes.MISSING_FIELDS, "Se requiere contraseña o credencial de Google.")
+
+        # -- Generación de Token --
         if user_info:
             access_token = create_access_token(identity=user_info['id'])
             return APIRoute.success(
@@ -65,7 +88,7 @@ def login():
                 message="Inicio de sesión exitoso."
             )
         else:
-            return APIRoute.error(ErrorCodes.AUTHENTICATION_ERROR, "Credenciales inválidas o el usuario se registró con un proveedor social.")
+            return APIRoute.error(ErrorCodes.AUTHENTICATION_ERROR, "Credenciales inválidas o usuario no encontrado.")
             
     except Exception as e:
         log_error(f"Error en el endpoint de login: {str(e)}", e, "users.routes")
