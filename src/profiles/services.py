@@ -793,14 +793,7 @@ class ProfileService(VerificationBaseService):
     
     def create_profile_for_user(self, user_id_or_email: str, user_role: str = None) -> Tuple[bool, str]:
         """
-        Crea el perfil adecuado según el rol del usuario.
-        
-        Args:
-            user_id_or_email: ID o email del usuario
-            user_role: Rol del usuario (opcional, si no se proporciona se obtiene de la base de datos)
-            
-        Returns:
-            Tuple[bool, str]: (Éxito, Mensaje o ID del perfil)
+        Crea el perfil adecuado según el rol del usuario, manejando roles base y roles individuales.
         """
         if not user_role:
             user_role = self.get_user_role(user_id_or_email)
@@ -808,23 +801,37 @@ class ProfileService(VerificationBaseService):
         if not user_role:
             return False, f"No se pudo determinar el rol del usuario: {user_id_or_email}"
             
-        if user_role == "TEACHER":
+        # --- Mapeo de Roles Individuales a Roles Base ---
+        if user_role == "INDIVIDUAL_TEACHER":
+            base_role = "TEACHER"
+        elif user_role == "INDIVIDUAL_STUDENT":
+            base_role = "STUDENT"
+        else:
+            base_role = user_role
+        # ------------------------------------------------
+
+        if base_role == "TEACHER":
             return self.create_teacher_profile(user_id_or_email, {})
-        elif user_role == "STUDENT":
+        elif base_role == "STUDENT":
             # Para estudiantes, crear tanto el perfil regular como el cognitivo
             success, message = self.create_student_profile(user_id_or_email, {})
             if not success:
-                return False, message
-                
-            cognitive_success, cognitive_message = self.create_cognitive_profile(user_id_or_email)
-            if not cognitive_success:
-                log_info(f"No se pudo crear el perfil cognitivo, pero se creó el perfil regular: {cognitive_message}", "profiles.services")
-                
+                # Si el perfil ya existe (puede pasar en flujos complejos), no lo tratamos como un error fatal
+                if "Ya existe un perfil" in message:
+                    log_info(f"Perfil de estudiante ya existía para {user_id_or_email}. Se omite la creación.", "profiles.services")
+                else:
+                    return False, message
+            
+            # Intentar crear perfil cognitivo solo si no existe
+            if not self.db.cognitive_profiles.find_one({"user_id": self._get_user_id(user_id_or_email)}):
+                cognitive_success, cognitive_message = self.create_cognitive_profile(user_id_or_email)
+                if not cognitive_success:
+                    log_info(f"No se pudo crear el perfil cognitivo, pero se creó/verificó el perfil regular: {cognitive_message}", "profiles.services")
+            
             return True, message
-        elif user_role == "ADMIN":
-            # Perfil de administrador general del sistema
+        elif base_role == "ADMIN":
             return self.create_admin_profile(user_id_or_email, {})
-        elif user_role == "INSTITUTE_ADMIN":
+        elif base_role == "INSTITUTE_ADMIN":
             # Para administradores de instituto, primero necesitamos obtener el ID del instituto
             try:
                 user_id = self._get_user_id(user_id_or_email)
