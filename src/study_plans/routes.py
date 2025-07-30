@@ -12,7 +12,8 @@ from .services import (
     LearningMethodologyService,
     ContentService,
     EvaluationResourceService,
-    TopicReadinessService
+    TopicReadinessService,
+    AutomaticGradingService
 )
 from src.resources.services import ResourceService, ResourceFolderService
 import logging
@@ -261,6 +262,19 @@ def get_module_topics(module_id):
     topics = ensure_json_serializable(topics)
     return APIRoute.success(data=topics)
 
+
+@study_plan_bp.route('/module/<module_id>/evaluations', methods=['GET'])
+@APIRoute.standard(auth_required_flag=True)
+def list_module_evaluations_route(module_id):
+    """Lista las evaluaciones de un módulo. Si se indica student_id, retorna el estado para ese estudiante."""
+    student_id = request.args.get('student_id')
+    if student_id:
+        evaluations = evaluation_service.get_evaluations_status_for_student(module_id, student_id)
+    else:
+        evaluations = evaluation_service.get_evaluations_by_module(module_id)
+    evaluations = ensure_json_serializable(evaluations)
+    return APIRoute.success(data={"evaluations": evaluations})
+
 # Rutas para Evaluaciones
 @study_plan_bp.route('/evaluation', methods=['POST'])
 @APIRoute.standard(auth_required_flag=True, roles=[ROLES["TEACHER"]], required_fields=['module_id', 'title', 'description', 'weight', 'criteria', 'due_date'])
@@ -386,14 +400,117 @@ def remove_resource_from_evaluation_route(evaluation_id, resource_id):
 def upload_evaluation_submission(evaluation_id):
     """Permite a un estudiante subir un archivo como entregable para una evaluación."""
     student_id = request.user_id
+
     if 'file' not in request.files:
         return APIRoute.error(ErrorCodes.MISSING_FIELD, "No se encontró el archivo en la solicitud", status_code=400)
 
     file = request.files['file']
     if file.filename == '':
         return APIRoute.error(ErrorCodes.INVALID_DATA, "No se seleccionó ningún archivo", status_code=400)
-    
-    # Aquí iría la lógica completa de subida de archivo y creación de recurso...
-    # (Simplificado para el ejemplo)
-    
-    return APIRoute.success(message="Entregable subido (lógica simulada)")
+
+    try:
+        filename = secure_filename(file.filename)
+        upload_dir = os.path.join('uploads', 'evaluations')
+        os.makedirs(upload_dir, exist_ok=True)
+        file_path = os.path.join(upload_dir, filename)
+        file.save(file_path)
+
+        resource_data = {
+            'name': filename,
+            'type': 'file',
+            'url': file_path,
+            'created_by': student_id
+        }
+
+        success, resource_id = resource_service.create_resource(resource_data)
+        if not success:
+            return APIRoute.error(ErrorCodes.CREATION_ERROR, resource_id, status_code=400)
+
+        submission_data = {
+            'evaluation_id': evaluation_id,
+            'student_id': student_id,
+            'submission_type': 'file',
+            'file_path': file_path
+        }
+
+        success, submission_id = evaluation_service.create_submission(submission_data)
+        if success:
+            evaluation_resource_service.link_resource_to_evaluation(
+                evaluation_id=evaluation_id,
+                resource_id=resource_id,
+                role='submission',
+                created_by=student_id
+            )
+
+            evaluation = evaluation_service.get_evaluation(evaluation_id)
+            if evaluation and evaluation.get('auto_grading'):
+                grading_service = AutomaticGradingService()
+                grade_info = grading_service.grade_submission(resource_id, evaluation_id)
+                evaluation_service.grade_submission(submission_id, {
+                    'grade': grade_info.get('grade'),
+                    'feedback': grade_info.get('feedback'),
+                    'graded_by': student_id,
+                    'graded_at': grade_info.get('graded_at')
+                })
+
+            return APIRoute.success(
+                data={"submission_id": submission_id},
+                message="Entregable subido correctamente",
+                status_code=201
+            )
+        return APIRoute.error(ErrorCodes.OPERATION_FAILED, submission_id, status_code=400)
+
+    except Exception as e:
+        log_error(f"Error subiendo entregable: {e}")
+        return APIRoute.error(ErrorCodes.SERVER_ERROR, str(e), status_code=500)
+
+
+@study_plan_bp.route('/evaluations/<evaluation_id>/submissions', methods=['GET'])
+@APIRoute.standard(auth_required_flag=True, roles=[ROLES["TEACHER"]])
+def list_evaluation_submissions(evaluation_id):
+    """Lista todas las entregas de una evaluación."""
+    submissions = evaluation_service.get_submissions_by_evaluation(evaluation_id)
+    submissions = ensure_json_serializable(submissions)
+    return APIRoute.success(data={"submissions": submissions})
+
+
+@study_plan_bp.route('/submissions/<submission_id>/grade', methods=['POST'])
+@APIRoute.standard(auth_required_flag=True, roles=[ROLES["TEACHER"], ROLES["ADMIN"]], required_fields=['grade'])
+def grade_submission(submission_id):
+    """Califica una entrega de estudiante."""
+    data = request.get_json() or {}
+    grade_data = {
+        'grade': data.get('grade'),
+        'feedback': data.get('feedback', ''),
+        'graded_by': request.user_id
+    }
+    success, message = evaluation_service.grade_submission(submission_id, grade_data)
+    if success:
+        return APIRoute.success(data={"message": message}, message=message)
+    return APIRoute.error(ErrorCodes.OPERATION_FAILED, message)
+
+
+@study_plan_bp.route('/evaluations/<evaluation_id>/grade', methods=['POST'])
+@APIRoute.standard(
+    auth_required_flag=True,
+    roles=[ROLES["TEACHER"], ROLES["ADMIN"]],
+    required_fields=["student_id", "score"]
+)
+def grade_evaluation(evaluation_id):
+    """Permite asignar una nota manual a una evaluación."""
+    data = request.get_json() or {}
+    result_data = {
+        "evaluation_id": evaluation_id,
+        "student_id": data.get("student_id"),
+        "score": data.get("score"),
+        "feedback": data.get("feedback", ""),
+        "graded_by": request.user_id
+    }
+
+    success, result = evaluation_service.record_result(result_data)
+    if success:
+        return APIRoute.success(
+            {"content_result_id": result},
+            message="Calificación registrada"
+        )
+    return APIRoute.error(ErrorCodes.OPERATION_FAILED, result)
