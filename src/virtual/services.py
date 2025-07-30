@@ -175,17 +175,18 @@ class VirtualTopicService(VerificationBaseService):
 
     def get_module_topics(self, module_id: str) -> List[Dict]:
         try:
-            topics = list(self.collection.find(
-                {
-                    "virtual_module_id": ObjectId(module_id),
-                    "status": {"$ne": "locked"}
-                }
-            ).sort("order", 1))
+            topics = list(
+                self.collection
+                .find({"virtual_module_id": ObjectId(module_id)})
+                .sort("order", 1)
+            )
             
             # Convertir ObjectIds a strings
             for topic in topics:
                 topic["_id"] = str(topic["_id"])
                 topic["virtual_module_id"] = str(topic["virtual_module_id"])
+                topic["locked"] = topic.get("locked", False)
+                topic["status"] = topic.get("status", "")
                 
             return topics
         except Exception as e:
