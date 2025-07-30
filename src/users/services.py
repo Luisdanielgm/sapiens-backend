@@ -1,6 +1,8 @@
 from typing import Tuple, Optional, Dict, List
 from bson import ObjectId
-from datetime import datetime
+from datetime import datetime, timedelta
+import os
+import uuid
 import json
 
 from src.shared.database import get_db
@@ -272,6 +274,24 @@ class UserService(VerificationBaseService):
             logging.error(f"Error al obtener información del usuario: {str(e)}")
             return None
 
+    def get_user_info_by_id(self, user_id: str) -> Optional[Dict]:
+        """Obtiene información básica del usuario a partir de su ID"""
+        try:
+            user = self.collection.find_one({"_id": ObjectId(user_id)})
+            if user:
+                return {
+                    "id": str(user["_id"]),
+                    "name": user["name"],
+                    "email": user["email"],
+                    "role": user["role"],
+                    "picture": user.get("picture"),
+                    "status": user.get("status", "active")
+                }
+            return None
+        except Exception as e:
+            logging.error(f"Error al obtener información del usuario por ID: {str(e)}")
+            return None
+
     def verify_password(self, plain_password, hashed_password):
         """Verifica si la contraseña en texto plano coincide con el hash almacenado"""
         try:
@@ -428,3 +448,53 @@ class CognitiveProfileService(VerificationBaseService):
         except Exception as e:
             logging.error(f"Error al obtener perfil cognitivo: {str(e)}")
             return None
+
+    # ---------------------------------------------------------
+    # Recuperación de contraseña
+    # ---------------------------------------------------------
+
+    def generate_reset_token(self, email: str) -> None:
+        """Genera un token de restablecimiento y lo registra en el usuario."""
+        try:
+            user = self.collection.find_one({"email": email})
+            if not user:
+                logging.info(f"Solicitud de restablecimiento para email no registrado: {email}")
+                return
+
+            token = uuid.uuid4().hex
+            expires = datetime.now() + timedelta(hours=1)
+
+            self.collection.update_one(
+                {"_id": user["_id"]},
+                {"$set": {"reset_token": token, "reset_token_expires": expires}}
+            )
+
+            frontend_url = os.getenv("FRONTEND_URL", "http://localhost:3000")
+            reset_link = f"{frontend_url}/reset-password?token={token}"
+            logging.info(f"Enlace de restablecimiento para {email}: {reset_link}")
+        except Exception as e:
+            logging.error(f"Error generando token de restablecimiento: {str(e)}")
+
+    def reset_password(self, token: str, new_password: str) -> Tuple[bool, str]:
+        """Actualiza la contraseña usando un token de restablecimiento."""
+        try:
+            user = self.collection.find_one({"reset_token": token})
+            if not user:
+                return False, "Token inválido"
+
+            expires = user.get("reset_token_expires")
+            if not expires or expires < datetime.now():
+                return False, "Token expirado"
+
+            hashed = bcrypt.hashpw(new_password.encode("utf-8"), bcrypt.gensalt()).decode("utf-8")
+            self.collection.update_one(
+                {"_id": user["_id"]},
+                {
+                    "$set": {"password": hashed},
+                    "$unset": {"reset_token": "", "reset_token_expires": ""}
+                }
+            )
+            return True, "Contraseña actualizada"
+        except Exception as e:
+            logging.error(f"Error restableciendo contraseña: {str(e)}")
+            return False, str(e)
