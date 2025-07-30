@@ -806,12 +806,12 @@ def update_module_progress(module_id):
             for topic_data in activity_data.get("topics_progress", []):
                 topic_id = topic_data.get("id")
                 topic_progress = topic_data.get("progress")
-                
+
                 if topic_id and isinstance(topic_progress, (int, float)):
                     try:
                         # Determinar estado de completado del tema
                         topic_status = "completed" if topic_progress >= 100 else "in_progress" if topic_progress > 0 else "not_started"
-                        
+
                         # Actualizar tema virtual
                         get_db().virtual_topics.update_one(
                             {"_id": ObjectId(topic_id), "virtual_module_id": ObjectId(module_id)},
@@ -823,8 +823,28 @@ def update_module_progress(module_id):
                                 }
                             }
                         )
+
+                        if topic_progress >= 100:
+                            try:
+                                from src.virtual.services import OptimizedQueueService
+                                OptimizedQueueService().trigger_on_progress(topic_id, 100)
+                            except Exception as trigger_error:
+                                logging.warning(f"Error al triggear cola para {topic_id}: {str(trigger_error)}")
+
+                            try:
+                                updated_topic = get_db().virtual_topics.find_one({"_id": ObjectId(topic_id)})
+                                if updated_topic:
+                                    virtual_topic_service._update_module_progress_from_topic(updated_topic)
+                            except Exception as update_err:
+                                logging.warning(f"Error recalculando progreso de módulo: {str(update_err)}")
                     except Exception as topic_error:
                         logging.warning(f"Error al actualizar tema {topic_id}: {str(topic_error)}")
+
+            # Obtener progreso actualizado del módulo tras procesar los temas
+            refreshed = get_db().virtual_modules.find_one({"_id": ObjectId(module_id)})
+            if refreshed:
+                progress = refreshed.get("progress", progress)
+                completion_status = refreshed.get("completion_status", completion_status)
         
         # Calcular métricas adicionales
         metrics = {
