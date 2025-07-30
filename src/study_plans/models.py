@@ -136,7 +136,8 @@ class Evaluation:
                  due_date: datetime,
                  use_quiz_score: bool = False,
                  requires_submission: bool = False,
-                 linked_quiz_id: Optional[str] = None):
+                 linked_quiz_id: Optional[str] = None,
+                 auto_grading: bool = False):
         self.module_id = ObjectId(module_id)
         self.title = title
         self.description = description
@@ -146,6 +147,7 @@ class Evaluation:
         self.use_quiz_score = use_quiz_score
         self.requires_submission = requires_submission
         self.linked_quiz_id = ObjectId(linked_quiz_id) if linked_quiz_id else None
+        self.auto_grading = auto_grading
         self.created_at = datetime.now()
         self.status = "pending"
 
@@ -161,7 +163,8 @@ class Evaluation:
             "status": self.status,
             "use_quiz_score": self.use_quiz_score,
             "requires_submission": self.requires_submission,
-            "linked_quiz_id": self.linked_quiz_id
+            "linked_quiz_id": self.linked_quiz_id,
+            "auto_grading": self.auto_grading
         }
 
 # DEPRECATED: Usar ContentResult en su lugar.
