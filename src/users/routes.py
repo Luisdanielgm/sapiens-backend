@@ -35,7 +35,10 @@ def register():
         success, user_id_or_error = user_service.register_user(data)
 
         if success:
-            access_token = create_access_token(identity=user_id_or_error)
+            institutes = membership_service.get_user_institutes(user_id_or_error)
+            institute_id = str(institutes[0]['_id']) if institutes else None
+            claims = {"institute_id": institute_id} if institute_id else None
+            access_token = create_access_token(identity=user_id_or_error, additional_claims=claims)
             user_info = user_service.get_user_info(data['email'])
             return APIRoute.success(
                 data={"token": access_token, "user": user_info},
@@ -96,7 +99,10 @@ def login():
 
         # -- Generación de Token --
         if user_info:
-            access_token = create_access_token(identity=user_info['id'])
+            institutes = membership_service.get_user_institutes(user_info['id'])
+            institute_id = str(institutes[0]['_id']) if institutes else None
+            claims = {"institute_id": institute_id} if institute_id else None
+            access_token = create_access_token(identity=user_info['id'], additional_claims=claims)
             return APIRoute.success(
                 data={"token": access_token, "user": user_info},
                 message="Inicio de sesión exitoso."
@@ -126,3 +132,52 @@ def get_my_institutes():
     except Exception as e:
         log_error(f"Error obteniendo los institutos del usuario: {str(e)}", e, "users.routes")
         return APIRoute.error(ErrorCodes.SERVER_ERROR, "Ocurrió un error al recuperar los institutos.")
+
+
+@users_bp.route('/switch-institute/<institute_id>', methods=['POST'])
+@APIRoute.standard(auth_required_flag=True)
+def switch_institute(institute_id):
+    """Genera un nuevo JWT para el instituto seleccionado si el usuario es miembro"""
+    try:
+        user_id = get_jwt_identity()
+        if not membership_service.check_institute_member_exists(institute_id, user_id):
+            return APIRoute.error(ErrorCodes.UNAUTHORIZED, "No pertenece al instituto indicado")
+        user_info = user_service.get_user_info_by_id(user_id)
+        claims = {"institute_id": institute_id}
+        if user_info and user_info.get("role"):
+            claims["role"] = user_info["role"]
+        token = create_access_token(identity=user_id, additional_claims=claims)
+        return APIRoute.success(data={"token": token})
+    except Exception as e:
+        log_error(f"Error en switch_institute: {str(e)}", e, "users.routes")
+        return APIRoute.error(ErrorCodes.SERVER_ERROR, "No se pudo cambiar de instituto")
+
+
+@users_bp.route('/forgot-password', methods=['POST'])
+@APIRoute.standard(required_fields=['email'])
+def forgot_password():
+    """Inicia el proceso de recuperación de contraseña."""
+    try:
+        data = request.get_json()
+        email = data.get('email')
+        user_service.generate_reset_token(email)
+        return APIRoute.success(message="Si el correo existe, se enviaron las instrucciones para restablecer la contraseña.")
+    except Exception as e:
+        log_error(f"Error en forgot_password: {str(e)}", e, "users.routes")
+        return APIRoute.error(ErrorCodes.SERVER_ERROR, "No se pudo procesar la solicitud.")
+
+
+@users_bp.route('/reset-password', methods=['POST'])
+@APIRoute.standard(required_fields=['token', 'password'])
+def reset_password():
+    """Aplica una nueva contraseña usando el token proporcionado."""
+    try:
+        data = request.get_json()
+        success, msg = user_service.reset_password(data['token'], data['password'])
+        if success:
+            return APIRoute.success(message=msg)
+        else:
+            return APIRoute.error(ErrorCodes.UPDATE_ERROR, msg)
+    except Exception as e:
+        log_error(f"Error en reset_password: {str(e)}", e, "users.routes")
+        return APIRoute.error(ErrorCodes.SERVER_ERROR, "No se pudo actualizar la contraseña.")
