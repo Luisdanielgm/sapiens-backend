@@ -819,8 +819,9 @@ class FastVirtualModuleGenerator(VerificationBaseService):
             
             # 5. Generar temas virtuales de forma optimizada
             self._generate_virtual_topics_fast(
-                module_id, student_id, virtual_module_id, 
-                cognitive_profile
+                module_id, student_id, virtual_module_id,
+                cognitive_profile,
+                preferences=None
             )
             
             # 6. Actualizar estado del módulo virtual
@@ -844,9 +845,9 @@ class FastVirtualModuleGenerator(VerificationBaseService):
             logging.error(f"Error al generar módulo virtual: {str(e)}")
             return False, str(e)
     
-    def _generate_virtual_topics_fast(self, module_id: str, student_id: str, 
+    def _generate_virtual_topics_fast(self, module_id: str, student_id: str,
                                     virtual_module_id: str, cognitive_profile: Dict,
-                                    initial_batch_size: int = 2):
+                                    preferences: Dict = None, initial_batch_size: int = 2):
         """
         Genera temas virtuales optimizados para velocidad.
         """
@@ -905,7 +906,8 @@ class FastVirtualModuleGenerator(VerificationBaseService):
                         topic_id=topic_id,
                         virtual_topic_id=virtual_topic_id,
                         cognitive_profile=cognitive_profile,
-                        student_id=student_id
+                        student_id=student_id,
+                        preferences=preferences
                     )
                 except Exception as e_topic:
                     logging.error(f"Error generando tema virtual para {topic['_id']}: {e_topic}")
@@ -974,7 +976,8 @@ class FastVirtualModuleGenerator(VerificationBaseService):
                         topic_id=str(topic["_id"]),
                         virtual_topic_id=virtual_topic_id,
                         cognitive_profile=cognitive_profile,
-                        student_id=str(student_id)
+                        student_id=str(student_id),
+                        preferences=preferences
                     )
                     
                     report["added"].append({"type": "topic", "id": str(topic["_id"]), "virtual_topic_id": virtual_topic_id})
@@ -1100,7 +1103,7 @@ class FastVirtualModuleGenerator(VerificationBaseService):
             "factor": adjustment
         }
 
-    def _generate_topic_contents_for_sync(self, topic_id: str, virtual_topic_id: str, cognitive_profile: Dict, student_id: str):
+    def _generate_topic_contents_for_sync(self, topic_id: str, virtual_topic_id: str, cognitive_profile: Dict, student_id: str, preferences: Dict = None):
         """
         Genera contenidos virtuales personalizados para un tema específico durante sincronización.
         
@@ -1122,7 +1125,7 @@ class FastVirtualModuleGenerator(VerificationBaseService):
                 return
             
             # Filtrar y seleccionar contenidos según perfil cognitivo
-            selected_contents = self._select_personalized_contents(original_contents, cognitive_profile)
+            selected_contents = self._select_personalized_contents(original_contents, cognitive_profile, preferences or {})
             
             if not selected_contents:
                 logging.warning(f"No se pudieron personalizar contenidos para el tema {topic_id}")
@@ -1168,7 +1171,7 @@ class FastVirtualModuleGenerator(VerificationBaseService):
         except Exception as e:
             logging.error(f"Error en _generate_topic_contents_for_sync: {str(e)}")
     
-    def _select_personalized_contents(self, original_contents: List[Dict], cognitive_profile: Dict) -> List[Dict]:
+    def _select_personalized_contents(self, original_contents: List[Dict], cognitive_profile: Dict, preferences: Dict = None) -> List[Dict]:
         """
         Selecciona y filtra contenidos según el perfil cognitivo del estudiante.
         *** CORREGIDO PARA MANEJAR LA ESTRUCTURA REAL DE LA BASE DE DATOS ***
@@ -1206,6 +1209,10 @@ class FastVirtualModuleGenerator(VerificationBaseService):
             
             has_dyslexia = "dislexia" in diagnosis_lower or "lectura" in difficulties_str or \
                            "escritura" in difficulties_str
+
+            preferences = preferences or {}
+            avoid_types = preferences.get("avoid_types", [])
+            prefer_types = preferences.get("prefer_types", [])
             
             # --- FIN DE LA LÓGICA CORREGIDA ---
 
@@ -1231,6 +1238,12 @@ class FastVirtualModuleGenerator(VerificationBaseService):
                 # Contenidos específicos
                 else:
                     specific_contents.append(content)
+
+            if avoid_types:
+                original_contents = [c for c in original_contents if c.get("content_type") not in avoid_types] or original_contents
+                complete_contents = [c for c in complete_contents if c.get("content_type") not in avoid_types]
+                specific_contents = [c for c in specific_contents if c.get("content_type") not in avoid_types]
+                evaluative_contents = [c for c in evaluative_contents if c.get("content_type") not in avoid_types]
             
             # PASO 5: Validar que hay contenidos para trabajar
             if not complete_contents and len(original_contents) < 2:
@@ -1317,6 +1330,17 @@ class FastVirtualModuleGenerator(VerificationBaseService):
                 if content["_id"] not in seen_ids and len(selected_contents) < 6:
                     selected_contents.append(content)
                     seen_ids.add(content["_id"])
+
+            if prefer_types:
+                for ptype in prefer_types:
+                    if len(selected_contents) >= 6:
+                        break
+                    if any(c.get("content_type") == ptype for c in selected_contents):
+                        continue
+                    cand = next((c for c in original_contents if c.get("content_type") == ptype), None)
+                    if cand and cand["_id"] not in seen_ids:
+                        selected_contents.append(cand)
+                        seen_ids.add(cand["_id"])
             
             # PASO 10: REGLA DE BALANCE #4 - Incluir contenido evaluativo
             if evaluative_contents and len(selected_contents) < 6:
@@ -1324,15 +1348,20 @@ class FastVirtualModuleGenerator(VerificationBaseService):
                 if eval_content["_id"] not in seen_ids:
                     selected_contents.append(eval_content)
                     logging.debug(f"Agregado contenido evaluativo: {eval_content.get('content_type')}")
-            
+
             # PASO 11: REGLA DE BALANCE #5 - Garantizar mínimo 3 contenidos
             if len(selected_contents) < 3:
-                remaining_contents = [c for c in original_contents 
+                remaining_contents = [c for c in original_contents
                                     if c["_id"] not in seen_ids]
                 needed = 3 - len(selected_contents)
                 for content in remaining_contents[:needed]:
                     selected_contents.append(content)
                     logging.debug(f"Agregado contenido de relleno: {content.get('content_type')}")
+
+            if avoid_types:
+                filtered_sel = [c for c in selected_contents if c.get("content_type") not in avoid_types]
+                if filtered_sel:
+                    selected_contents = filtered_sel
             
             # PASO 12: Validación final del balance
             final_types = [c.get('content_type') for c in selected_contents]
@@ -2636,7 +2665,7 @@ class OptimizedQueueService(VerificationBaseService):
             generated_topics = []
             for topic in topics_to_generate:
                 success, virtual_topic_id, topic_order = self._generate_single_virtual_topic(
-                    topic, virtual_module_id, student_id, cognitive_profile
+                    topic, virtual_module_id, student_id, cognitive_profile, preferences=None
                 )
                 if success:
                     generated_topics.append({
@@ -2661,7 +2690,7 @@ class OptimizedQueueService(VerificationBaseService):
             return {"error": f"Error interno: {str(e)}"}
     
     def _generate_single_virtual_topic(self, original_topic: Dict, virtual_module_id: str,
-                                     student_id: str, cognitive_profile: Dict) -> Tuple[bool, str, int]:
+                                     student_id: str, cognitive_profile: Dict, preferences: Dict = None) -> Tuple[bool, str, int]:
         """
         Genera un único tema virtual optimizado.
         """
@@ -2702,7 +2731,8 @@ class OptimizedQueueService(VerificationBaseService):
                 topic_id=str(original_topic["_id"]),
                 virtual_topic_id=virtual_topic_id,
                 cognitive_profile=cognitive_profile,
-                student_id=student_id
+                student_id=student_id,
+                preferences=preferences
             )
             
             logging.info(f"Tema virtual generado: {virtual_topic_id} ({'bloqueado' if is_locked else 'activo'})")
@@ -2951,3 +2981,67 @@ class OptimizedQueueService(VerificationBaseService):
         except Exception as e:
             logging.error(f"Error en bulk_initialize_queues: {str(e)}")
             return {"error": str(e)}
+
+
+class AdaptiveLearningService:
+    """Actualiza el perfil cognitivo basándose en resultados de contenido."""
+
+    def __init__(self):
+        self.db = get_db()
+
+    def update_profile_from_results(self, student_id: str) -> bool:
+        try:
+            results = list(self.db.content_results.find({"student_id": ObjectId(student_id)}))
+            if not results:
+                return False
+
+            stats = {}
+            for res in results:
+                vc_id = res.get("virtual_content_id")
+                if not vc_id:
+                    continue
+                vc = self.db.virtual_topic_contents.find_one({"_id": ObjectId(vc_id)})
+                if not vc:
+                    continue
+                ctype = vc.get("content_type", "unknown")
+                score = res.get("score", 0)
+                stats.setdefault(ctype, []).append(score)
+
+            if not stats:
+                return False
+
+            avg_score = {k: sum(v)/len(v) for k, v in stats.items() if v}
+
+            if len(avg_score) > 1:
+                best = max(avg_score.values())
+                worst = min(avg_score.values())
+                prefer_types = [t for t, s in avg_score.items() if s >= best * 0.9]
+                avoid_types = [t for t, s in avg_score.items() if s <= worst * 1.1 and t not in prefer_types]
+            else:
+                prefer_types = []
+                avoid_types = []
+
+            profile = self.db.cognitive_profiles.find_one({"user_id": ObjectId(student_id)})
+            if not profile:
+                return False
+
+            try:
+                import json
+                data = json.loads(profile.get("profile", "{}"))
+            except Exception:
+                data = {}
+
+            prefs = data.get("contentPreferences", {})
+            prefs["prefer_types"] = prefer_types
+            prefs["avoid_types"] = avoid_types
+            data["contentPreferences"] = prefs
+
+            self.db.cognitive_profiles.update_one(
+                {"_id": profile["_id"]},
+                {"$set": {"profile": json.dumps(data), "updated_at": datetime.now()}}
+            )
+
+            return True
+        except Exception as e:
+            logging.error(f"Error actualizando perfil cognitivo desde resultados: {str(e)}")
+            return False
