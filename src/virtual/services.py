@@ -863,20 +863,25 @@ class FastVirtualModuleGenerator(VerificationBaseService):
 
             # Limitar al lote inicial
             topics_to_generate = topics[:initial_batch_size]
+            existing_count = self.db.virtual_topics.count_documents({
+                "virtual_module_id": ObjectId(virtual_module_id)
+            })
             
             logging.info(f"Generando lote inicial de {len(topics_to_generate)} temas para el módulo virtual {virtual_module_id}. "
                          f"({len(topics) - len(topics_to_generate)} pendientes)")
 
             # Generar contenido para cada tema
-            for topic in topics_to_generate:
+            for idx, topic in enumerate(topics_to_generate):
                 try:
                     topic_id = str(topic["_id"])
+                    topic_order = existing_count + idx
                     
                     # Crear tema virtual básico
                     virtual_topic_data = {
                         "topic_id": topic_id,
                         "student_id": student_id,
                         "virtual_module_id": virtual_module_id,
+                        "order": topic_order,
                         # El modelo no incluye 'name' ni 'description', se obtienen del topic original si es necesario
                         "adaptations": {
                             "cognitive_profile": cognitive_profile,
@@ -2630,7 +2635,7 @@ class OptimizedQueueService(VerificationBaseService):
             # Generar temas faltantes
             generated_topics = []
             for topic in topics_to_generate:
-                success, virtual_topic_id = self._generate_single_virtual_topic(
+                success, virtual_topic_id, topic_order = self._generate_single_virtual_topic(
                     topic, virtual_module_id, student_id, cognitive_profile
                 )
                 if success:
@@ -2638,7 +2643,8 @@ class OptimizedQueueService(VerificationBaseService):
                         "original_topic_id": str(topic["_id"]),
                         "virtual_topic_id": virtual_topic_id,
                         "name": topic.get("name", ""),
-                        "locked": len(existing_virtual_topics) > 0  # Bloquear si no es el primero
+                        "locked": len(existing_virtual_topics) > 0,  # Bloquear si no es el primero
+                        "order": topic_order
                     })
                     existing_virtual_topics.append({"_id": ObjectId(virtual_topic_id)})
             
@@ -2654,8 +2660,8 @@ class OptimizedQueueService(VerificationBaseService):
             logging.error(f"Error manteniendo cola de temas: {str(e)}")
             return {"error": f"Error interno: {str(e)}"}
     
-    def _generate_single_virtual_topic(self, original_topic: Dict, virtual_module_id: str, 
-                                     student_id: str, cognitive_profile: Dict) -> Tuple[bool, str]:
+    def _generate_single_virtual_topic(self, original_topic: Dict, virtual_module_id: str,
+                                     student_id: str, cognitive_profile: Dict) -> Tuple[bool, str, int]:
         """
         Genera un único tema virtual optimizado.
         """
@@ -2665,6 +2671,7 @@ class OptimizedQueueService(VerificationBaseService):
                 "virtual_module_id": ObjectId(virtual_module_id)
             })
             is_locked = existing_count > 0  # Solo el primer tema está desbloqueado
+            topic_order = existing_count
             
             # Crear tema virtual
             virtual_topic_data = {
@@ -2678,6 +2685,7 @@ class OptimizedQueueService(VerificationBaseService):
                     "difficulty_adjustment": self._calculate_difficulty_adjustment(cognitive_profile),
                     "personalization_applied": True
                 },
+                "order": topic_order,
                 "status": "locked" if is_locked else "active",
                 "locked": is_locked,
                 "progress": 0.0,
@@ -2698,11 +2706,11 @@ class OptimizedQueueService(VerificationBaseService):
             )
             
             logging.info(f"Tema virtual generado: {virtual_topic_id} ({'bloqueado' if is_locked else 'activo'})")
-            return True, virtual_topic_id
+            return True, virtual_topic_id, topic_order
             
         except Exception as e:
             logging.error(f"Error generando tema virtual individual: {str(e)}")
-            return False, str(e)
+            return False, str(e), -1
     
     def _calculate_difficulty_adjustment(self, cognitive_profile: Dict) -> float:
         """

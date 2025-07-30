@@ -523,18 +523,19 @@ def generate_virtual_topics(module_id: str, student_id: str, virtual_module_id: 
     Genera temas virtuales para un módulo. Función auxiliar separada para procesamiento asincrónico.
     """
     try:
-        # Obtener temas del módulo que estén publicados
+        # Obtener temas del módulo ordenados por 'order' o fecha de creación
         topics = list(get_db().topics.find({
             "module_id": ObjectId(module_id),
             "published": True
-        }))
+        }).sort([("order", 1), ("created_at", 1)]))
         
         if not topics:
             logging.warning(f"No se encontraron temas publicados para el módulo {module_id}. El módulo virtual se generará sin temas.")
             return True
         
-        for topic in topics:
+        for idx, topic in enumerate(topics):
             topic_id = str(topic["_id"])
+            is_locked = idx > 0
             
             # Verificar si ya existe un tema virtual para este estudiante y tema
             existing = get_db().virtual_topics.find_one({
@@ -551,15 +552,18 @@ def generate_virtual_topics(module_id: str, student_id: str, virtual_module_id: 
             }
             
             if existing:
-                # Actualizar tema existente
+                # Actualizar tema existente con el nuevo orden
                 get_db().virtual_topics.update_one(
                     {"_id": existing["_id"]},
                     {"$set": {
                         "adaptations": adaptations,
+                        "order": idx,
+                        "locked": is_locked,
+                        "status": "locked" if is_locked else "active",
                         "updated_at": datetime.now()
                     }}
                 )
-                
+
                 virtual_topic_id = existing["_id"]
             else:
                 # Crear nuevo tema virtual
@@ -569,13 +573,15 @@ def generate_virtual_topics(module_id: str, student_id: str, virtual_module_id: 
                     "virtual_module_id": ObjectId(virtual_module_id),
                     "name": topic.get("name"),
                     "adaptations": adaptations,
-                    "status": "active",
+                    "order": idx,
+                    "locked": is_locked,
+                    "status": "locked" if is_locked else "active",
                     "created_at": datetime.now(),
                     "updated_at": datetime.now(),
                     "progress": 0.0,
                     "completion_status": "not_started"
                 })
-                
+
                 virtual_topic_id = result.inserted_id
                 
             # Generar contenido personalizado para el tema
