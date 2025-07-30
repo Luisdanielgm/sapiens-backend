@@ -6,7 +6,14 @@ from bson import ObjectId
 from datetime import datetime
 import logging
 
-from .services import VirtualModuleService, VirtualTopicService, ServerlessQueueService, FastVirtualModuleGenerator, ContentChangeDetector
+from .services import (
+    VirtualModuleService,
+    VirtualTopicService,
+    ServerlessQueueService,
+    FastVirtualModuleGenerator,
+    ContentChangeDetector,
+    AdaptiveLearningService,
+)
 from src.content.models import ContentTypes, LearningMethodologyTypes
 from src.study_plans.services import TopicService
 
@@ -267,10 +274,21 @@ def generate_virtual_modules():
             )
             
         cognitive_profile = student.get("cognitive_profile", {})
+        stored_preferences = {}
+        try:
+            profile_str = cognitive_profile.get("profile")
+            if profile_str and isinstance(profile_str, str):
+                import json
+                profile_json = json.loads(profile_str)
+                stored_preferences = profile_json.get("contentPreferences", {})
+        except Exception:
+            stored_preferences = {}
         
         # 5. Obtener perfil cognitivo personalizado si existe en opciones adaptativas
         if adaptive_options.get("cognitive_profile"):
             cognitive_profile = {**cognitive_profile, **adaptive_options.get("cognitive_profile")}
+
+        preferences = {**stored_preferences, **preferences}
             
         # 6. Comenzar generación de módulos virtuales
         # Determinar módulos a generar: si viene `module_id`, filtrar solo ese;
@@ -585,7 +603,7 @@ def generate_virtual_topics(module_id: str, student_id: str, virtual_module_id: 
                 virtual_topic_id = result.inserted_id
                 
             # Generar contenido personalizado para el tema
-            generate_personalized_content(topic_id, str(virtual_topic_id), cognitive_profile)
+            generate_personalized_content(topic_id, str(virtual_topic_id), cognitive_profile, student_id, preferences)
             
         return True
     except Exception as e:
@@ -623,106 +641,56 @@ def calculate_difficulty_adjustment(topic: dict, cognitive_profile: dict) -> dic
         "adjustment_factor": adjustment
     }
 
-def generate_personalized_content(topic_id: str, virtual_topic_id: str, cognitive_profile: dict):
+def generate_personalized_content(topic_id: str, virtual_topic_id: str, cognitive_profile: dict, student_id: str, preferences: dict = None):
     """
     Genera contenido personalizado para un tema virtual.
     """
     try:
-        # Obtener tema original
         topic = get_db().topics.find_one({"_id": ObjectId(topic_id)})
         if not topic:
             return False
-            
-        # Obtener recomendaciones de tipo de contenido según perfil
-        content_types = []
-        
-        # Determinar tipos de contenido según perfil
-        if cognitive_profile.get("visual_strength", 0) > 0.6:
-            content_types.extend([ContentTypes.DIAGRAM, ContentTypes.INFOGRAPHIC, ContentTypes.MINDMAP])
-            
-        if cognitive_profile.get("auditory_strength", 0) > 0.6:
-            content_types.extend([ContentTypes.AUDIO, ContentTypes.NARRATED_PRESENTATION])
-            
-        if cognitive_profile.get("read_write_strength", 0) > 0.6:
-            content_types.extend([ContentTypes.TEXT, ContentTypes.SUMMARY, ContentTypes.FEYNMAN])
-            
-        if cognitive_profile.get("kinesthetic_strength", 0) > 0.6:
-            content_types.extend([ContentTypes.SIMULATION, ContentTypes.GAME, ContentTypes.INTERACTIVE_EXERCISE])
-            
-        # Adaptaciones específicas
-        if cognitive_profile.get("adhd", False):
-            content_types.extend([ContentTypes.INTERACTIVE_EXERCISE, ContentTypes.GAME, ContentTypes.MINDMAP])
-            
-        if cognitive_profile.get("dyslexia", False):
-            content_types.extend([ContentTypes.AUDIO, ContentTypes.DIAGRAM, ContentTypes.MINDMAP])
-            
-        # Seleccionar tipos de contenido (eliminar duplicados)
-        content_types = list(set(content_types))
-        
-        # Si no hay suficientes tipos, añadir los básicos
-        if len(content_types) < 3:
-            content_types.extend([ContentTypes.TEXT, ContentTypes.DIAGRAM, ContentTypes.SUMMARY])
-            content_types = list(set(content_types))
-            
-        # Obtener contenido existente para este tema
+
+        virtual_topic = get_db().virtual_topics.find_one({"_id": ObjectId(virtual_topic_id)})
+        if not virtual_topic:
+            return False
+
         existing_contents = list(get_db().topic_contents.find({
             "topic_id": ObjectId(topic_id),
-            "status": {"$in": ["draft", "active", "published"]}
+            "status": {"$in": ["draft", "active", "published", "approved"]}
         }))
-        
-        # Usar contenido existente o generar nuevo
-        for content_type in content_types[:5]:  # Limitamos a 5 tipos principales
-            # Buscar si ya existe este tipo de contenido
-            matching_content = next((c for c in existing_contents if c.get("content_type") == content_type), None)
-            
-            # Manejo especial para diagramas: solo vincular si existe y no crear nuevos
-            if content_type == ContentTypes.DIAGRAM:
-                if matching_content:
-                    # Vincular contenido existente al tema virtual
-                    get_db().virtual_topic_contents.insert_one({
-                        "virtual_topic_id": ObjectId(virtual_topic_id),
-                        "content_id": matching_content["_id"],
-                        "created_at": datetime.now(),
-                        "access_count": 0,
-                        "last_accessed": None
-                    })
-                continue
 
-            if matching_content:
-                # Vincular contenido existente al tema virtual
+        selected_contents = fast_generator._select_personalized_contents(existing_contents, cognitive_profile, preferences or {})
+        if not selected_contents:
+            selected_contents = existing_contents[:3]
+
+        for content in selected_contents:
+            try:
+                personalization_data = fast_generator._generate_content_personalization(content, cognitive_profile)
                 get_db().virtual_topic_contents.insert_one({
                     "virtual_topic_id": ObjectId(virtual_topic_id),
-                    "content_id": matching_content["_id"],
-                    "created_at": datetime.now(),
-                    "access_count": 0,
-                    "last_accessed": None
-                })
-            else:
-                # Crear nuevo contenido para este tipo
-                # Esto sería más sofisticado en producción, posiblemente usando IA
-                new_content = {
-                    "topic_id": ObjectId(topic_id),
-                    "content_type": content_type,
-                    "content": f"Contenido personalizado generado para {topic.get('name')} usando formato {content_type}",
-                    "learning_methodologies": [],
+                    "content_id": content["_id"],
+                    "student_id": ObjectId(student_id),
+                    "content_type": content.get("content_type", "unknown"),
+                    "content": content.get("content", ""),
+                    "personalization_data": personalization_data,
+                    "interaction_tracking": {
+                        "access_count": 0,
+                        "total_time_spent": 0,
+                        "last_accessed": None,
+                        "completion_status": "not_started",
+                        "completion_percentage": 0.0,
+                        "sessions": 0,
+                        "best_score": None,
+                        "avg_score": None,
+                        "interactions": []
+                    },
                     "status": "active",
                     "created_at": datetime.now(),
-                    "updated_at": datetime.now(),
-                    "ai_credits": True
-                }
-                
-                # Insertar nuevo contenido
-                content_result = get_db().topic_contents.insert_one(new_content)
-                
-                # Vincular al tema virtual
-                get_db().virtual_topic_contents.insert_one({
-                    "virtual_topic_id": ObjectId(virtual_topic_id),
-                    "content_id": content_result.inserted_id,
-                    "created_at": datetime.now(),
-                    "access_count": 0,
-                    "last_accessed": None
+                    "updated_at": datetime.now()
                 })
-        
+            except Exception as c_err:
+                logging.error(f"Error creando contenido virtual para {content.get('_id')}: {c_err}")
+
         return True
     except Exception as e:
         logging.error(f"Error al generar contenido personalizado: {str(e)}")
@@ -858,7 +826,14 @@ def update_module_progress(module_id):
             "resources_viewed": activity_data.get("resources_viewed", 0),
             "activities_completed": activity_data.get("activities_completed", 0)
         }
-        
+
+        if completion_status == "completed":
+            try:
+                from src.virtual.services import AdaptiveLearningService
+                AdaptiveLearningService().update_profile_from_results(str(student_id))
+            except Exception as profile_err:
+                logging.warning(f"Error actualizando perfil adaptativo: {profile_err}")
+
         return APIRoute.success(
             data={
                 "module_id": module_id,
