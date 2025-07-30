@@ -1124,6 +1124,7 @@ class EvaluationService(VerificationBaseService):
             # Opciones de evaluación avanzada
             evaluation_dict["use_quiz_score"] = evaluation_data.get("use_quiz_score", False)
             evaluation_dict["requires_submission"] = evaluation_data.get("requires_submission", False)
+            evaluation_dict["auto_grading"] = evaluation_data.get("auto_grading", False)
             if "linked_quiz_id" in evaluation_data:
                 evaluation_dict["linked_quiz_id"] = evaluation_data.get("linked_quiz_id")
             
@@ -1169,6 +1170,9 @@ class EvaluationService(VerificationBaseService):
             # Manejo de linked_quiz_id para actualización de evaluación
             if 'linked_quiz_id' in update_data and isinstance(update_data['linked_quiz_id'], str):
                 update_data['linked_quiz_id'] = ObjectId(update_data['linked_quiz_id'])
+
+            if 'auto_grading' in update_data:
+                update_data['auto_grading'] = bool(update_data['auto_grading'])
 
             # ---- Inicio: Manejo de due_date en actualización ----
             if 'due_date' in update_data:
@@ -1224,14 +1228,51 @@ class EvaluationService(VerificationBaseService):
             evaluation = self.collection.find_one({"_id": ObjectId(evaluation_id)})
             if not evaluation:
                 return None
-            
+
             # Convertir ObjectId a string
             evaluation['_id'] = str(evaluation['_id'])
             evaluation['module_id'] = str(evaluation['module_id'])
-            
+
             return evaluation
         except Exception as e:
             return None
+
+    def get_evaluations_by_module(self, module_id: str) -> List[Dict]:
+        """Lista todas las evaluaciones de un módulo."""
+        try:
+            evaluations = list(self.collection.find({"module_id": ObjectId(module_id)}))
+            for ev in evaluations:
+                ev["_id"] = str(ev["_id"])
+                ev["module_id"] = str(ev["module_id"])
+            return evaluations
+        except Exception:
+            return []
+
+    def get_evaluations_status_for_student(self, module_id: str, student_id: str) -> List[Dict]:
+        """Obtiene evaluaciones del módulo con estado para un estudiante."""
+        try:
+            evaluations = self.get_evaluations_by_module(module_id)
+            db = get_db()
+            results = []
+            for ev in evaluations:
+                submission = db.evaluation_submissions.find_one({
+                    "evaluation_id": ObjectId(ev["_id"]),
+                    "student_id": student_id
+                })
+
+                status = {
+                    "evaluation": ev,
+                    "submitted": submission is not None,
+                    "submitted_at": submission.get("updated_at") if submission else None,
+                    "grade": submission.get("grade") if submission else None,
+                    "feedback": submission.get("feedback") if submission else None
+                }
+
+                results.append(status)
+
+            return results
+        except Exception:
+            return []
     
     def record_result(self, result_data: dict) -> Tuple[bool, str]:
         """
@@ -2787,6 +2828,21 @@ class EvaluationResourceService(VerificationBaseService):
         except Exception as e:
             log_error(f"Error al eliminar vinculación recurso {resource_id} evaluación {evaluation_id}: {str(e)}")
             return False, str(e)
+
+
+class AutomaticGradingService:
+    """Servicio simple para corrección automática de entregas."""
+
+    def grade_submission(self, resource_id: str, evaluation_id: str) -> Dict:
+        """Genera una calificación simulada para la entrega."""
+        try:
+            return {
+                "grade": 100.0,
+                "feedback": "Calificado automáticamente",
+                "graded_at": datetime.now()
+            }
+        except Exception:
+            return {"grade": 100.0, "feedback": "Auto"}
 
 class TopicReadinessService(VerificationBaseService):
     """
