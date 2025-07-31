@@ -127,6 +127,146 @@ class VirtualGenerationTask:
             "estimated_duration": self.estimated_duration
         }
 
+class ParallelContentGenerationTask:
+    """
+    Modelo para tareas de generación paralela de contenido (Fase 2B).
+    Soporta múltiples proveedores de IA, balanceador de carga y fallback.
+    """
+    def __init__(self,
+                 student_id: str,
+                 virtual_topic_id: str,
+                 content_type: str,
+                 task_type: str = "generate",  # "generate", "enhance", "translate"
+                 priority: int = 5,
+                 status: str = "pending",
+                 ai_providers: Optional[List[str]] = None,
+                 primary_provider: Optional[str] = None,
+                 fallback_providers: Optional[List[str]] = None,
+                 attempts_per_provider: Optional[Dict[str, int]] = None,
+                 max_attempts_per_provider: int = 2,
+                 payload: Optional[Dict] = None,
+                 generation_config: Optional[Dict] = None):
+        self.student_id = ObjectId(student_id)
+        self.virtual_topic_id = ObjectId(virtual_topic_id)
+        self.content_type = content_type
+        self.task_type = task_type
+        self.priority = priority  # 1 = más alta, 10 = más baja
+        self.status = status  # pending, processing, completed, failed, retrying
+        
+        # Configuración de proveedores de IA
+        self.ai_providers = ai_providers or ["openai", "anthropic", "gemini"]
+        self.primary_provider = primary_provider or "openai"
+        self.fallback_providers = fallback_providers or ["anthropic", "gemini"]
+        self.current_provider = self.primary_provider
+        
+        # Control de intentos por proveedor
+        self.attempts_per_provider = attempts_per_provider or {}
+        self.max_attempts_per_provider = max_attempts_per_provider
+        self.total_attempts = 0
+        
+        # Datos de la tarea
+        self.payload = payload or {}
+        self.generation_config = generation_config or {}
+        
+        # Metadatos de ejecución
+        self.created_at = datetime.now()
+        self.processing_started_at = None
+        self.completed_at = None
+        self.last_attempt_at = None
+        
+        # Resultados y errores
+        self.result_data = None
+        self.error_history = []  # Lista de errores por proveedor
+        self.performance_metrics = {}  # Métricas de rendimiento por proveedor
+        
+        # Estimaciones
+        self.estimated_duration = 45  # segundos estimados para generación paralela
+        self.actual_duration = None
+        
+    def to_dict(self) -> dict:
+        return {
+            "student_id": self.student_id,
+            "virtual_topic_id": self.virtual_topic_id,
+            "content_type": self.content_type,
+            "task_type": self.task_type,
+            "priority": self.priority,
+            "status": self.status,
+            "ai_providers": self.ai_providers,
+            "primary_provider": self.primary_provider,
+            "fallback_providers": self.fallback_providers,
+            "current_provider": self.current_provider,
+            "attempts_per_provider": self.attempts_per_provider,
+            "max_attempts_per_provider": self.max_attempts_per_provider,
+            "total_attempts": self.total_attempts,
+            "payload": self.payload,
+            "generation_config": self.generation_config,
+            "created_at": self.created_at,
+            "processing_started_at": self.processing_started_at,
+            "completed_at": self.completed_at,
+            "last_attempt_at": self.last_attempt_at,
+            "result_data": self.result_data,
+            "error_history": self.error_history,
+            "performance_metrics": self.performance_metrics,
+            "estimated_duration": self.estimated_duration,
+            "actual_duration": self.actual_duration
+        }
+    
+    def get_next_provider(self) -> Optional[str]:
+        """
+        Obtiene el siguiente proveedor a intentar basado en intentos y disponibilidad.
+        """
+        # Verificar si el proveedor actual aún tiene intentos disponibles
+        current_attempts = self.attempts_per_provider.get(self.current_provider, 0)
+        if current_attempts < self.max_attempts_per_provider:
+            return self.current_provider
+        
+        # Buscar en proveedores de fallback
+        for provider in self.fallback_providers:
+            provider_attempts = self.attempts_per_provider.get(provider, 0)
+            if provider_attempts < self.max_attempts_per_provider:
+                self.current_provider = provider
+                return provider
+        
+        # No hay más proveedores disponibles
+        return None
+    
+    def record_attempt(self, provider: str, success: bool, error_message: str = None, duration: float = None):
+        """
+        Registra un intento de generación con un proveedor específico.
+        """
+        # Incrementar contador de intentos
+        self.attempts_per_provider[provider] = self.attempts_per_provider.get(provider, 0) + 1
+        self.total_attempts += 1
+        self.last_attempt_at = datetime.now()
+        
+        # Registrar error si falló
+        if not success and error_message:
+            self.error_history.append({
+                "provider": provider,
+                "error": error_message,
+                "timestamp": datetime.now(),
+                "attempt_number": self.attempts_per_provider[provider]
+            })
+        
+        # Registrar métricas de rendimiento
+        if provider not in self.performance_metrics:
+            self.performance_metrics[provider] = {
+                "total_attempts": 0,
+                "successful_attempts": 0,
+                "average_duration": 0,
+                "durations": []
+            }
+        
+        metrics = self.performance_metrics[provider]
+        metrics["total_attempts"] += 1
+        
+        if success:
+            metrics["successful_attempts"] += 1
+        
+        if duration is not None:
+            metrics["durations"].append(duration)
+            metrics["average_duration"] = sum(metrics["durations"]) / len(metrics["durations"])
+
 class VirtualTopicContent:
     def __init__(self,
                  virtual_topic_id: str,

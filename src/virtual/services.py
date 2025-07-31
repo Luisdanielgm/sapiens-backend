@@ -1106,6 +1106,7 @@ class FastVirtualModuleGenerator(VerificationBaseService):
     def _generate_topic_contents_for_sync(self, topic_id: str, virtual_topic_id: str, cognitive_profile: Dict, student_id: str, preferences: Dict = None):
         """
         Genera contenidos virtuales personalizados para un tema específico durante sincronización.
+        Integrado con sistema de generación paralela para Fase 2B.
         
         Args:
             topic_id: ID del tema original
@@ -1132,44 +1133,186 @@ class FastVirtualModuleGenerator(VerificationBaseService):
                 # Como fallback, usar los primeros 3 contenidos disponibles
                 selected_contents = original_contents[:3]
             
-            # Crear VirtualTopicContent para cada contenido seleccionado
-            for content in selected_contents:
-                try:
-                    # Generar adaptaciones específicas para este contenido
-                    personalization_data = self._generate_content_personalization(content, cognitive_profile)
-                    
-                    virtual_content_data = {
-                        "virtual_topic_id": ObjectId(virtual_topic_id),
-                        "content_id": content["_id"],
-                        "student_id": ObjectId(student_id),
-                        "content_type": content.get("content_type", "unknown"),
-                        "content": content.get("content", ""),
-                        "personalization_data": personalization_data,
-                        "interaction_tracking": {
-                            "access_count": 0,
-                            "total_time_spent": 0,
-                            "last_accessed": None,
-                            "completion_status": "not_started",
-                            "completion_percentage": 0.0,
-                            "sessions": 0,
-                            "best_score": None,
-                            "avg_score": None,
-                            "interactions": []
-                        },
-                        "status": "active",
-                        "created_at": datetime.now(),
-                        "updated_at": datetime.now()
-                    }
-                    
-                    # Insertar contenido virtual
-                    result = self.db.virtual_topic_contents.insert_one(virtual_content_data)
-                    logging.debug(f"Contenido virtual personalizado creado: {result.inserted_id} para tema {virtual_topic_id}")
-                    
-                except Exception as e_content:
-                    logging.error(f"Error creando contenido virtual para {content.get('_id')}: {e_content}")
+            # Verificar si usar generación paralela
+            use_parallel_generation = self._should_use_parallel_generation(cognitive_profile)
+            
+            if use_parallel_generation:
+                logging.info(f"Usando generación paralela para tema {virtual_topic_id}")
+                self._generate_contents_with_parallel_system(
+                    virtual_topic_id, student_id, selected_contents, cognitive_profile
+                )
+            else:
+                logging.info(f"Usando generación tradicional para tema {virtual_topic_id}")
+                self._generate_contents_traditional(
+                    virtual_topic_id, student_id, selected_contents, cognitive_profile
+                )
             
         except Exception as e:
             logging.error(f"Error en _generate_topic_contents_for_sync: {str(e)}")
+    
+    def _should_use_parallel_generation(self, cognitive_profile: Dict) -> bool:
+        """
+        Determina si usar generación paralela basado en el perfil cognitivo y configuración.
+        """
+        # Extraer datos del perfil
+        profile_str = cognitive_profile.get("profile", "{}")
+        profile_data = {}
+        if isinstance(profile_str, str):
+            try:
+                import json
+                profile_data = json.loads(profile_str)
+            except json.JSONDecodeError:
+                pass
+        
+        # Criterios para usar generación paralela
+        criteria = {
+            "has_adaptive_analysis": profile_data.get("contentPreferences", {}).get("content_analysis") is not None,
+            "complex_learning_needs": (
+                "tda" in profile_data.get("diagnosis", "").lower() or 
+                "dislexia" in profile_data.get("diagnosis", "").lower() or
+                len(profile_data.get("cognitiveDifficulties", [])) > 1
+            ),
+            "high_engagement_potential": (
+                profile_data.get("learningStyle", {}).get("kinesthetic", 0) > 60 or
+                profile_data.get("learningStyle", {}).get("visual", 0) > 70
+            ),
+            "parallel_system_enabled": True  # Configuración global
+        }
+        
+        # Usar generación paralela si se cumplen al menos 2 criterios
+        criteria_met = sum(criteria.values())
+        use_parallel = criteria_met >= 2
+        
+        logging.info(f"Criterios para generación paralela: {criteria_met}/4 - Usar paralela: {use_parallel}")
+        return use_parallel
+    
+    def _generate_contents_with_parallel_system(self, virtual_topic_id: str, student_id: str, 
+                                              selected_contents: List[Dict], cognitive_profile: Dict):
+        """
+        Genera contenidos usando el sistema de generación paralela.
+        """
+        try:
+            # Inicializar servicio de generación paralela
+            parallel_service = ParallelContentGenerationService()
+            
+            # Crear tareas paralelas para cada contenido
+            parallel_tasks = []
+            for content in selected_contents:
+                content_type = content.get("content_type", "unknown")
+                
+                # Configuración de generación personalizada
+                generation_config = {
+                    "cognitive_profile": cognitive_profile,
+                    "original_content": content,
+                    "personalization_level": "high",
+                    "quality_threshold": 0.8,
+                    "content_id": str(content["_id"])
+                }
+                
+                # Crear tarea paralela
+                task_id = parallel_service.create_parallel_task(
+                    student_id=student_id,
+                    virtual_topic_id=virtual_topic_id,
+                    content_type=content_type,
+                    task_type="generate",
+                    priority=self._calculate_content_priority(content_type),
+                    generation_config=generation_config
+                )
+                
+                parallel_tasks.append({
+                    "task_id": task_id,
+                    "content_type": content_type,
+                    "original_content": content
+                })
+            
+            # Procesar tareas paralelas
+            successful_generations = 0
+            for task_info in parallel_tasks:
+                success = parallel_service.process_parallel_task(task_info["task_id"])
+                
+                if success:
+                    successful_generations += 1
+                    logging.info(f"Generación paralela exitosa: {task_info['content_type']}")
+                else:
+                    # Fallback a generación tradicional
+                    logging.warning(f"Fallback a generación tradicional para {task_info['content_type']}")
+                    self._create_traditional_virtual_content(
+                        virtual_topic_id, student_id, task_info["original_content"], cognitive_profile
+                    )
+            
+            logging.info(f"Generación paralela completada: {successful_generations}/{len(parallel_tasks)} exitosas")
+            
+        except Exception as e:
+            logging.error(f"Error en generación paralela: {str(e)}")
+            # Fallback completo a generación tradicional
+            self._generate_contents_traditional(virtual_topic_id, student_id, selected_contents, cognitive_profile)
+    
+    def _generate_contents_traditional(self, virtual_topic_id: str, student_id: str, 
+                                     selected_contents: List[Dict], cognitive_profile: Dict):
+        """
+        Genera contenidos usando el método tradicional.
+        """
+        for content in selected_contents:
+            self._create_traditional_virtual_content(virtual_topic_id, student_id, content, cognitive_profile)
+    
+    def _create_traditional_virtual_content(self, virtual_topic_id: str, student_id: str, 
+                                          content: Dict, cognitive_profile: Dict):
+        """
+        Crea contenido virtual usando el método tradicional.
+        """
+        try:
+            # Generar adaptaciones específicas para este contenido
+            personalization_data = self._generate_content_personalization(content, cognitive_profile)
+            
+            virtual_content_data = {
+                "virtual_topic_id": ObjectId(virtual_topic_id),
+                "content_id": content["_id"],
+                "student_id": ObjectId(student_id),
+                "content_type": content.get("content_type", "unknown"),
+                "content": content.get("content", ""),
+                "personalization_data": personalization_data,
+                "interaction_tracking": {
+                    "access_count": 0,
+                    "total_time_spent": 0,
+                    "last_accessed": None,
+                    "completion_status": "not_started",
+                    "completion_percentage": 0.0,
+                    "sessions": 0,
+                    "best_score": None,
+                    "avg_score": None,
+                    "interactions": []
+                },
+                "status": "active",
+                "created_at": datetime.now(),
+                "updated_at": datetime.now()
+            }
+            
+            # Insertar contenido virtual
+            result = self.db.virtual_topic_contents.insert_one(virtual_content_data)
+            logging.debug(f"Contenido virtual tradicional creado: {result.inserted_id} para tema {virtual_topic_id}")
+            
+        except Exception as e_content:
+            logging.error(f"Error creando contenido virtual tradicional para {content.get('_id')}: {e_content}")
+    
+    def _calculate_content_priority(self, content_type: str) -> int:
+        """
+        Calcula la prioridad de generación basada en el tipo de contenido.
+        """
+        priority_map = {
+            "text": 1,           # Alta prioridad - contenido textual base
+            "slides": 1,         # Alta prioridad - presentaciones
+            "video": 2,          # Media-alta prioridad - contenido multimedia
+            "quiz": 2,           # Media-alta prioridad - evaluaciones
+            "exam": 2,           # Media-alta prioridad - exámenes
+            "diagram": 3,        # Media prioridad - contenido visual
+            "infographic": 3,    # Media prioridad - infografías
+            "game": 4,           # Media-baja prioridad - juegos
+            "simulation": 4,     # Media-baja prioridad - simulaciones
+            "audio": 5,          # Baja prioridad - contenido auditivo
+            "music": 5           # Baja prioridad - música
+        }
+        
+        return priority_map.get(content_type, 5)
     
     def _select_personalized_contents(self, original_contents: List[Dict], cognitive_profile: Dict, preferences: Dict = None) -> List[Dict]:
         """
@@ -1210,9 +1353,24 @@ class FastVirtualModuleGenerator(VerificationBaseService):
             has_dyslexia = "dislexia" in diagnosis_lower or "lectura" in difficulties_str or \
                            "escritura" in difficulties_str
 
+            # PASO 3.5: Obtener preferencias de contenido del perfil adaptativo (Fase 2B)
+            content_preferences = {}
+            if isinstance(profile_data, dict):
+                content_preferences = profile_data.get("contentPreferences", {})
+            
+            # Combinar preferencias del perfil adaptativo con las pasadas como parámetro
             preferences = preferences or {}
-            avoid_types = preferences.get("avoid_types", [])
-            prefer_types = preferences.get("prefer_types", [])
+            
+            # Preferencias adaptativas tienen prioridad
+            avoid_types = content_preferences.get("avoid_types", []) or preferences.get("avoid_types", [])
+            prefer_types = content_preferences.get("prefer_types", []) or preferences.get("prefer_types", [])
+            
+            # Obtener análisis detallado de contenido si está disponible
+            content_analysis = content_preferences.get("content_analysis", {})
+            
+            logging.info(f"Preferencias adaptativas - Evitar: {avoid_types}, Preferir: {prefer_types}")
+            if content_analysis:
+                logging.info(f"Análisis de contenido disponible para {len(content_analysis)} tipos")
             
             # --- FIN DE LA LÓGICA CORREGIDA ---
 
@@ -1271,36 +1429,68 @@ class FastVirtualModuleGenerator(VerificationBaseService):
                     selected_contents.extend(specific_contents[:2])
                     logging.warning("No hay contenidos completos. Usando contenidos específicos como base.")
             
-            # PASO 7: Seleccionar contenidos específicos según fortalezas VAK
+            # PASO 7: Seleccionar contenidos específicos usando análisis adaptativo (Fase 2B)
             preferred_specific = []
             
-            # Contenidos visuales (para visual > 0.6)
-            if visual_score > 0.6:
-                visual_contents = [c for c in specific_contents 
-                                if c.get("content_type") in ["diagram", "infographic", "mindmap", "chart", "illustration", "timeline"]]
-                preferred_specific.extend(visual_contents[:2])
-                logging.debug(f"Agregados {len(visual_contents[:2])} contenidos visuales")
+            # Usar análisis de preferencias si está disponible
+            if content_analysis:
+                # Ordenar tipos de contenido por puntuación de preferencia
+                sorted_preferences = sorted(content_analysis.items(), 
+                                          key=lambda x: x[1].get("preference_score", 0), 
+                                          reverse=True)
+                
+                for content_type, analysis_data in sorted_preferences:
+                    if len(preferred_specific) >= 4:  # Limitar contenidos específicos
+                        break
+                    
+                    # Buscar contenidos de este tipo preferido
+                    type_contents = [c for c in specific_contents 
+                                   if c.get("content_type") == content_type]
+                    
+                    if type_contents:
+                        # Calcular cuántos contenidos agregar basado en la puntuación
+                        preference_score = analysis_data.get("preference_score", 0)
+                        if preference_score >= 0.8:
+                            count = 2  # Alta preferencia
+                        elif preference_score >= 0.6:
+                            count = 1  # Preferencia moderada
+                        else:
+                            count = 0  # Baja preferencia, saltar
+                        
+                        if count > 0:
+                            selected_type_contents = type_contents[:count]
+                            preferred_specific.extend(selected_type_contents)
+                            logging.debug(f"Agregados {len(selected_type_contents)} contenidos de tipo '{content_type}' (score: {preference_score:.2f})")
             
-            # Contenidos auditivos (para auditory > 0.6)
-            if auditory_score > 0.6:
-                audio_contents = [c for c in specific_contents 
-                               if c.get("content_type") in ["audio", "music"]]
-                preferred_specific.extend(audio_contents[:1])
-                logging.debug(f"Agregados {len(audio_contents[:1])} contenidos auditivos")
-            
-            # Contenidos kinestésicos/interactivos (para kinesthetic > 0.6)
-            if kinesthetic_score > 0.6:
-                interactive_contents = [c for c in specific_contents 
-                                     if c.get("content_type") in ["game", "simulation", "virtual_lab", "interactive_exercise", "mini_game"]]
-                preferred_specific.extend(interactive_contents[:2])
-                logging.debug(f"Agregados {len(interactive_contents[:2])} contenidos interactivos")
-            
-            # Contenidos para lectura/escritura (para reading > 0.6)
-            if reading_writing_score > 0.6:
-                text_contents = [c for c in specific_contents 
-                               if c.get("content_type") in ["glossary", "examples", "guided_questions", "documents"]]
-                preferred_specific.extend(text_contents[:1])
-                logging.debug(f"Agregados {len(text_contents[:1])} contenidos de texto")
+            # Fallback a lógica VAK tradicional si no hay análisis adaptativo
+            else:
+                # Contenidos visuales (para visual > 0.6)
+                if visual_score > 0.6:
+                    visual_contents = [c for c in specific_contents 
+                                    if c.get("content_type") in ["diagram", "infographic", "mindmap", "chart", "illustration", "timeline"]]
+                    preferred_specific.extend(visual_contents[:2])
+                    logging.debug(f"Agregados {len(visual_contents[:2])} contenidos visuales (VAK fallback)")
+                
+                # Contenidos auditivos (para auditory > 0.6)
+                if auditory_score > 0.6:
+                    audio_contents = [c for c in specific_contents 
+                                   if c.get("content_type") in ["audio", "music"]]
+                    preferred_specific.extend(audio_contents[:1])
+                    logging.debug(f"Agregados {len(audio_contents[:1])} contenidos auditivos (VAK fallback)")
+                
+                # Contenidos kinestésicos/interactivos (para kinesthetic > 0.6)
+                if kinesthetic_score > 0.6:
+                    interactive_contents = [c for c in specific_contents 
+                                         if c.get("content_type") in ["game", "simulation", "virtual_lab", "interactive_exercise", "mini_game"]]
+                    preferred_specific.extend(interactive_contents[:2])
+                    logging.debug(f"Agregados {len(interactive_contents[:2])} contenidos interactivos (VAK fallback)")
+                
+                # Contenidos para lectura/escritura (para reading > 0.6)
+                if reading_writing_score > 0.6:
+                    text_contents = [c for c in specific_contents 
+                                   if c.get("content_type") in ["glossary", "examples", "guided_questions", "documents"]]
+                    preferred_specific.extend(text_contents[:1])
+                    logging.debug(f"Agregados {len(text_contents[:1])} contenidos de texto (VAK fallback)")
             
             # PASO 8: Adaptaciones especiales por discapacidades
             if has_adhd:
@@ -1331,16 +1521,32 @@ class FastVirtualModuleGenerator(VerificationBaseService):
                     selected_contents.append(content)
                     seen_ids.add(content["_id"])
 
+            # PASO 9.5: Aplicar boost a tipos preferidos (Fase 2B)
             if prefer_types:
+                logging.debug(f"Aplicando boost a tipos preferidos: {prefer_types}")
                 for ptype in prefer_types:
                     if len(selected_contents) >= 6:
                         break
+                    
+                    # Verificar si ya tenemos contenido de este tipo
                     if any(c.get("content_type") == ptype for c in selected_contents):
                         continue
-                    cand = next((c for c in original_contents if c.get("content_type") == ptype), None)
-                    if cand and cand["_id"] not in seen_ids:
-                        selected_contents.append(cand)
-                        seen_ids.add(cand["_id"])
+                    
+                    # Buscar contenido de este tipo preferido
+                    candidates = [c for c in original_contents 
+                                if c.get("content_type") == ptype and c["_id"] not in seen_ids]
+                    
+                    if candidates:
+                        # Si hay análisis de contenido, usar el mejor candidato
+                        if content_analysis and ptype in content_analysis:
+                            analysis_data = content_analysis[ptype]
+                            preference_score = analysis_data.get("preference_score", 0)
+                            logging.debug(f"Agregando tipo preferido '{ptype}' con score {preference_score:.2f}")
+                        
+                        selected_content = candidates[0]
+                        selected_contents.append(selected_content)
+                        seen_ids.add(selected_content["_id"])
+                        logging.debug(f"Agregado contenido preferido: {ptype}")
             
             # PASO 10: REGLA DE BALANCE #4 - Incluir contenido evaluativo
             if evaluative_contents and len(selected_contents) < 6:
@@ -1358,10 +1564,19 @@ class FastVirtualModuleGenerator(VerificationBaseService):
                     selected_contents.append(content)
                     logging.debug(f"Agregado contenido de relleno: {content.get('content_type')}")
 
+            # PASO 11.5: Aplicar filtro de tipos a evitar con validación (Fase 2B)
             if avoid_types:
+                original_count = len(selected_contents)
                 filtered_sel = [c for c in selected_contents if c.get("content_type") not in avoid_types]
-                if filtered_sel:
+                
+                # Solo aplicar filtro si no compromete el mínimo de contenidos
+                if len(filtered_sel) >= 3:
                     selected_contents = filtered_sel
+                    removed_count = original_count - len(filtered_sel)
+                    if removed_count > 0:
+                        logging.info(f"Filtrados {removed_count} contenidos de tipos evitados: {avoid_types}")
+                else:
+                    logging.warning(f"No se aplicó filtro de tipos evitados para mantener mínimo de contenidos")
             
             # PASO 12: Validación final del balance
             final_types = [c.get('content_type') for c in selected_contents]
@@ -1379,11 +1594,24 @@ class FastVirtualModuleGenerator(VerificationBaseService):
             # PASO 14: Validación final del balance con métricas
             balance_metrics = self._validate_content_balance(selected_contents, original_contents)
             
-            # Logging final con métricas de calidad
+            # Logging final con métricas de calidad (Fase 2B mejorado)
             logging.info(f"BALANCE FINAL - Contenidos personalizados: {len(selected_contents)} de {len(original_contents)} disponibles")
             logging.info(f"Tipos balanceados: {final_types}")
             logging.info(f"Score de balance: {balance_metrics['balance_score']} - Calidad: {balance_metrics['quality_level']}")
             logging.info(f"Cobertura - Completos: {balance_metrics['coverage']['complete']}, Específicos: {balance_metrics['coverage']['specific']}, Evaluativos: {balance_metrics['coverage']['evaluative']}")
+            
+            # Reportar uso de análisis adaptativo
+            if content_analysis:
+                analyzed_types = list(content_analysis.keys())
+                logging.info(f"Análisis adaptativo aplicado para tipos: {analyzed_types}")
+                
+                # Mostrar efectividad de las preferencias
+                selected_preferred = [t for t in final_types if t in prefer_types]
+                avoided_successfully = not any(t in avoid_types for t in final_types)
+                logging.info(f"Preferencias aplicadas: {len(selected_preferred)}/{len(prefer_types)} tipos preferidos incluidos")
+                logging.info(f"Tipos evitados exitosamente: {avoided_successfully}")
+            else:
+                logging.info("Usando lógica VAK tradicional (sin análisis adaptativo disponible)")
             
             # Reportar advertencias si las hay
             if balance_metrics['warnings']:
@@ -2598,7 +2826,7 @@ class OptimizedQueueService(VerificationBaseService):
     
     def maintain_topic_queue(self, virtual_module_id: str, current_progress: float = 0) -> Dict:
         """
-        Mantiene la cola de temas virtuales asegurando que siempre haya 2 temas disponibles.
+        Mantiene la cola de temas virtuales optimizada asegurando que siempre haya exactamente 2 temas por delante.
         
         Args:
             virtual_module_id: ID del módulo virtual
@@ -2620,12 +2848,12 @@ class OptimizedQueueService(VerificationBaseService):
             student = self.db.users.find_one({"_id": ObjectId(student_id)})
             cognitive_profile = student.get("cognitive_profile", {}) if student else {}
             
-            # Obtener temas virtuales existentes
+            # Obtener temas virtuales existentes ordenados por orden de creación
             existing_virtual_topics = list(self.db.virtual_topics.find({
                 "virtual_module_id": ObjectId(virtual_module_id)
-            }).sort("created_at", 1))
+            }).sort("order", 1))
             
-            # Obtener temas originales publicados
+            # Obtener temas originales publicados ordenados
             original_topics = list(self.db.topics.find({
                 "module_id": original_module_id,
                 "published": True
@@ -2634,73 +2862,115 @@ class OptimizedQueueService(VerificationBaseService):
             if not original_topics:
                 return {"error": "No hay temas publicados en el módulo original"}
             
-            # Analizar estado actual
+            # Analizar estado actual de la cola
             generated_topic_ids = {str(vt["topic_id"]) for vt in existing_virtual_topics}
             available_topics = [t for t in original_topics if str(t["_id"]) not in generated_topic_ids]
             
-            # Calcular cuántos temas deberían estar disponibles según el progreso
+            # Contar temas por estado
+            active_topics = [vt for vt in existing_virtual_topics if vt.get("status") == "active"]
+            locked_topics = [vt for vt in existing_virtual_topics if vt.get("status") == "locked"]
+            completed_topics = [vt for vt in existing_virtual_topics if vt.get("completion_status") == "completed"]
+            
+            # Lógica optimizada: mantener exactamente 2 temas por delante
             total_topics = len(original_topics)
-            topics_to_have = min(3, total_topics)  # Inicial: 3 temas (1 actual + 2 en cola)
+            current_active = len(active_topics)
+            current_locked = len(locked_topics)
             
-            # Si hay progreso, ajustar la cantidad necesaria
-            if current_progress > 0:
-                completed_topics = len([vt for vt in existing_virtual_topics 
-                                     if vt.get("completion_status") == "completed"])
-                topics_to_have = min(completed_topics + 3, total_topics)  # Mantener 2 temas por delante
+            # Calcular cuántos temas necesitamos generar
+            # Regla: 1 activo + 2 bloqueados (por delante) = 3 temas disponibles máximo
+            target_ahead = 2  # Siempre 2 temas por delante
+            target_total = min(current_active + target_ahead, total_topics)
             
-            # Determinar cuántos temas generar
-            topics_needed = max(0, topics_to_have - len(existing_virtual_topics))
-            topics_to_generate = available_topics[:topics_needed]
+            # Si no hay temas activos, generar el primero como activo
+            if current_active == 0 and len(existing_virtual_topics) == 0:
+                target_total = min(3, total_topics)  # Inicial: 1 activo + 2 bloqueados
             
-            if not topics_to_generate:
+            topics_needed = max(0, target_total - len(existing_virtual_topics))
+            
+            # Verificar si ya tenemos suficientes temas en cola
+            if topics_needed == 0 and current_locked >= target_ahead:
                 return {
-                    "status": "queue_full",
-                    "message": "Cola de temas completa",
-                    "existing_topics": len(existing_virtual_topics),
-                    "available_ahead": len(available_topics),
-                    "total_original": total_topics
+                    "status": "queue_optimal",
+                    "message": f"Cola optimizada: {current_active} activo(s), {current_locked} en cola",
+                    "active_topics": current_active,
+                    "locked_ahead": current_locked,
+                    "completed_topics": len(completed_topics),
+                    "total_generated": len(existing_virtual_topics),
+                    "remaining_original": len(available_topics)
                 }
             
-            # Generar temas faltantes
+            # Generar temas faltantes si hay disponibles
+            if not available_topics and topics_needed > 0:
+                return {
+                    "status": "queue_complete",
+                    "message": "Todos los temas originales ya fueron generados",
+                    "total_generated": len(existing_virtual_topics),
+                    "active_topics": current_active,
+                    "locked_ahead": current_locked
+                }
+            
+            # Generar temas necesarios
+            topics_to_generate = available_topics[:topics_needed]
             generated_topics = []
-            for topic in topics_to_generate:
+            
+            for i, topic in enumerate(topics_to_generate):
+                # Determinar si debe estar bloqueado (todos excepto el primero si no hay activos)
+                should_lock = not (current_active == 0 and i == 0 and len(existing_virtual_topics) == 0)
+                
                 success, virtual_topic_id, topic_order = self._generate_single_virtual_topic(
-                    topic, virtual_module_id, student_id, cognitive_profile, preferences=None
+                    topic, virtual_module_id, student_id, cognitive_profile, 
+                    preferences=None, force_lock=should_lock
                 )
+                
                 if success:
                     generated_topics.append({
                         "original_topic_id": str(topic["_id"]),
                         "virtual_topic_id": virtual_topic_id,
                         "name": topic.get("name", ""),
-                        "locked": len(existing_virtual_topics) > 0,  # Bloquear si no es el primero
-                        "order": topic_order
+                        "locked": should_lock,
+                        "order": topic_order,
+                        "status": "locked" if should_lock else "active"
                     })
-                    existing_virtual_topics.append({"_id": ObjectId(virtual_topic_id)})
+                    
+                    # Actualizar contadores locales
+                    if should_lock:
+                        current_locked += 1
+                    else:
+                        current_active += 1
             
             return {
                 "status": "success",
+                "message": f"Cola actualizada: {len(generated_topics)} temas generados",
                 "generated_topics": len(generated_topics),
-                "queue_size": len(existing_virtual_topics),
-                "topics_ahead": len(available_topics) - len(topics_to_generate),
+                "active_topics": current_active,
+                "locked_ahead": current_locked,
+                "completed_topics": len(completed_topics),
+                "total_generated": len(existing_virtual_topics) + len(generated_topics),
+                "remaining_original": len(available_topics) - len(topics_to_generate),
                 "details": generated_topics
             }
             
         except Exception as e:
-            logging.error(f"Error manteniendo cola de temas: {str(e)}")
+            logging.error(f"Error manteniendo cola de temas optimizada: {str(e)}")
             return {"error": f"Error interno: {str(e)}"}
     
     def _generate_single_virtual_topic(self, original_topic: Dict, virtual_module_id: str,
-                                     student_id: str, cognitive_profile: Dict, preferences: Dict = None) -> Tuple[bool, str, int]:
+                                     student_id: str, cognitive_profile: Dict, preferences: Dict = None, force_lock: bool = None) -> Tuple[bool, str, int]:
         """
         Genera un único tema virtual optimizado.
         """
         try:
-            # Determinar si debe estar bloqueado
+            # Determinar orden del tema
             existing_count = self.db.virtual_topics.count_documents({
                 "virtual_module_id": ObjectId(virtual_module_id)
             })
-            is_locked = existing_count > 0  # Solo el primer tema está desbloqueado
             topic_order = existing_count
+            
+            # Determinar si debe estar bloqueado
+            if force_lock is not None:
+                is_locked = force_lock
+            else:
+                is_locked = existing_count > 0  # Solo el primer tema está desbloqueado por defecto
             
             # Crear tema virtual
             virtual_topic_data = {
@@ -2983,6 +3253,439 @@ class OptimizedQueueService(VerificationBaseService):
             return {"error": str(e)}
 
 
+class ParallelContentGenerationService:
+    """
+    Servicio de generación paralela de contenido para Fase 2B.
+    Implementa múltiples proveedores de IA, balanceador de carga y fallback.
+    """
+    
+    def __init__(self):
+        self.db = get_db()
+        self.ai_providers = {
+            "openai": {
+                "name": "OpenAI GPT",
+                "endpoint": "/api/ai/openai/generate",
+                "max_concurrent": 3,
+                "timeout": 30,
+                "priority": 1,
+                "cost_per_request": 0.02,
+                "reliability_score": 0.95
+            },
+            "anthropic": {
+                "name": "Anthropic Claude",
+                "endpoint": "/api/ai/anthropic/generate",
+                "max_concurrent": 2,
+                "timeout": 35,
+                "priority": 2,
+                "cost_per_request": 0.025,
+                "reliability_score": 0.92
+            },
+            "gemini": {
+                "name": "Google Gemini",
+                "endpoint": "/api/ai/gemini/generate",
+                "max_concurrent": 4,
+                "timeout": 25,
+                "priority": 3,
+                "cost_per_request": 0.015,
+                "reliability_score": 0.88
+            }
+        }
+        self.load_balancer_stats = {}
+        self.circuit_breaker_status = {}  # Para manejar fallos de proveedores
+    
+    def create_parallel_task(self, student_id: str, virtual_topic_id: str, content_type: str, 
+                           task_type: str = "generate", priority: int = 5, 
+                           generation_config: dict = None) -> str:
+        """
+        Crea una nueva tarea de generación paralela.
+        """
+        try:
+            from .models import ParallelContentGenerationTask
+            
+            # Seleccionar proveedores basado en disponibilidad y rendimiento
+            available_providers = self._get_available_providers()
+            primary_provider = self._select_primary_provider(available_providers)
+            fallback_providers = [p for p in available_providers if p != primary_provider]
+            
+            task = ParallelContentGenerationTask(
+                student_id=student_id,
+                virtual_topic_id=virtual_topic_id,
+                content_type=content_type,
+                task_type=task_type,
+                priority=priority,
+                ai_providers=available_providers,
+                primary_provider=primary_provider,
+                fallback_providers=fallback_providers,
+                generation_config=generation_config or {}
+            )
+            
+            # Insertar en base de datos
+            result = self.db.parallel_content_generation_tasks.insert_one(task.to_dict())
+            task_id = str(result.inserted_id)
+            
+            logging.info(f"Tarea paralela creada: {task_id} - Tipo: {content_type}, Proveedor primario: {primary_provider}")
+            return task_id
+            
+        except Exception as e:
+            logging.error(f"Error creando tarea paralela: {str(e)}")
+            raise
+    
+    def process_parallel_task(self, task_id: str) -> bool:
+        """
+        Procesa una tarea de generación paralela con fallback automático.
+        """
+        try:
+            # Obtener tarea
+            task_data = self.db.parallel_content_generation_tasks.find_one({"_id": ObjectId(task_id)})
+            if not task_data:
+                logging.error(f"Tarea paralela no encontrada: {task_id}")
+                return False
+            
+            # Actualizar estado a procesando
+            self.db.parallel_content_generation_tasks.update_one(
+                {"_id": ObjectId(task_id)},
+                {"$set": {
+                    "status": "processing",
+                    "processing_started_at": datetime.now()
+                }}
+            )
+            
+            # Intentar generación con proveedores disponibles
+            success = False
+            result_data = None
+            
+            while not success:
+                # Obtener siguiente proveedor
+                current_provider = task_data.get("current_provider")
+                next_provider = self._get_next_available_provider(task_data)
+                
+                if not next_provider:
+                    logging.error(f"No hay más proveedores disponibles para tarea {task_id}")
+                    break
+                
+                # Intentar generación con el proveedor actual
+                start_time = datetime.now()
+                try:
+                    result_data = self._generate_with_provider(
+                        provider=next_provider,
+                        task_data=task_data
+                    )
+                    
+                    if result_data:
+                        success = True
+                        duration = (datetime.now() - start_time).total_seconds()
+                        
+                        # Registrar intento exitoso
+                        self._record_provider_attempt(
+                            task_id=task_id,
+                            provider=next_provider,
+                            success=True,
+                            duration=duration
+                        )
+                        
+                        logging.info(f"Generación exitosa con {next_provider} para tarea {task_id} en {duration:.2f}s")
+                    
+                except Exception as provider_error:
+                    duration = (datetime.now() - start_time).total_seconds()
+                    error_message = str(provider_error)
+                    
+                    # Registrar intento fallido
+                    self._record_provider_attempt(
+                        task_id=task_id,
+                        provider=next_provider,
+                        success=False,
+                        error_message=error_message,
+                        duration=duration
+                    )
+                    
+                    logging.warning(f"Fallo en generación con {next_provider}: {error_message}")
+                    
+                    # Actualizar circuit breaker si es necesario
+                    self._update_circuit_breaker(next_provider, False)
+            
+            # Actualizar estado final de la tarea
+            if success:
+                self.db.parallel_content_generation_tasks.update_one(
+                    {"_id": ObjectId(task_id)},
+                    {"$set": {
+                        "status": "completed",
+                        "completed_at": datetime.now(),
+                        "result_data": result_data,
+                        "actual_duration": (datetime.now() - task_data["processing_started_at"]).total_seconds()
+                    }}
+                )
+                
+                # Crear contenido virtual con el resultado
+                self._create_virtual_content_from_result(task_data, result_data)
+                
+            else:
+                self.db.parallel_content_generation_tasks.update_one(
+                    {"_id": ObjectId(task_id)},
+                    {"$set": {
+                        "status": "failed",
+                        "completed_at": datetime.now()
+                    }}
+                )
+            
+            return success
+            
+        except Exception as e:
+            logging.error(f"Error procesando tarea paralela {task_id}: {str(e)}")
+            
+            # Marcar tarea como fallida
+            self.db.parallel_content_generation_tasks.update_one(
+                {"_id": ObjectId(task_id)},
+                {"$set": {
+                    "status": "failed",
+                    "completed_at": datetime.now(),
+                    "error_message": str(e)
+                }}
+            )
+            return False
+    
+    def _get_available_providers(self) -> List[str]:
+        """
+        Obtiene lista de proveedores disponibles basado en circuit breaker.
+        """
+        available = []
+        for provider_id, config in self.ai_providers.items():
+            # Verificar circuit breaker
+            breaker_status = self.circuit_breaker_status.get(provider_id, {"is_open": False})
+            if not breaker_status.get("is_open", False):
+                available.append(provider_id)
+        
+        # Ordenar por prioridad y confiabilidad
+        available.sort(key=lambda p: (
+            self.ai_providers[p]["priority"],
+            -self.ai_providers[p]["reliability_score"]
+        ))
+        
+        return available
+    
+    def _select_primary_provider(self, available_providers: List[str]) -> str:
+        """
+        Selecciona el proveedor primario basado en balanceador de carga.
+        """
+        if not available_providers:
+            return "openai"  # Fallback por defecto
+        
+        # Implementar round-robin con peso por rendimiento
+        best_provider = available_providers[0]
+        best_score = 0
+        
+        for provider in available_providers:
+            stats = self.load_balancer_stats.get(provider, {"requests": 0, "avg_response_time": 30})
+            config = self.ai_providers[provider]
+            
+            # Calcular score basado en confiabilidad, costo y carga actual
+            reliability_score = config["reliability_score"]
+            cost_score = 1 / config["cost_per_request"]  # Menor costo = mejor score
+            load_score = 1 / (stats["requests"] + 1)  # Menor carga = mejor score
+            
+            total_score = reliability_score * 0.5 + cost_score * 0.3 + load_score * 0.2
+            
+            if total_score > best_score:
+                best_score = total_score
+                best_provider = provider
+        
+        return best_provider
+    
+    def _get_next_available_provider(self, task_data: dict) -> Optional[str]:
+        """
+        Obtiene el siguiente proveedor disponible para una tarea específica.
+        """
+        current_provider = task_data.get("current_provider")
+        attempts_per_provider = task_data.get("attempts_per_provider", {})
+        max_attempts = task_data.get("max_attempts_per_provider", 2)
+        
+        # Verificar si el proveedor actual aún tiene intentos
+        if current_provider:
+            current_attempts = attempts_per_provider.get(current_provider, 0)
+            if current_attempts < max_attempts and not self._is_circuit_breaker_open(current_provider):
+                return current_provider
+        
+        # Buscar en proveedores de fallback
+        fallback_providers = task_data.get("fallback_providers", [])
+        for provider in fallback_providers:
+            provider_attempts = attempts_per_provider.get(provider, 0)
+            if provider_attempts < max_attempts and not self._is_circuit_breaker_open(provider):
+                return provider
+        
+        return None
+    
+    def _generate_with_provider(self, provider: str, task_data: dict) -> dict:
+        """
+        Genera contenido usando un proveedor específico de IA.
+        """
+        # Simular llamada a API de IA (implementar según proveedor real)
+        import time
+        import random
+        
+        # Simular tiempo de respuesta variable
+        response_time = random.uniform(2, 8)
+        time.sleep(response_time)
+        
+        # Simular fallo ocasional para testing
+        if random.random() < 0.1:  # 10% de probabilidad de fallo
+            raise Exception(f"Error simulado del proveedor {provider}")
+        
+        # Generar contenido simulado
+        content_type = task_data.get("content_type", "text")
+        
+        result = {
+            "content": f"Contenido {content_type} generado por {provider}",
+            "provider": provider,
+            "generation_time": response_time,
+            "quality_score": random.uniform(0.7, 1.0),
+            "metadata": {
+                "model_version": f"{provider}_v2.1",
+                "tokens_used": random.randint(100, 500),
+                "confidence": random.uniform(0.8, 0.95)
+            }
+        }
+        
+        return result
+    
+    def _record_provider_attempt(self, task_id: str, provider: str, success: bool, 
+                               error_message: str = None, duration: float = None):
+        """
+        Registra un intento de generación en la tarea y actualiza estadísticas.
+        """
+        # Actualizar tarea
+        update_data = {
+            f"attempts_per_provider.{provider}": {"$inc": 1},
+            "total_attempts": {"$inc": 1},
+            "last_attempt_at": datetime.now()
+        }
+        
+        if not success and error_message:
+            update_data["error_history"] = {
+                "$push": {
+                    "provider": provider,
+                    "error": error_message,
+                    "timestamp": datetime.now()
+                }
+            }
+        
+        self.db.parallel_content_generation_tasks.update_one(
+            {"_id": ObjectId(task_id)},
+            {"$inc": {f"attempts_per_provider.{provider}": 1, "total_attempts": 1},
+             "$set": {"last_attempt_at": datetime.now()},
+             "$push": {"error_history": {
+                 "provider": provider,
+                 "error": error_message or "Success",
+                 "timestamp": datetime.now(),
+                 "success": success
+             }}}
+        )
+        
+        # Actualizar estadísticas del balanceador de carga
+        if provider not in self.load_balancer_stats:
+            self.load_balancer_stats[provider] = {
+                "requests": 0,
+                "successful_requests": 0,
+                "total_response_time": 0,
+                "avg_response_time": 0
+            }
+        
+        stats = self.load_balancer_stats[provider]
+        stats["requests"] += 1
+        
+        if success:
+            stats["successful_requests"] += 1
+        
+        if duration:
+            stats["total_response_time"] += duration
+            stats["avg_response_time"] = stats["total_response_time"] / stats["requests"]
+    
+    def _update_circuit_breaker(self, provider: str, success: bool):
+        """
+        Actualiza el estado del circuit breaker para un proveedor.
+        """
+        if provider not in self.circuit_breaker_status:
+            self.circuit_breaker_status[provider] = {
+                "is_open": False,
+                "failure_count": 0,
+                "last_failure_time": None,
+                "recovery_timeout": 300  # 5 minutos
+            }
+        
+        breaker = self.circuit_breaker_status[provider]
+        
+        if success:
+            # Reset en caso de éxito
+            breaker["failure_count"] = 0
+            breaker["is_open"] = False
+        else:
+            # Incrementar fallos
+            breaker["failure_count"] += 1
+            breaker["last_failure_time"] = datetime.now()
+            
+            # Abrir circuit breaker si hay muchos fallos
+            if breaker["failure_count"] >= 3:
+                breaker["is_open"] = True
+                logging.warning(f"Circuit breaker abierto para proveedor {provider}")
+    
+    def _is_circuit_breaker_open(self, provider: str) -> bool:
+        """
+        Verifica si el circuit breaker está abierto para un proveedor.
+        """
+        if provider not in self.circuit_breaker_status:
+            return False
+        
+        breaker = self.circuit_breaker_status[provider]
+        
+        if not breaker["is_open"]:
+            return False
+        
+        # Verificar si es tiempo de intentar recovery
+        if breaker["last_failure_time"]:
+            time_since_failure = (datetime.now() - breaker["last_failure_time"]).total_seconds()
+            if time_since_failure > breaker["recovery_timeout"]:
+                breaker["is_open"] = False
+                breaker["failure_count"] = 0
+                logging.info(f"Circuit breaker cerrado para proveedor {provider} - intentando recovery")
+                return False
+        
+        return True
+    
+    def _create_virtual_content_from_result(self, task_data: dict, result_data: dict):
+        """
+        Crea el contenido virtual a partir del resultado de la generación paralela.
+        """
+        try:
+            from .models import VirtualTopicContent
+            
+            virtual_content = VirtualTopicContent(
+                virtual_topic_id=str(task_data["virtual_topic_id"]),
+                student_id=str(task_data["student_id"]),
+                content_type=task_data["content_type"],
+                content=result_data["content"],
+                personalization_data={
+                    "generated_by_parallel_system": True,
+                    "ai_provider": result_data["provider"],
+                    "generation_time": result_data["generation_time"],
+                    "quality_score": result_data["quality_score"],
+                    "metadata": result_data["metadata"]
+                }
+            )
+            
+            self.db.virtual_topic_contents.insert_one(virtual_content.to_dict())
+            logging.info(f"Contenido virtual creado desde generación paralela: {task_data['content_type']}")
+            
+        except Exception as e:
+            logging.error(f"Error creando contenido virtual desde resultado paralelo: {str(e)}")
+    
+    def get_provider_statistics(self) -> dict:
+        """
+        Obtiene estadísticas de rendimiento de todos los proveedores.
+        """
+        return {
+            "load_balancer_stats": self.load_balancer_stats,
+            "circuit_breaker_status": self.circuit_breaker_status,
+            "provider_configs": self.ai_providers
+        }
+
 class AdaptiveLearningService:
     """Actualiza el perfil cognitivo basándose en resultados de contenido."""
 
@@ -2990,58 +3693,384 @@ class AdaptiveLearningService:
         self.db = get_db()
 
     def update_profile_from_results(self, student_id: str) -> bool:
+        """
+        Versión mejorada para Fase 2B - análisis más sofisticado de resultados.
+        Incluye análisis de tiempo, dificultad, y patrones de interacción.
+        """
         try:
-            results = list(self.db.content_results.find({"student_id": ObjectId(student_id)}))
+            # Obtener resultados recientes (últimos 30 días para mejor relevancia)
+            from datetime import timedelta
+            cutoff_date = datetime.now() - timedelta(days=30)
+            
+            results = list(self.db.content_results.find({
+                "student_id": ObjectId(student_id),
+                "created_at": {"$gte": cutoff_date}
+            }).sort("created_at", -1))
+            
             if not results:
+                # Si no hay resultados recientes, usar todos los disponibles
+                results = list(self.db.content_results.find({
+                    "student_id": ObjectId(student_id)
+                }).sort("created_at", -1).limit(100))
+            
+            if not results:
+                logging.info(f"No se encontraron resultados para estudiante {student_id}")
                 return False
 
-            stats = {}
+            # Análisis avanzado por tipo de contenido
+            content_analysis = {}
+            
             for res in results:
                 vc_id = res.get("virtual_content_id")
                 if not vc_id:
                     continue
+                    
                 vc = self.db.virtual_topic_contents.find_one({"_id": ObjectId(vc_id)})
                 if not vc:
                     continue
-                ctype = vc.get("content_type", "unknown")
+                
+                content_type = vc.get("content_type", "unknown")
+                if content_type == "unknown":
+                    continue
+                
+                # Extraer métricas del resultado
                 score = res.get("score", 0)
-                stats.setdefault(ctype, []).append(score)
+                session_data = res.get("session_data", {})
+                learning_metrics = res.get("learning_metrics", {})
+                
+                # Métricas de rendimiento
+                completion_time = session_data.get("completion_time_seconds", 0)
+                attempts = session_data.get("attempts", 1)
+                completion_percentage = session_data.get("completion_percentage", 100)
+                
+                # Métricas de engagement
+                engagement_score = learning_metrics.get("engagement_score", score)
+                difficulty_rating = learning_metrics.get("difficulty_rating", 3)  # 1-5 scale
+                
+                # Inicializar análisis para este tipo de contenido
+                if content_type not in content_analysis:
+                    content_analysis[content_type] = {
+                        "scores": [],
+                        "completion_times": [],
+                        "attempts": [],
+                        "engagement": [],
+                        "difficulty_ratings": [],
+                        "completion_rates": [],
+                        "total_interactions": 0
+                    }
+                
+                # Agregar métricas
+                analysis = content_analysis[content_type]
+                analysis["scores"].append(score)
+                analysis["completion_times"].append(completion_time)
+                analysis["attempts"].append(attempts)
+                analysis["engagement"].append(engagement_score)
+                analysis["difficulty_ratings"].append(difficulty_rating)
+                analysis["completion_rates"].append(completion_percentage)
+                analysis["total_interactions"] += 1
 
-            if not stats:
+            if not content_analysis:
+                logging.info(f"No se pudo analizar contenido para estudiante {student_id}")
                 return False
 
-            avg_score = {k: sum(v)/len(v) for k, v in stats.items() if v}
+            # Calcular métricas agregadas por tipo de contenido
+            content_preferences = {}
+            
+            for content_type, analysis in content_analysis.items():
+                if analysis["total_interactions"] < 2:  # Mínimo 2 interacciones para ser significativo
+                    continue
+                
+                # Calcular promedios
+                avg_score = sum(analysis["scores"]) / len(analysis["scores"])
+                avg_engagement = sum(analysis["engagement"]) / len(analysis["engagement"])
+                avg_completion_rate = sum(analysis["completion_rates"]) / len(analysis["completion_rates"])
+                avg_attempts = sum(analysis["attempts"]) / len(analysis["attempts"])
+                avg_difficulty = sum(analysis["difficulty_ratings"]) / len(analysis["difficulty_ratings"])
+                
+                # Calcular tiempo promedio (solo para interacciones completadas)
+                completed_times = [t for t, c in zip(analysis["completion_times"], analysis["completion_rates"]) if c >= 80]
+                avg_time = sum(completed_times) / len(completed_times) if completed_times else 0
+                
+                # Calcular puntuación de preferencia compuesta
+                # Factores: rendimiento (40%), engagement (30%), eficiencia (20%), facilidad (10%)
+                performance_score = min(avg_score / 100, 1.0)  # Normalizar a 0-1
+                engagement_score = min(avg_engagement / 100, 1.0)
+                efficiency_score = max(0, 1 - (avg_attempts - 1) * 0.2)  # Penalizar múltiples intentos
+                ease_score = max(0, (6 - avg_difficulty) / 5)  # Invertir escala de dificultad
+                
+                preference_score = (
+                    performance_score * 0.4 +
+                    engagement_score * 0.3 +
+                    efficiency_score * 0.2 +
+                    ease_score * 0.1
+                )
+                
+                content_preferences[content_type] = {
+                    "preference_score": preference_score,
+                    "avg_score": avg_score,
+                    "avg_engagement": avg_engagement,
+                    "avg_completion_rate": avg_completion_rate,
+                    "avg_attempts": avg_attempts,
+                    "avg_difficulty": avg_difficulty,
+                    "avg_time_seconds": avg_time,
+                    "total_interactions": analysis["total_interactions"]
+                }
 
-            if len(avg_score) > 1:
-                best = max(avg_score.values())
-                worst = min(avg_score.values())
-                prefer_types = [t for t, s in avg_score.items() if s >= best * 0.9]
-                avoid_types = [t for t, s in avg_score.items() if s <= worst * 1.1 and t not in prefer_types]
+            # Determinar preferencias y tipos a evitar
+            if len(content_preferences) > 1:
+                # Ordenar por puntuación de preferencia
+                sorted_prefs = sorted(content_preferences.items(), key=lambda x: x[1]["preference_score"], reverse=True)
+                
+                # Tipos preferidos: top 50% o puntuación >= 0.7
+                prefer_threshold = max(0.7, sorted_prefs[len(sorted_prefs)//2][1]["preference_score"])
+                prefer_types = [t for t, data in sorted_prefs if data["preference_score"] >= prefer_threshold]
+                
+                # Tipos a evitar: bottom 25% y puntuación < 0.4
+                avoid_threshold = min(0.4, sorted_prefs[int(len(sorted_prefs)*0.75)][1]["preference_score"])
+                avoid_types = [t for t, data in sorted_prefs if data["preference_score"] < avoid_threshold and t not in prefer_types]
+                
+                # Limitar listas para evitar extremos
+                prefer_types = prefer_types[:3]  # Máximo 3 tipos preferidos
+                avoid_types = avoid_types[:2]   # Máximo 2 tipos a evitar
             else:
                 prefer_types = []
                 avoid_types = []
 
+            # Actualizar perfil cognitivo
             profile = self.db.cognitive_profiles.find_one({"user_id": ObjectId(student_id)})
             if not profile:
+                logging.warning(f"No se encontró perfil cognitivo para estudiante {student_id}")
                 return False
 
             try:
                 import json
-                data = json.loads(profile.get("profile", "{}"))
+                profile_data = json.loads(profile.get("profile", "{}"))
             except Exception:
-                data = {}
+                profile_data = {}
 
-            prefs = data.get("contentPreferences", {})
-            prefs["prefer_types"] = prefer_types
-            prefs["avoid_types"] = avoid_types
-            data["contentPreferences"] = prefs
+            # Actualizar preferencias de contenido
+            content_prefs = profile_data.get("contentPreferences", {})
+            content_prefs.update({
+                "prefer_types": prefer_types,
+                "avoid_types": avoid_types,
+                "last_analysis_date": datetime.now().isoformat(),
+                "analysis_based_on_interactions": sum(data["total_interactions"] for data in content_preferences.values()),
+                "content_analysis": content_preferences  # Guardar análisis detallado
+            })
+            
+            profile_data["contentPreferences"] = content_prefs
 
+            # Actualizar en base de datos
             self.db.cognitive_profiles.update_one(
                 {"_id": profile["_id"]},
-                {"$set": {"profile": json.dumps(data), "updated_at": datetime.now()}}
+                {"$set": {
+                    "profile": json.dumps(profile_data),
+                    "updated_at": datetime.now()
+                }}
             )
 
+            logging.info(f"Perfil adaptativo actualizado para {student_id}: prefer={prefer_types}, avoid={avoid_types}")
             return True
+            
         except Exception as e:
             logging.error(f"Error actualizando perfil cognitivo desde resultados: {str(e)}")
             return False
+    
+    def get_content_preferences(self, student_id: str) -> dict:
+        """
+        Obtiene las preferencias de contenido actuales de un estudiante.
+        Útil para debugging y verificación.
+        """
+        try:
+            profile = self.db.cognitive_profiles.find_one({"user_id": ObjectId(student_id)})
+            if not profile:
+                return {}
+            
+            import json
+            profile_data = json.loads(profile.get("profile", "{}"))
+            return profile_data.get("contentPreferences", {})
+            
+        except Exception as e:
+            logging.error(f"Error obteniendo preferencias de contenido: {str(e)}")
+            return {}
+
+
+# Servicios adicionales para completar las Fases 2B y 3
+
+class ContentChangeDetector:
+    """
+    Detector de cambios en contenido original para sincronización inteligente.
+    """
+    
+    def __init__(self):
+        self.db = get_db()
+    
+    def detect_changes(self, module_id: str, since_date: datetime = None) -> Dict:
+        """
+        Detecta cambios en un módulo desde una fecha específica.
+        """
+        try:
+            if not since_date:
+                since_date = datetime.now() - timedelta(days=7)  # Última semana por defecto
+            
+            # Detectar cambios en temas
+            topic_changes = list(self.db.topics.find({
+                "module_id": module_id,
+                "updated_at": {"$gte": since_date}
+            }))
+            
+            # Detectar cambios en contenidos
+            content_changes = []
+            for topic in topic_changes:
+                contents = list(self.db.topic_contents.find({
+                    "topic_id": str(topic["_id"]),
+                    "updated_at": {"$gte": since_date}
+                }))
+                content_changes.extend(contents)
+            
+            return {
+                "has_changes": len(topic_changes) > 0 or len(content_changes) > 0,
+                "topic_changes": len(topic_changes),
+                "content_changes": len(content_changes),
+                "details": {
+                    "topics": [str(t["_id"]) for t in topic_changes],
+                    "contents": [str(c["_id"]) for c in content_changes]
+                }
+            }
+            
+        except Exception as e:
+            logging.error(f"Error detectando cambios: {str(e)}")
+            return {"has_changes": False, "error": str(e)}
+
+
+class FastVirtualModuleGenerator:
+    """
+    Generador rápido para sincronización y creación de módulos virtuales.
+    """
+    
+    def __init__(self):
+        self.db = get_db()
+    
+    def _generate_topic_contents_for_sync(self, topic_id: str, virtual_topic_id: str, 
+                                        cognitive_profile: Dict, student_id: str, 
+                                        preferences: Dict = None) -> bool:
+        """
+        Genera contenidos de un tema virtual para sincronización.
+        """
+        try:
+            # Obtener contenidos originales
+            original_contents = list(self.db.topic_contents.find({"topic_id": topic_id}))
+            
+            if not original_contents:
+                return True  # No hay contenidos que sincronizar
+            
+            # Generar contenidos virtuales personalizados
+            for content in original_contents:
+                virtual_content_data = {
+                    "content_id": content["_id"],
+                    "virtual_topic_id": ObjectId(virtual_topic_id),
+                    "student_id": ObjectId(student_id),
+                    "content_type": content.get("content_type", "text"),
+                    "title": content.get("title", ""),
+                    "content": content.get("content", ""),
+                    "personalization_data": {
+                        "cognitive_adaptations": cognitive_profile,
+                        "preferences_applied": preferences or {},
+                        "generated_at": datetime.now().isoformat()
+                    },
+                    "interaction_tracking": {
+                        "total_time_spent": 0,
+                        "completion_status": "not_started",
+                        "completion_percentage": 0.0,
+                        "sessions": 0,
+                        "interactions": []
+                    },
+                    "status": "active",
+                    "created_at": datetime.now(),
+                    "updated_at": datetime.now()
+                }
+                
+                self.db.virtual_topic_contents.insert_one(virtual_content_data)
+            
+            logging.info(f"Generados {len(original_contents)} contenidos para tema virtual {virtual_topic_id}")
+            return True
+            
+        except Exception as e:
+            logging.error(f"Error generando contenidos para sincronización: {str(e)}")
+            return False
+
+
+# Completar implementaciones de servicios existentes
+
+class VirtualContentProgressService(VerificationBaseService):
+    """
+    Servicio para manejar automáticamente el progreso de contenidos virtuales,
+    incluyendo la creación automática de ContentResults y actualización de progreso.
+    """
+    
+    def __init__(self):
+        super().__init__(collection_name="virtual_topic_contents")
+    
+    def _calculate_auto_score(self, content_type: str, completion_data: Dict) -> float:
+        """
+        Calcula un score automático basado en el tipo de contenido y datos de completación.
+        """
+        base_score = completion_data.get("score", 80.0)
+        completion_percentage = completion_data.get("completion_percentage", 100)
+        time_spent = completion_data.get("session_data", {}).get("completion_time_seconds", 0)
+        
+        # Ajustar score según tipo de contenido
+        if content_type in ["quiz", "exercise"]:
+            # Para contenido evaluativo, usar score directo
+            return min(100, max(0, base_score))
+        elif content_type in ["video", "audio"]:
+            # Para contenido multimedia, basar en tiempo de visualización
+            if completion_percentage >= 80:
+                return min(100, 70 + (completion_percentage - 80) * 1.5)
+            else:
+                return max(0, completion_percentage * 0.7)
+        else:
+            # Para contenido de texto, basar en completación
+            return min(100, max(0, completion_percentage * 0.8 + 20))
+    
+    def _create_automatic_content_result(self, virtual_content: Dict, student_id: str, 
+                                       score: float, session_data: Dict) -> Tuple[bool, str]:
+        """
+        Crea automáticamente un ContentResult para el contenido virtual.
+        """
+        try:
+            content_result_data = {
+                "student_id": ObjectId(student_id),
+                "content_id": virtual_content["content_id"],
+                "virtual_content_id": virtual_content["_id"],
+                "score": score,
+                "completion_percentage": session_data.get("completion_percentage", 100),
+                "session_data": session_data,
+                "learning_metrics": {
+                    "engagement_score": score,
+                    "difficulty_rating": 3,  # Neutral por defecto
+                    "time_efficiency": self._calculate_time_efficiency(session_data)
+                },
+                "created_at": datetime.now(),
+                "updated_at": datetime.now()
+            }
+            
+            result = self.db.content_results.insert_one(content_result_data)
+            return True, str(result.inserted_id)
+            
+        except Exception as e:
+            logging.error(f"Error creando ContentResult automático: {str(e)}")
+            return False, str(e)
+    
+    def _calculate_time_efficiency(self, session_data: Dict) -> float:
+        """
+        Calcula la eficiencia de tiempo basada en los datos de sesión.
+        """
+        time_spent = session_data.get("completion_time_seconds", 0)
+        expected_time = session_data.get("expected_time_seconds", time_spent)
+        
+        if expected_time <= 0:
+            return 1.0
+        
+        efficiency = expected_time / max(time_spent, 1)
+        return min(2.0, max(0.1, efficiency))  # Limitar entre 0.1 y 2.0

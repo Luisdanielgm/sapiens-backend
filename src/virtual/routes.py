@@ -183,6 +183,103 @@ def submit_content_result():
                 {"$set": update_data, "$inc": {"interaction_tracking.access_count": 1}}
             )
             
+            # Calcular progreso del tema automáticamente
+            virtual_topic_id = virtual_content.get("virtual_topic_id")
+            if virtual_topic_id and completion_percentage >= 100:
+                try:
+                    # Obtener todos los contenidos del tema
+                    topic_contents = list(get_db().virtual_topic_contents.find({
+                        "virtual_topic_id": virtual_topic_id
+                    }))
+                    
+                    if topic_contents:
+                        # Calcular progreso promedio del tema
+                        total_completion = sum(
+                            content.get("interaction_tracking", {}).get("completion_percentage", 0)
+                            for content in topic_contents
+                        )
+                        topic_progress = total_completion / len(topic_contents)
+                        
+                        # Determinar estado del tema
+                        topic_status = "completed" if topic_progress >= 100 else "in_progress" if topic_progress > 0 else "not_started"
+                        
+                        # Actualizar progreso del tema virtual
+                        get_db().virtual_topics.update_one(
+                            {"_id": virtual_topic_id},
+                            {"$set": {
+                                "progress": topic_progress,
+                                "completion_status": topic_status,
+                                "updated_at": datetime.now()
+                            }}
+                        )
+                        
+                        # Si el tema se completó al 100%, desbloquear siguiente tema
+                        if topic_progress >= 100:
+                            virtual_topic = get_db().virtual_topics.find_one({"_id": virtual_topic_id})
+                            if virtual_topic:
+                                virtual_module_id = virtual_topic.get("virtual_module_id")
+                                current_order = virtual_topic.get("order", 0)
+                                
+                                # Desbloquear siguiente tema
+                                get_db().virtual_topics.update_one(
+                                    {
+                                        "virtual_module_id": virtual_module_id,
+                                        "order": current_order + 1
+                                    },
+                                    {"$set": {"locked": False, "updated_at": datetime.now()}}
+                                )
+                                
+                                # Actualizar progreso del módulo
+                                virtual_topic_service._update_module_progress_from_topic(virtual_topic)
+                                
+                                # Trigger para actualización de perfil adaptativo
+                                try:
+                                    adaptive_service = AdaptiveLearningService()
+                                    adaptive_service.update_profile_from_results(student_id)
+                                except Exception as adaptive_err:
+                                    logging.warning(f"Error actualizando perfil adaptativo: {adaptive_err}")
+                                
+                                # Verificar si necesitamos generar siguiente módulo (trigger al 80%)
+                                updated_module = get_db().virtual_modules.find_one({"_id": virtual_module_id})
+                                if updated_module and updated_module.get("progress", 0) >= 80:
+                                    try:
+                                        # Obtener información del módulo para generar el siguiente
+                                        module_id = updated_module.get("module_id")
+                                        study_plan_id = updated_module.get("study_plan_id")
+                                        
+                                        # Buscar siguiente módulo en el plan de estudios
+                                        current_module = get_db().modules.find_one({"_id": module_id})
+                                        if current_module:
+                                            next_module = get_db().modules.find_one({
+                                                "study_plan_id": study_plan_id,
+                                                "order": current_module.get("order", 0) + 1
+                                            })
+                                            
+                                            if next_module:
+                                                # Verificar si el siguiente módulo virtual ya existe
+                                                existing_next = get_db().virtual_modules.find_one({
+                                                    "module_id": next_module["_id"],
+                                                    "student_id": ObjectId(student_id)
+                                                })
+                                                
+                                                if not existing_next:
+                                                    # Encolar generación del siguiente módulo
+                                                    queue_service.enqueue_task(
+                                                        student_id=student_id,
+                                                        module_id=str(next_module["_id"]),
+                                                        task_type="generate",
+                                                        priority=1,
+                                                        payload={
+                                                            "trigger_reason": "auto_progress_80",
+                                                            "source_module_id": str(module_id)
+                                                        }
+                                                    )
+                                    except Exception as next_module_err:
+                                        logging.warning(f"Error generando siguiente módulo: {next_module_err}")
+                        
+                except Exception as progress_err:
+                    logging.warning(f"Error calculando progreso del tema: {progress_err}")
+            
             return APIRoute.success(
                 data={
                     "result_id": result_id,
@@ -643,7 +740,7 @@ def calculate_difficulty_adjustment(topic: dict, cognitive_profile: dict) -> dic
 
 def generate_personalized_content(topic_id: str, virtual_topic_id: str, cognitive_profile: dict, student_id: str, preferences: dict = None):
     """
-    Genera contenido personalizado para un tema virtual.
+    Genera contenido personalizado para un tema virtual usando el algoritmo avanzado.
     """
     try:
         topic = get_db().topics.find_one({"_id": ObjectId(topic_id)})
@@ -654,18 +751,61 @@ def generate_personalized_content(topic_id: str, virtual_topic_id: str, cognitiv
         if not virtual_topic:
             return False
 
+        # Extraer preferencias aprendidas del perfil cognitivo
+        learned_preferences = {}
+        try:
+            profile_str = cognitive_profile.get("profile", "{}")
+            if isinstance(profile_str, str):
+                import json
+                profile_data = json.loads(profile_str)
+                content_preferences = profile_data.get("contentPreferences", {})
+                learned_preferences = {
+                    "avoid_types": content_preferences.get("avoid_types", []),
+                    "prefer_types": content_preferences.get("prefer_types", [])
+                }
+        except (json.JSONDecodeError, Exception) as e:
+            logging.warning(f"Error extrayendo preferencias del perfil: {e}")
+            learned_preferences = {"avoid_types": [], "prefer_types": []}
+        
+        # Combinar preferencias aprendidas con preferencias manuales
+        combined_preferences = {
+            "avoid_types": list(set(learned_preferences.get("avoid_types", []) + (preferences or {}).get("avoid_types", []))),
+            "prefer_types": list(set(learned_preferences.get("prefer_types", []) + (preferences or {}).get("prefer_types", [])))
+        }
+        
+        # Agregar otras preferencias manuales
+        if preferences:
+            for key, value in preferences.items():
+                if key not in ["avoid_types", "prefer_types"]:
+                    combined_preferences[key] = value
+
         existing_contents = list(get_db().topic_contents.find({
             "topic_id": ObjectId(topic_id),
             "status": {"$in": ["draft", "active", "published", "approved"]}
         }))
 
-        selected_contents = fast_generator._select_personalized_contents(existing_contents, cognitive_profile, preferences or {})
+        # Usar el algoritmo avanzado de selección personalizada
+        selected_contents = fast_generator._select_personalized_contents(
+            existing_contents, 
+            cognitive_profile, 
+            combined_preferences
+        )
+        
+        # Fallback si no se seleccionó contenido
         if not selected_contents:
+            logging.warning(f"Algoritmo avanzado no seleccionó contenidos. Usando fallback.")
             selected_contents = existing_contents[:3]
+        
+        # Limitar a máximo 6 contenidos según especificación
+        selected_contents = selected_contents[:6]
+        
+        logging.info(f"Seleccionados {len(selected_contents)} contenidos personalizados para tema {virtual_topic_id}")
 
         for content in selected_contents:
             try:
+                # Generar datos de personalización avanzados
                 personalization_data = fast_generator._generate_content_personalization(content, cognitive_profile)
+                
                 get_db().virtual_topic_contents.insert_one({
                     "virtual_topic_id": ObjectId(virtual_topic_id),
                     "content_id": content["_id"],
@@ -688,6 +828,9 @@ def generate_personalized_content(topic_id: str, virtual_topic_id: str, cognitiv
                     "created_at": datetime.now(),
                     "updated_at": datetime.now()
                 })
+                
+                logging.debug(f"Contenido virtual creado: {content.get('content_type')} con personalización: {list(personalization_data.keys())}")
+                
             except Exception as c_err:
                 logging.error(f"Error creando contenido virtual para {content.get('_id')}: {c_err}")
 
@@ -1739,6 +1882,160 @@ def trigger_next_topic_generation(virtual_content_id):
             status_code=500
         )
 
+# ===== ENDPOINT DE COMPLETACIÓN DE MÓDULO =====
+
+@virtual_bp.route('/module/<module_id>/complete', methods=['POST'])
+@APIRoute.standard(auth_required_flag=True, roles=[ROLES["STUDENT"]])
+def complete_virtual_module(module_id):
+    """
+    Marca un módulo como completado y activa aprendizaje adaptativo.
+    Endpoint crítico para Fase 2B - activación automática de actualización de perfil.
+    """
+    try:
+        from flask_jwt_extended import get_jwt_identity
+        
+        student_id = get_jwt_identity()
+        data = request.get_json() or {}
+        
+        # Verificar que el módulo virtual existe y pertenece al estudiante
+        virtual_module = get_db().virtual_modules.find_one({
+            "_id": ObjectId(module_id),
+            "student_id": ObjectId(student_id)
+        })
+        
+        if not virtual_module:
+            return APIRoute.error(
+                ErrorCodes.NOT_FOUND,
+                "Módulo virtual no encontrado o no tienes acceso",
+                status_code=404
+            )
+        
+        # Verificar que el módulo no esté ya completado
+        if virtual_module.get("completion_status") == "completed":
+            return APIRoute.error(
+                ErrorCodes.BAD_REQUEST,
+                "El módulo ya está marcado como completado",
+                status_code=400
+            )
+        
+        # Obtener progreso actual de todos los temas del módulo
+        virtual_topics = list(get_db().virtual_topics.find({
+            "virtual_module_id": ObjectId(module_id)
+        }))
+        
+        if not virtual_topics:
+            return APIRoute.error(
+                ErrorCodes.BAD_REQUEST,
+                "No se encontraron temas en este módulo",
+                status_code=400
+            )
+        
+        # Calcular progreso real del módulo
+        total_progress = sum(topic.get("progress", 0) for topic in virtual_topics)
+        module_progress = total_progress / len(virtual_topics) if virtual_topics else 0
+        
+        # Permitir completación manual si el progreso es >= 80%
+        min_progress_required = data.get("min_progress", 80)
+        if module_progress < min_progress_required:
+            return APIRoute.error(
+                ErrorCodes.BAD_REQUEST,
+                f"El módulo debe tener al menos {min_progress_required}% de progreso para completarse. Progreso actual: {module_progress:.1f}%",
+                status_code=400
+            )
+        
+        # Marcar módulo como completado
+        completion_time = datetime.now()
+        get_db().virtual_modules.update_one(
+            {"_id": ObjectId(module_id)},
+            {"$set": {
+                "completion_status": "completed",
+                "progress": 100.0,
+                "completed_at": completion_time,
+                "updated_at": completion_time
+            }}
+        )
+        
+        # Activar aprendizaje adaptativo - FUNCIONALIDAD CRÍTICA FASE 2B
+        adaptive_service = AdaptiveLearningService()
+        profile_updated = False
+        
+        try:
+            profile_updated = adaptive_service.update_profile_from_results(student_id)
+            logging.info(f"Perfil adaptativo actualizado para estudiante {student_id}: {profile_updated}")
+        except Exception as adaptive_err:
+            logging.error(f"Error actualizando perfil adaptativo: {adaptive_err}")
+            # No fallar la completación por error en perfil adaptativo
+        
+        # Trigger para generar siguiente módulo si existe
+        next_module_generated = False
+        try:
+            # Obtener información del módulo original
+            original_module = get_db().modules.find_one({"_id": virtual_module["module_id"]})
+            if original_module:
+                study_plan_id = virtual_module["study_plan_id"]
+                current_order = original_module.get("order", 0)
+                
+                # Buscar siguiente módulo en el plan de estudios
+                next_module = get_db().modules.find_one({
+                    "study_plan_id": ObjectId(study_plan_id),
+                    "order": current_order + 1,
+                    "published": True
+                })
+                
+                if next_module:
+                    # Verificar si el siguiente módulo virtual ya existe
+                    existing_next = get_db().virtual_modules.find_one({
+                        "module_id": next_module["_id"],
+                        "student_id": ObjectId(student_id)
+                    })
+                    
+                    if not existing_next:
+                        # Encolar generación del siguiente módulo
+                        queue_service.enqueue_task(
+                            student_id=student_id,
+                            module_id=str(next_module["_id"]),
+                            task_type="generate",
+                            priority=1,
+                            payload={
+                                "trigger_reason": "module_completion",
+                                "source_module_id": str(virtual_module["module_id"]),
+                                "completion_time": completion_time.isoformat()
+                            }
+                        )
+                        next_module_generated = True
+                        logging.info(f"Siguiente módulo encolado para generación: {next_module['_id']}")
+        
+        except Exception as next_module_err:
+            logging.warning(f"Error generando siguiente módulo: {next_module_err}")
+        
+        # Respuesta de éxito
+        return APIRoute.success(
+            data={
+                "module_id": module_id,
+                "completion_status": "completed",
+                "progress": 100.0,
+                "completed_at": completion_time.isoformat(),
+                "adaptive_learning": {
+                    "profile_updated": profile_updated,
+                    "update_triggered": True
+                },
+                "next_module": {
+                    "generation_triggered": next_module_generated
+                },
+                "module_progress": module_progress
+            },
+            message="Módulo completado exitosamente y perfil adaptativo actualizado",
+            status_code=200
+        )
+        
+    except Exception as e:
+        logging.error(f"Error completando módulo virtual: {str(e)}")
+        return APIRoute.error(
+            ErrorCodes.SERVER_ERROR,
+            f"Error interno al completar módulo: {str(e)}",
+            status_code=500
+        )
+
 # ===== ENDPOINTS DE BULK OPERATIONS =====
 
 @virtual_bp.route('/student/<student_id>/complete-reading-contents', methods=['POST'])
@@ -2335,6 +2632,209 @@ def queue_health_check():
         
     except Exception as e:
         logging.error(f"Error en health check: {str(e)}")
+        return APIRoute.error(
+            ErrorCodes.SERVER_ERROR,
+            str(e),
+            status_code=500
+        )
+
+
+# ========== NUEVOS ENDPOINTS OPTIMIZADOS PARA GESTIÓN DE COLA ==========
+
+@virtual_bp.route('/module/<module_id>/queue/status', methods=['GET'])
+@APIRoute.standard(auth_required_flag=True)
+def get_module_queue_status(module_id):
+    """Obtiene el estado actual de la cola de temas de un módulo virtual específico."""
+    try:
+        from src.virtual.services import OptimizedQueueService
+        
+        # Verificar que el módulo virtual existe
+        virtual_module = get_db().virtual_modules.find_one({"_id": ObjectId(module_id)})
+        if not virtual_module:
+            return APIRoute.error(
+                ErrorCodes.NOT_FOUND,
+                "Módulo virtual no encontrado",
+                status_code=404
+            )
+        
+        # Verificar permisos
+        student_id = virtual_module.get("student_id")
+        if str(student_id) != str(request.user_id) and "TEACHER" not in request.user_roles:
+            return APIRoute.error(
+                ErrorCodes.PERMISSION_DENIED,
+                "No tienes permiso para ver el estado de este módulo",
+                status_code=403
+            )
+        
+        queue_service = OptimizedQueueService()
+        status = queue_service.get_queue_status(module_id)
+        
+        if "error" in status:
+            return APIRoute.error(
+                ErrorCodes.OPERATION_FAILED,
+                status["error"],
+                status_code=400
+            )
+        
+        return APIRoute.success(
+            data=status,
+            message="Estado de cola obtenido exitosamente"
+        )
+        
+    except Exception as e:
+        logging.error(f"Error obteniendo estado de cola del módulo {module_id}: {str(e)}")
+        return APIRoute.error(
+            ErrorCodes.SERVER_ERROR,
+            str(e),
+            status_code=500
+        )
+
+
+@virtual_bp.route('/module/<module_id>/queue/optimize', methods=['POST'])
+@APIRoute.standard(auth_required_flag=True)
+def optimize_module_queue(module_id):
+    """Optimiza manualmente la cola de temas de un módulo virtual específico."""
+    try:
+        from src.virtual.services import OptimizedQueueService
+        
+        data = request.get_json() or {}
+        current_progress = data.get('current_progress', 0)
+        
+        # Verificar que el módulo virtual existe
+        virtual_module = get_db().virtual_modules.find_one({"_id": ObjectId(module_id)})
+        if not virtual_module:
+            return APIRoute.error(
+                ErrorCodes.NOT_FOUND,
+                "Módulo virtual no encontrado",
+                status_code=404
+            )
+        
+        # Verificar permisos
+        student_id = virtual_module.get("student_id")
+        if str(student_id) != str(request.user_id) and "TEACHER" not in request.user_roles:
+            return APIRoute.error(
+                ErrorCodes.PERMISSION_DENIED,
+                "No tienes permiso para optimizar este módulo",
+                status_code=403
+            )
+        
+        queue_service = OptimizedQueueService()
+        result = queue_service.maintain_topic_queue(module_id, current_progress)
+        
+        if "error" in result:
+            return APIRoute.error(
+                ErrorCodes.OPERATION_FAILED,
+                result["error"],
+                status_code=400
+            )
+        
+        return APIRoute.success(
+            data=result,
+            message="Cola optimizada exitosamente"
+        )
+        
+    except Exception as e:
+        logging.error(f"Error optimizando cola del módulo {module_id}: {str(e)}")
+        return APIRoute.error(
+            ErrorCodes.SERVER_ERROR,
+            str(e),
+            status_code=500
+        )
+
+
+@virtual_bp.route('/admin/queues/bulk-optimize', methods=['POST'])
+@APIRoute.standard(auth_required_flag=True, roles=[ROLES["TEACHER"], ROLES["INSTITUTE_ADMIN"], ROLES["SYSTEM"]])
+def bulk_optimize_all_queues():
+    """Optimiza múltiples colas de módulos virtuales en lote (endpoint administrativo)."""
+    try:
+        from src.virtual.services import OptimizedQueueService
+        
+        data = request.get_json() or {}
+        max_modules = data.get('max_modules', 50)
+        
+        # Validar límites de seguridad
+        if max_modules > 200:
+            max_modules = 200
+        
+        queue_service = OptimizedQueueService()
+        result = queue_service.bulk_initialize_queues(max_modules)
+        
+        if "error" in result:
+            return APIRoute.error(
+                ErrorCodes.OPERATION_FAILED,
+                result["error"],
+                status_code=500
+            )
+        
+        return APIRoute.success(
+            data=result,
+            message=f"Optimización masiva completada: {result.get('processed', 0)} módulos procesados"
+        )
+        
+    except Exception as e:
+        logging.error(f"Error en optimización masiva de colas: {str(e)}")
+        return APIRoute.error(
+            ErrorCodes.SERVER_ERROR,
+            str(e),
+            status_code=500
+        )
+
+
+@virtual_bp.route('/topic/<topic_id>/trigger-progress', methods=['POST'])
+@APIRoute.standard(auth_required_flag=True)
+def trigger_topic_progress(topic_id):
+    """Trigger manual para actualizar progreso de un tema y mantener la cola."""
+    try:
+        from src.virtual.services import OptimizedQueueService
+        
+        data = request.get_json() or {}
+        progress_percentage = data.get('progress_percentage', 100)
+        
+        # Validar progreso
+        if not isinstance(progress_percentage, (int, float)) or progress_percentage < 0 or progress_percentage > 100:
+            return APIRoute.error(
+                ErrorCodes.BAD_REQUEST,
+                "El progreso debe ser un número entre 0 y 100",
+                status_code=400
+            )
+        
+        # Verificar que el tema virtual existe
+        virtual_topic = get_db().virtual_topics.find_one({"_id": ObjectId(topic_id)})
+        if not virtual_topic:
+            return APIRoute.error(
+                ErrorCodes.NOT_FOUND,
+                "Tema virtual no encontrado",
+                status_code=404
+            )
+        
+        # Verificar permisos
+        virtual_module = get_db().virtual_modules.find_one({"_id": virtual_topic["virtual_module_id"]})
+        if virtual_module:
+            student_id = virtual_module.get("student_id")
+            if str(student_id) != str(request.user_id) and "TEACHER" not in request.user_roles:
+                return APIRoute.error(
+                    ErrorCodes.PERMISSION_DENIED,
+                    "No tienes permiso para actualizar este tema",
+                    status_code=403
+                )
+        
+        queue_service = OptimizedQueueService()
+        result = queue_service.trigger_on_progress(topic_id, progress_percentage)
+        
+        if "error" in result:
+            return APIRoute.error(
+                ErrorCodes.OPERATION_FAILED,
+                result["error"],
+                status_code=400
+            )
+        
+        return APIRoute.success(
+            data=result,
+            message=f"Trigger ejecutado exitosamente para progreso {progress_percentage}%"
+        )
+        
+    except Exception as e:
+        logging.error(f"Error en trigger de progreso del tema {topic_id}: {str(e)}")
         return APIRoute.error(
             ErrorCodes.SERVER_ERROR,
             str(e),
