@@ -4074,3 +4074,406 @@ class VirtualContentProgressService(VerificationBaseService):
         
         efficiency = expected_time / max(time_spent, 1)
         return min(2.0, max(0.1, efficiency))  # Limitar entre 0.1 y 2.0
+
+
+class UIPerformanceMetricsService:
+    """
+    Servicio para métricas de rendimiento de UI en tiempo real.
+    Implementa tracking de rendimiento de interfaz y optimización automática.
+    """
+    
+    def __init__(self):
+        self.db = get_db()
+        self.metrics_collection = self.db.ui_performance_metrics
+        self.optimization_collection = self.db.ui_optimizations
+    
+    def record_ui_metrics(self, student_id: str, session_data: Dict) -> bool:
+        """
+        Registra métricas de rendimiento de UI para un estudiante.
+        
+        Args:
+            student_id: ID del estudiante
+            session_data: Datos de la sesión de UI
+        """
+        try:
+            metrics_data = {
+                "student_id": ObjectId(student_id),
+                "session_id": session_data.get("session_id"),
+                "device_info": {
+                    "device_type": session_data.get("device_type", "unknown"),
+                    "screen_resolution": session_data.get("screen_resolution"),
+                    "browser": session_data.get("browser"),
+                    "connection_speed": session_data.get("connection_speed")
+                },
+                "performance_metrics": {
+                    "page_load_time": session_data.get("page_load_time", 0),
+                    "content_render_time": session_data.get("content_render_time", 0),
+                    "interaction_response_time": session_data.get("interaction_response_time", 0),
+                    "scroll_performance": session_data.get("scroll_performance", 0),
+                    "memory_usage": session_data.get("memory_usage", 0)
+                },
+                "user_interactions": {
+                    "clicks_per_minute": session_data.get("clicks_per_minute", 0),
+                    "scroll_events": session_data.get("scroll_events", 0),
+                    "navigation_events": session_data.get("navigation_events", 0),
+                    "error_events": session_data.get("error_events", 0)
+                },
+                "accessibility_metrics": {
+                    "font_size_adjustments": session_data.get("font_size_adjustments", 0),
+                    "contrast_adjustments": session_data.get("contrast_adjustments", 0),
+                    "keyboard_navigation_usage": session_data.get("keyboard_navigation_usage", False)
+                },
+                "timestamp": datetime.now(),
+                "session_duration": session_data.get("session_duration", 0)
+            }
+            
+            self.metrics_collection.insert_one(metrics_data)
+            
+            # Trigger análisis de optimización si es necesario
+            self._analyze_and_optimize(student_id, metrics_data)
+            
+            return True
+            
+        except Exception as e:
+            logging.error(f"Error registrando métricas de UI: {str(e)}")
+            return False
+    
+    def _analyze_and_optimize(self, student_id: str, current_metrics: Dict):
+        """
+        Analiza métricas y genera optimizaciones automáticas.
+        """
+        try:
+            # Obtener historial de métricas del estudiante
+            historical_metrics = list(self.metrics_collection.find({
+                "student_id": ObjectId(student_id)
+            }).sort("timestamp", -1).limit(10))
+            
+            if len(historical_metrics) < 3:
+                return  # Necesitamos más datos para análisis
+            
+            # Analizar patrones de rendimiento
+            performance_analysis = self._analyze_performance_patterns(historical_metrics)
+            
+            # Generar optimizaciones
+            optimizations = self._generate_optimizations(student_id, performance_analysis)
+            
+            if optimizations:
+                self._save_optimizations(student_id, optimizations)
+                
+        except Exception as e:
+            logging.error(f"Error en análisis de optimización: {str(e)}")
+    
+    def _analyze_performance_patterns(self, metrics_history: List[Dict]) -> Dict:
+        """
+        Analiza patrones de rendimiento en el historial de métricas.
+        """
+        analysis = {
+            "avg_load_time": 0,
+            "avg_render_time": 0,
+            "avg_interaction_time": 0,
+            "performance_trend": "stable",
+            "problem_areas": [],
+            "device_patterns": {},
+            "accessibility_usage": False
+        }
+        
+        if not metrics_history:
+            return analysis
+        
+        # Calcular promedios
+        total_metrics = len(metrics_history)
+        load_times = [m["performance_metrics"]["page_load_time"] for m in metrics_history]
+        render_times = [m["performance_metrics"]["content_render_time"] for m in metrics_history]
+        interaction_times = [m["performance_metrics"]["interaction_response_time"] for m in metrics_history]
+        
+        analysis["avg_load_time"] = sum(load_times) / total_metrics
+        analysis["avg_render_time"] = sum(render_times) / total_metrics
+        analysis["avg_interaction_time"] = sum(interaction_times) / total_metrics
+        
+        # Detectar problemas de rendimiento
+        if analysis["avg_load_time"] > 3000:  # > 3 segundos
+            analysis["problem_areas"].append("slow_loading")
+        
+        if analysis["avg_render_time"] > 1000:  # > 1 segundo
+            analysis["problem_areas"].append("slow_rendering")
+        
+        if analysis["avg_interaction_time"] > 500:  # > 500ms
+            analysis["problem_areas"].append("slow_interactions")
+        
+        # Analizar uso de accesibilidad
+        accessibility_usage = any(
+            m["accessibility_metrics"]["font_size_adjustments"] > 0 or
+            m["accessibility_metrics"]["contrast_adjustments"] > 0 or
+            m["accessibility_metrics"]["keyboard_navigation_usage"]
+            for m in metrics_history
+        )
+        analysis["accessibility_usage"] = accessibility_usage
+        
+        return analysis
+    
+    def _generate_optimizations(self, student_id: str, analysis: Dict) -> List[Dict]:
+        """
+        Genera optimizaciones basadas en el análisis de rendimiento.
+        """
+        optimizations = []
+        
+        # Optimizaciones para carga lenta
+        if "slow_loading" in analysis["problem_areas"]:
+            optimizations.append({
+                "type": "performance",
+                "category": "loading",
+                "action": "enable_lazy_loading",
+                "description": "Habilitar carga diferida de contenido",
+                "priority": "high",
+                "estimated_improvement": "30-50% reducción en tiempo de carga"
+            })
+        
+        # Optimizaciones para renderizado lento
+        if "slow_rendering" in analysis["problem_areas"]:
+            optimizations.append({
+                "type": "performance",
+                "category": "rendering",
+                "action": "reduce_animations",
+                "description": "Reducir animaciones complejas",
+                "priority": "medium",
+                "estimated_improvement": "40-60% mejora en renderizado"
+            })
+        
+        # Optimizaciones de accesibilidad
+        if analysis["accessibility_usage"]:
+            optimizations.append({
+                "type": "accessibility",
+                "category": "visual",
+                "action": "auto_adjust_contrast",
+                "description": "Ajustar contraste automáticamente",
+                "priority": "high",
+                "estimated_improvement": "Mejor experiencia de accesibilidad"
+            })
+        
+        return optimizations
+    
+    def _save_optimizations(self, student_id: str, optimizations: List[Dict]):
+        """
+        Guarda las optimizaciones generadas para el estudiante.
+        """
+        try:
+            optimization_record = {
+                "student_id": ObjectId(student_id),
+                "optimizations": optimizations,
+                "generated_at": datetime.now(),
+                "status": "pending",
+                "applied_optimizations": []
+            }
+            
+            self.optimization_collection.insert_one(optimization_record)
+            logging.info(f"Generadas {len(optimizations)} optimizaciones para estudiante {student_id}")
+            
+        except Exception as e:
+            logging.error(f"Error guardando optimizaciones: {str(e)}")
+    
+    def get_student_optimizations(self, student_id: str) -> Dict:
+        """
+        Obtiene las optimizaciones pendientes para un estudiante.
+        """
+        try:
+            optimization_record = self.optimization_collection.find_one({
+                "student_id": ObjectId(student_id),
+                "status": "pending"
+            }, sort=[("generated_at", -1)])
+            
+            if not optimization_record:
+                return {"optimizations": [], "status": "none"}
+            
+            return {
+                "optimizations": optimization_record["optimizations"],
+                "status": optimization_record["status"],
+                "generated_at": optimization_record["generated_at"]
+            }
+            
+        except Exception as e:
+            logging.error(f"Error obteniendo optimizaciones: {str(e)}")
+            return {"optimizations": [], "status": "error"}
+    
+    def get_performance_analytics(self, student_id: str = None, days: int = 7) -> Dict:
+        """
+        Obtiene analíticas de rendimiento para un estudiante o globales.
+        """
+        try:
+            since_date = datetime.now() - timedelta(days=days)
+            
+            query = {"timestamp": {"$gte": since_date}}
+            if student_id:
+                query["student_id"] = ObjectId(student_id)
+            
+            metrics = list(self.metrics_collection.find(query))
+            
+            if not metrics:
+                return {"analytics": {}, "total_sessions": 0}
+            
+            # Calcular estadísticas
+            total_sessions = len(metrics)
+            avg_load_time = sum(m["performance_metrics"]["page_load_time"] for m in metrics) / total_sessions
+            avg_render_time = sum(m["performance_metrics"]["content_render_time"] for m in metrics) / total_sessions
+            
+            # Calcular score de rendimiento general
+            performance_score = max(0, 100 - (avg_load_time / 50) - (avg_render_time / 20))
+            
+            return {
+                "analytics": {
+                    "avg_load_time": avg_load_time,
+                    "avg_render_time": avg_render_time,
+                    "performance_score": performance_score
+                },
+                "total_sessions": total_sessions,
+                "period_days": days
+            }
+            
+        except Exception as e:
+            logging.error(f"Error obteniendo analíticas de rendimiento: {str(e)}")
+            return {"analytics": {}, "total_sessions": 0, "error": str(e)}
+
+
+class AdaptiveUIOptimizationService:
+    """
+    Servicio para optimización automática de interfaz basada en patrones de uso.
+    """
+    
+    def __init__(self):
+        self.db = get_db()
+        self.ui_metrics_service = UIPerformanceMetricsService()
+    
+    def generate_adaptive_ui_config(self, student_id: str) -> Dict:
+        """
+        Genera configuración de UI adaptativa para un estudiante.
+        """
+        try:
+            # Obtener perfil cognitivo
+            student = self.db.users.find_one({"_id": ObjectId(student_id)})
+            if not student:
+                return self._get_default_ui_config()
+            
+            cognitive_profile = student.get("cognitive_profile", {})
+            
+            # Obtener métricas de rendimiento
+            performance_analytics = self.ui_metrics_service.get_performance_analytics(student_id, days=30)
+            
+            # Obtener optimizaciones pendientes
+            optimizations = self.ui_metrics_service.get_student_optimizations(student_id)
+            
+            # Generar configuración adaptativa
+            ui_config = self._build_adaptive_config(cognitive_profile, performance_analytics, optimizations)
+            
+            return ui_config
+            
+        except Exception as e:
+            logging.error(f"Error generando configuración UI adaptativa: {str(e)}")
+            return self._get_default_ui_config()
+    
+    def _build_adaptive_config(self, cognitive_profile: Dict, performance_analytics: Dict, optimizations: Dict) -> Dict:
+        """
+        Construye la configuración de UI adaptativa.
+        """
+        config = {
+            "layout": {
+                "sidebar_collapsed": False,
+                "content_width": "normal",
+                "navigation_style": "standard"
+            },
+            "visual": {
+                "theme": "light",
+                "font_size": "medium",
+                "contrast": "normal",
+                "animations": "enabled"
+            },
+            "performance": {
+                "lazy_loading": False,
+                "image_compression": False,
+                "reduced_animations": False
+            },
+            "accessibility": {
+                "high_contrast": False,
+                "dyslexia_font": False,
+                "keyboard_navigation_enhanced": False
+            }
+        }
+        
+        # Adaptaciones basadas en perfil cognitivo
+        if cognitive_profile:
+            # Adaptaciones para TDAH
+            if self._has_adhd(cognitive_profile):
+                config["layout"]["sidebar_collapsed"] = True
+                config["visual"]["animations"] = "reduced"
+            
+            # Adaptaciones para dislexia
+            if self._has_dyslexia(cognitive_profile):
+                config["accessibility"]["dyslexia_font"] = True
+                config["visual"]["font_size"] = "large"
+                config["accessibility"]["high_contrast"] = True
+        
+        # Adaptaciones basadas en rendimiento
+        analytics = performance_analytics.get("analytics", {})
+        if analytics:
+            performance_score = analytics.get("performance_score", 100)
+            
+            if performance_score < 60:  # Rendimiento bajo
+                config["performance"]["lazy_loading"] = True
+                config["visual"]["animations"] = "disabled"
+        
+        # Aplicar optimizaciones pendientes
+        for optimization in optimizations.get("optimizations", []):
+            if optimization["action"] == "enable_lazy_loading":
+                config["performance"]["lazy_loading"] = True
+            elif optimization["action"] == "reduce_animations":
+                config["visual"]["animations"] = "reduced"
+            elif optimization["action"] == "auto_adjust_contrast":
+                config["accessibility"]["high_contrast"] = True
+        
+        return config
+    
+    def _has_adhd(self, cognitive_profile: Dict) -> bool:
+        """
+        Detecta si el perfil indica TDAH.
+        """
+        diagnosis = cognitive_profile.get("diagnosis", "").lower()
+        difficulties = " ".join(cognitive_profile.get("cognitive_difficulties", [])).lower()
+        
+        return ("tda" in diagnosis or "hiperactividad" in diagnosis or
+                "distractibilidad" in difficulties or "concentración" in difficulties)
+    
+    def _has_dyslexia(self, cognitive_profile: Dict) -> bool:
+        """
+        Detecta si el perfil indica dislexia.
+        """
+        diagnosis = cognitive_profile.get("diagnosis", "").lower()
+        difficulties = " ".join(cognitive_profile.get("cognitive_difficulties", [])).lower()
+        
+        return ("dislexia" in diagnosis or "lectura" in difficulties or
+                "escritura" in difficulties)
+    
+    def _get_default_ui_config(self) -> Dict:
+        """
+        Retorna configuración de UI por defecto.
+        """
+        return {
+            "layout": {
+                "sidebar_collapsed": False,
+                "content_width": "normal",
+                "navigation_style": "standard"
+            },
+            "visual": {
+                "theme": "light",
+                "font_size": "medium",
+                "contrast": "normal",
+                "animations": "enabled"
+            },
+            "performance": {
+                "lazy_loading": False,
+                "image_compression": False,
+                "reduced_animations": False
+            },
+            "accessibility": {
+                "high_contrast": False,
+                "dyslexia_font": False,
+                "keyboard_navigation_enhanced": False
+            }
+        }

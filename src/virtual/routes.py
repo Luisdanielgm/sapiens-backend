@@ -13,6 +13,8 @@ from .services import (
     FastVirtualModuleGenerator,
     ContentChangeDetector,
     AdaptiveLearningService,
+    UIPerformanceMetricsService,
+    AdaptiveUIOptimizationService,
 )
 from src.content.models import ContentTypes, LearningMethodologyTypes
 from src.study_plans.services import TopicService
@@ -298,6 +300,167 @@ def submit_content_result():
         
     except Exception as e:
         logging.error(f"Error al registrar resultado de contenido: {str(e)}")
+        return APIRoute.error(
+            ErrorCodes.SERVER_ERROR,
+            str(e),
+            status_code=500
+        )
+
+
+# Rutas para Métricas de UI y Optimización Automática
+@virtual_bp.route('/ui-metrics', methods=['POST'])
+@APIRoute.standard(
+    auth_required_flag=True,
+    roles=[ROLES["STUDENT"]],
+    required_fields=['session_data']
+)
+def record_ui_metrics():
+    """Registra métricas de rendimiento de UI para un estudiante."""
+    try:
+        from src.virtual.services import UIPerformanceMetricsService
+        
+        data = request.get_json()
+        student_id = str(request.user_id)
+        session_data = data.get('session_data')
+        
+        # Validar datos de sesión
+        if not isinstance(session_data, dict):
+            return APIRoute.error(
+                ErrorCodes.BAD_REQUEST,
+                "Los datos de sesión deben ser un objeto válido",
+                status_code=400
+            )
+        
+        ui_metrics_service = UIPerformanceMetricsService()
+        success = ui_metrics_service.record_ui_metrics(student_id, session_data)
+        
+        if success:
+            return APIRoute.success(
+                data={"recorded": True},
+                message="Métricas de UI registradas exitosamente"
+            )
+        else:
+            return APIRoute.error(
+                ErrorCodes.OPERATION_FAILED,
+                "Error al registrar métricas de UI",
+                status_code=500
+            )
+            
+    except Exception as e:
+        logging.error(f"Error registrando métricas de UI: {str(e)}")
+        return APIRoute.error(
+            ErrorCodes.SERVER_ERROR,
+            str(e),
+            status_code=500
+        )
+
+
+@virtual_bp.route('/ui-optimizations', methods=['GET'])
+@APIRoute.standard(auth_required_flag=True)
+def get_ui_optimizations():
+    """Obtiene las optimizaciones de UI pendientes para el estudiante actual."""
+    try:
+        from src.virtual.services import UIPerformanceMetricsService
+        
+        student_id = str(request.user_id)
+        
+        ui_metrics_service = UIPerformanceMetricsService()
+        optimizations = ui_metrics_service.get_student_optimizations(student_id)
+        
+        return APIRoute.success(
+            data=optimizations,
+            message="Optimizaciones obtenidas exitosamente"
+        )
+        
+    except Exception as e:
+        logging.error(f"Error obteniendo optimizaciones de UI: {str(e)}")
+        return APIRoute.error(
+            ErrorCodes.SERVER_ERROR,
+            str(e),
+            status_code=500
+        )
+
+
+@virtual_bp.route('/ui-config', methods=['GET'])
+@APIRoute.standard(auth_required_flag=True)
+def get_adaptive_ui_config():
+    """Genera configuración de UI adaptativa para el estudiante actual."""
+    try:
+        from src.virtual.services import AdaptiveUIOptimizationService
+        
+        student_id = str(request.user_id)
+        
+        ui_optimization_service = AdaptiveUIOptimizationService()
+        ui_config = ui_optimization_service.generate_adaptive_ui_config(student_id)
+        
+        return APIRoute.success(
+            data={"ui_config": ui_config},
+            message="Configuración de UI adaptativa generada exitosamente"
+        )
+        
+    except Exception as e:
+        logging.error(f"Error generando configuración UI adaptativa: {str(e)}")
+        return APIRoute.error(
+            ErrorCodes.SERVER_ERROR,
+            str(e),
+            status_code=500
+        )
+
+
+@virtual_bp.route('/performance-analytics', methods=['GET'])
+@APIRoute.standard(auth_required_flag=True)
+def get_performance_analytics():
+    """Obtiene analíticas de rendimiento de UI para el estudiante actual."""
+    try:
+        from src.virtual.services import UIPerformanceMetricsService
+        
+        student_id = str(request.user_id)
+        days = request.args.get('days', 7, type=int)
+        
+        # Validar parámetros
+        if days < 1 or days > 365:
+            days = 7
+        
+        ui_metrics_service = UIPerformanceMetricsService()
+        analytics = ui_metrics_service.get_performance_analytics(student_id, days)
+        
+        return APIRoute.success(
+            data=analytics,
+            message="Analíticas de rendimiento obtenidas exitosamente"
+        )
+        
+    except Exception as e:
+        logging.error(f"Error obteniendo analíticas de rendimiento: {str(e)}")
+        return APIRoute.error(
+            ErrorCodes.SERVER_ERROR,
+            str(e),
+            status_code=500
+        )
+
+
+@virtual_bp.route('/admin/performance-analytics', methods=['GET'])
+@APIRoute.standard(auth_required_flag=True, roles=[ROLES["TEACHER"], ROLES["INSTITUTE_ADMIN"]])
+def get_global_performance_analytics():
+    """Obtiene analíticas de rendimiento globales (endpoint administrativo)."""
+    try:
+        from src.virtual.services import UIPerformanceMetricsService
+        
+        days = request.args.get('days', 30, type=int)
+        
+        # Validar parámetros
+        if days < 1 or days > 365:
+            days = 30
+        
+        ui_metrics_service = UIPerformanceMetricsService()
+        analytics = ui_metrics_service.get_performance_analytics(student_id=None, days=days)
+        
+        return APIRoute.success(
+            data=analytics,
+            message="Analíticas globales de rendimiento obtenidas exitosamente"
+        )
+        
+    except Exception as e:
+        logging.error(f"Error obteniendo analíticas globales de rendimiento: {str(e)}")
         return APIRoute.error(
             ErrorCodes.SERVER_ERROR,
             str(e),
