@@ -780,6 +780,142 @@ def get_personalized_recommendations(student_id):
             status_code=500
         )
 
+@virtual_bp.route('/module/<virtual_module_id>/recommendation', methods=['GET'])
+@APIRoute.standard(auth_required_flag=True)
+def get_module_recommendations(virtual_module_id):
+    """Obtiene recomendaciones personalizadas para un módulo virtual específico"""
+    try:
+        # Obtener student_id de los parámetros de consulta
+        student_id = request.args.get('student_id')
+        if not student_id:
+            return APIRoute.error(
+                ErrorCodes.VALIDATION_ERROR,
+                "El parámetro student_id es requerido",
+                status_code=400
+            )
+        
+        # Verificar que el estudiante existe
+        student = get_db().users.find_one({"_id": ObjectId(student_id)})
+        if not student:
+            return APIRoute.error(
+                ErrorCodes.NOT_FOUND,
+                "Estudiante no encontrado",
+                status_code=404
+            )
+        
+        # Verificar que el módulo virtual existe
+        virtual_module = get_db().virtual_modules.find_one({"_id": ObjectId(virtual_module_id)})
+        if not virtual_module:
+            return APIRoute.error(
+                ErrorCodes.NOT_FOUND,
+                "Módulo virtual no encontrado",
+                status_code=404
+            )
+            
+        # Obtener perfil cognitivo del estudiante
+        cognitive_profile = student.get("cognitive_profile", {})
+        
+        # Generar recomendaciones según el perfil
+        recommendations = {
+            "learning_methodologies": [],
+            "content_types": [],
+            "resources": []
+        }
+        
+        # 1. Metodologías de aprendizaje recomendadas
+        learning_method_strengths = {}
+        
+        # Calcular compatibilidad con metodologías según perfil
+        for method_type, compatibility in LearningMethodologyTypes.get_default_content_compatibility().items():
+            score = 0
+            
+            # Aumentar puntuación según perfil cognitivo
+            if method_type == "visual" and cognitive_profile.get("visual_strength", 0) > 0.6:
+                score += 2
+            elif method_type == "auditory" and cognitive_profile.get("auditory_strength", 0) > 0.6:
+                score += 2
+            elif method_type == "read_write" and cognitive_profile.get("read_write_strength", 0) > 0.6:
+                score += 2
+            elif method_type == "kinesthetic" and cognitive_profile.get("kinesthetic_strength", 0) > 0.6:
+                score += 2
+                
+            # Ajustar según adaptaciones específicas
+            if method_type == "adhd_adapted" and cognitive_profile.get("adhd", False):
+                score += 3
+            elif method_type == "dyslexia_adapted" and cognitive_profile.get("dyslexia", False):
+                score += 3
+            elif method_type == "autism_adapted" and cognitive_profile.get("autism", False):
+                score += 3
+                
+            if score > 0:
+                learning_method_strengths[method_type] = score
+        
+        # Ordenar metodologías por puntuación
+        sorted_methods = sorted(learning_method_strengths.items(), key=lambda x: x[1], reverse=True)
+        recommendations["learning_methodologies"] = [
+            {"code": method, "score": score} 
+            for method, score in sorted_methods[:5]
+        ]
+        
+        # 2. Tipos de contenido recomendados según metodologías
+        content_type_scores = {}
+        
+        # Puntuar tipos de contenido según metodologías recomendadas
+        for method, score in sorted_methods[:3]:  # Usar top 3 metodologías
+            compatible_types = LearningMethodologyTypes.get_default_content_compatibility().get(method, [])
+            for content_type in compatible_types:
+                if content_type in content_type_scores:
+                    content_type_scores[content_type] += score
+                else:
+                    content_type_scores[content_type] = score
+        
+        # Ordenar tipos de contenido por puntuación
+        sorted_types = sorted(content_type_scores.items(), key=lambda x: x[1], reverse=True)
+        recommendations["content_types"] = [
+            {"code": ctype, "score": score} 
+            for ctype, score in sorted_types[:8]  # Recomendar top 8 tipos
+        ]
+        
+        # 3. Recursos específicos del módulo virtual
+        # Obtener el módulo original asociado al módulo virtual
+        original_module_id = virtual_module.get("module_id")
+        if original_module_id:
+            # Obtener temas del módulo original
+            topics = list(get_db().topics.find({"module_id": ObjectId(original_module_id)}))
+            
+            if topics:
+                # Usar el primer tema para recomendaciones
+                sample_topic = str(topics[0]["_id"])
+                
+                # Importar servicio de recomendaciones
+                from src.study_plans.services import ContentRecommendationService
+                
+                recommendation_service = ContentRecommendationService()
+                topic_recommendations = recommendation_service.get_content_recommendations(sample_topic)
+                
+                # Añadir recursos recomendados para el módulo
+                recommendations["resources"] = {
+                    "from_virtual_module": virtual_module_id,
+                    "pdfs": topic_recommendations.get("pdfs", [])[:3],
+                    "web_resources": topic_recommendations.get("web_resources", [])[:3],
+                    "diagrams": topic_recommendations.get("diagrams", {}).get("existing_diagrams", [])[:2]
+                }
+        
+        return APIRoute.success(data={
+            "virtual_module_id": virtual_module_id,
+            "student_id": student_id,
+            "learning_methodologies": recommendations["learning_methodologies"],
+            "content_types": recommendations["content_types"],
+            "resources": recommendations["resources"]
+        })
+    except Exception as e:
+        logging.error(f"Error al obtener recomendaciones del módulo virtual: {str(e)}")
+        return APIRoute.error(
+            ErrorCodes.SERVER_ERROR,
+            str(e),
+            status_code=500
+        )
+
 # Nuevo endpoint para listar módulos virtuales de un estudiante y plan de estudios
 @virtual_bp.route('/modules', methods=['GET'])
 @APIRoute.standard(auth_required_flag=True)
