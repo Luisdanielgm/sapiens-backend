@@ -10,6 +10,102 @@ resources_bp = APIBlueprint('resources', __name__)
 resource_service = ResourceService()
 folder_service = ResourceFolderService()
 
+@resources_bp.route('/', methods=['GET'])
+@APIRoute.standard(auth_required_flag=True)
+def list_resources():
+    """
+    Endpoint genérico para listar recursos.
+    Redirige la lógica según el rol del usuario.
+    """
+    try:
+        user_role = getattr(request, 'user_role', None)
+        
+        if user_role == ROLES["TEACHER"]:
+            # Para profesores, usar la lógica existente de teacher resources
+            email = request.args.get('email')
+            if not email:
+                return APIRoute.error(
+                    ErrorCodes.MISSING_FIELDS, 
+                    "Se requiere el email del profesor", 
+                    status_code=400
+                )
+            
+            # Reutilizar la lógica de list_teacher_resources
+            folder_id = request.args.get('folder_id')
+            query = request.args.get('query')
+            
+            teacher_id = resource_service.get_teacher_by_email(email)
+            if not teacher_id:
+                return APIRoute.error(
+                    ErrorCodes.USER_NOT_FOUND, 
+                    "Profesor no encontrado", 
+                    status_code=404
+                )
+            
+            if query:
+                filters = {}
+                if request.args.get('types'):
+                    types = request.args.get('types').split(',')
+                    filters['types'] = types
+                if request.args.get('tags'):
+                    tags = request.args.get('tags').split(',')
+                    filters['tags'] = tags
+                if request.args.get('date_from'):
+                    filters['date_from'] = request.args.get('date_from')
+                if request.args.get('date_to'):
+                    filters['date_to'] = request.args.get('date_to')
+                
+                resources = resource_service.search_teacher_resources(
+                    teacher_id, query, folder_id, filters
+                )
+            else:
+                resources = resource_service.list_teacher_resources(teacher_id, folder_id)
+            
+            return APIRoute.success(
+                {"resources": resources},
+                message="Recursos obtenidos exitosamente"
+            )
+        
+        elif user_role == ROLES["STUDENT"]:
+            # Para estudiantes, listar recursos accesibles
+            # Por ahora retornamos una lista vacía, pero se puede implementar
+            # la lógica específica para estudiantes
+            return APIRoute.success(
+                {"resources": []},
+                message="Recursos de estudiante obtenidos exitosamente"
+            )
+        
+        else:
+            # Para otros roles, usar lógica de profesor por defecto
+            email = request.args.get('email')
+            if not email:
+                return APIRoute.error(
+                    ErrorCodes.MISSING_FIELDS, 
+                    "Se requiere el email", 
+                    status_code=400
+                )
+            
+            teacher_id = resource_service.get_teacher_by_email(email)
+            if not teacher_id:
+                return APIRoute.error(
+                    ErrorCodes.USER_NOT_FOUND, 
+                    "Usuario no encontrado", 
+                    status_code=404
+                )
+            
+            resources = resource_service.list_teacher_resources(teacher_id)
+            return APIRoute.success(
+                {"resources": resources},
+                message="Recursos obtenidos exitosamente"
+            )
+            
+    except Exception as e:
+        return APIRoute.error(
+            ErrorCodes.OPERATION_FAILED, 
+            f"Error al obtener recursos: {str(e)}", 
+            status_code=500
+        )
+
 @resources_bp.route('/teacher', methods=['GET'])
 @APIRoute.standard(auth_required_flag=True, roles=[ROLES["TEACHER"]])
 def list_teacher_resources():
@@ -831,4 +927,4 @@ def create_resource_direct():
             ErrorCodes.SERVER_ERROR, 
             str(e), 
             status_code=500
-        ) 
+        )

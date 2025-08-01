@@ -514,3 +514,19 @@ def grade_evaluation(evaluation_id):
             message="Calificación registrada"
         )
     return APIRoute.error(ErrorCodes.OPERATION_FAILED, result)
+
+
+# Ruta para Metodologías de Aprendizaje
+@study_plan_bp.route('/methodologies', methods=['GET'])
+@APIRoute.standard(auth_required_flag=True)
+def list_methodologies():
+    """Lista todas las metodologías de aprendizaje activas"""
+    try:
+        methodologies = methodology_service.list_methodologies()
+        return APIRoute.success(
+            {"methodologies": methodologies},
+            message="Metodologías obtenidas exitosamente"
+        )
+    except Exception as e:
+        log_error(f"Error al obtener metodologías: {str(e)}")
+        return APIRoute.error(ErrorCodes.OPERATION_FAILED, "Error al obtener metodologías")
