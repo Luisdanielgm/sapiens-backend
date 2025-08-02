@@ -269,6 +269,40 @@ class VirtualTopicService(VerificationBaseService):
         except Exception as e:
             logging.error(f"Error al obtener contenidos del tema virtual: {str(e)}")
             return []
+    
+    def trigger_next_topic_generation(self, topic_id: str, progress: float) -> Tuple[bool, str]:
+        """
+        Activa la generación del siguiente tema cuando el progreso supera el 80%.
+        
+        Args:
+            topic_id: ID del tema actual
+            progress: Progreso actual (0-100)
+            
+        Returns:
+            Tuple[bool, str]: (Éxito, mensaje)
+        """
+        try:
+            # Validar progreso
+            if progress < 80:
+                return False, "El progreso debe ser mayor al 80% para activar la generación"
+            
+            # Obtener el tema actual
+            topic = self.collection.find_one({"_id": ObjectId(topic_id)})
+            if not topic:
+                return False, "Tema no encontrado"
+            
+            # Usar el servicio de cola optimizada para activar la generación
+            queue_service = OptimizedQueueService()
+            result = queue_service.trigger_on_progress(topic_id, progress)
+            
+            if result:
+                return True, "Generación del siguiente tema activada exitosamente"
+            else:
+                return False, "Error al activar la generación del siguiente tema"
+                
+        except Exception as e:
+            logging.error(f"Error en trigger_next_topic_generation: {str(e)}")
+            return False, f"Error interno: {str(e)}"
 
 # QuizService eliminado - Los quizzes ahora se manejan como TopicContent con content_type="quiz"
 # La funcionalidad de evaluación se migró al sistema unificado de ContentResult

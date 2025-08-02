@@ -1556,6 +1556,63 @@ class EvaluationService(VerificationBaseService):
             logging.error(f"Error obteniendo submissions: {str(e)}")
             return []
     
+    def get_submissions_by_evaluation_and_student(self, evaluation_id: str, student_id: str) -> List[Dict]:
+        """
+        Obtiene las entregas de una evaluación específica filtradas por estudiante.
+        """
+        try:
+            # Validar el evaluation_id
+            validate_object_id(evaluation_id)
+            
+            db = get_db()
+            submissions = list(db.evaluation_submissions.find({
+                "evaluation_id": ObjectId(evaluation_id),
+                "student_id": student_id
+            }))
+            
+            # Convertir ObjectIds y enriquecer con datos de estudiante
+            for submission in submissions:
+                submission["_id"] = str(submission["_id"])
+                submission["evaluation_id"] = str(submission["evaluation_id"])
+                
+                # Asegurar que student_id sea string
+                if isinstance(submission["student_id"], ObjectId):
+                    submission["student_id"] = str(submission["student_id"])
+                
+                # Agregar información del estudiante
+                student = None
+                try:
+                    # Intentar buscar por ObjectId si student_id puede convertirse
+                    student = db.users.find_one({"_id": ObjectId(submission["student_id"])})
+                except:
+                    # Si falla, buscar por string
+                    student = db.users.find_one({"_id": submission["student_id"]})
+                
+                if student:
+                    submission["student"] = {
+                        "name": student.get("name", ""),
+                        "email": student.get("email", ""),
+                        "picture": student.get("picture", "")
+                    }
+                
+                # Agregar información del evaluador si existe
+                if submission.get("graded_by"):
+                    try:
+                        grader = db.users.find_one({"_id": ObjectId(submission["graded_by"])})
+                        if grader:
+                            submission["grader"] = {
+                                "name": grader.get("name", ""),
+                                "email": grader.get("email", "")
+                            }
+                    except Exception as e:
+                        logging.warning(f"Error obteniendo datos del evaluador: {e}")
+            
+            return submissions
+            
+        except Exception as e:
+            logging.error(f"Error obteniendo submissions por estudiante: {str(e)}")
+            return []
+    
     def get_submission_by_student(self, evaluation_id: str, student_id: str) -> Optional[Dict]:
         """
         Obtiene la entrega de un estudiante específico para una evaluación.
@@ -2845,18 +2902,108 @@ class EvaluationResourceService(VerificationBaseService):
 
 
 class AutomaticGradingService:
-    """Servicio simple para corrección automática de entregas."""
+    """Servicio para corrección automática de entregas."""
+
+    def __init__(self):
+        self.db = get_db()
 
     def grade_submission(self, resource_id: str, evaluation_id: str) -> Dict:
-        """Genera una calificación simulada para la entrega."""
+        """Califica automáticamente una entrega basada en el recurso y evaluación."""
         try:
+            # Obtener información del recurso (archivo entregado)
+            resource = self.db.resources.find_one({"_id": ObjectId(resource_id)})
+            if not resource:
+                return {"grade": 0.0, "feedback": "Recurso no encontrado"}
+            
+            # Obtener información de la evaluación
+            evaluation = self.db.evaluations.find_one({"_id": ObjectId(evaluation_id)})
+            if not evaluation:
+                return {"grade": 0.0, "feedback": "Evaluación no encontrada"}
+            
+            # Lógica de calificación automática básica
+            grade = self._calculate_automatic_grade(resource, evaluation)
+            feedback = self._generate_automatic_feedback(resource, evaluation, grade)
+            
             return {
-                "grade": 100.0,
-                "feedback": "Calificado automáticamente",
-                "graded_at": datetime.now()
+                "grade": grade,
+                "feedback": feedback,
+                "graded_at": datetime.now(),
+                "auto_graded": True
             }
+        except Exception as e:
+            logging.error(f"Error en calificación automática: {str(e)}")
+            return {
+                "grade": 0.0, 
+                "feedback": f"Error en calificación automática: {str(e)}",
+                "graded_at": datetime.now(),
+                "auto_graded": True
+            }
+    
+    def _calculate_automatic_grade(self, resource: Dict, evaluation: Dict) -> float:
+        """Calcula la calificación automática basada en criterios simples."""
+        try:
+            # Criterios básicos de calificación automática
+            base_score = 70.0  # Puntuación base por entregar
+            
+            # Bonus por tipo de archivo
+            file_type_bonus = 0.0
+            resource_type = resource.get("type", "")
+            if resource_type in ["pdf", "docx", "doc"]:
+                file_type_bonus = 10.0
+            elif resource_type in ["txt", "md"]:
+                file_type_bonus = 5.0
+            
+            # Bonus por tamaño del archivo (indica esfuerzo)
+            size_bonus = 0.0
+            file_size = resource.get("size", 0)
+            if file_size > 1024:  # Más de 1KB
+                size_bonus = 10.0
+            elif file_size > 512:  # Más de 512B
+                size_bonus = 5.0
+            
+            # Bonus por entrega temprana (si hay fecha límite)
+            timing_bonus = 0.0
+            due_date = evaluation.get("due_date")
+            if due_date and isinstance(due_date, datetime):
+                submitted_at = resource.get("created_at", datetime.now())
+                if submitted_at < due_date:
+                    timing_bonus = 5.0
+            
+            total_score = min(100.0, base_score + file_type_bonus + size_bonus + timing_bonus)
+            return total_score
+            
         except Exception:
-            return {"grade": 100.0, "feedback": "Auto"}
+            return 70.0  # Puntuación por defecto
+    
+    def _generate_automatic_feedback(self, resource: Dict, evaluation: Dict, grade: float) -> str:
+        """Genera feedback automático basado en la calificación."""
+        try:
+            feedback_parts = ["Calificación automática:"]
+            
+            if grade >= 90:
+                feedback_parts.append("Excelente entrega.")
+            elif grade >= 80:
+                feedback_parts.append("Buena entrega.")
+            elif grade >= 70:
+                feedback_parts.append("Entrega satisfactoria.")
+            else:
+                feedback_parts.append("Entrega necesita mejoras.")
+            
+            # Agregar detalles específicos
+            resource_type = resource.get("type", "")
+            if resource_type in ["pdf", "docx", "doc"]:
+                feedback_parts.append("Formato de archivo apropiado.")
+            
+            file_size = resource.get("size", 0)
+            if file_size > 1024:
+                feedback_parts.append("Archivo con contenido sustancial.")
+            
+            feedback_parts.append("Revisión manual recomendada para feedback detallado.")
+            
+            return " ".join(feedback_parts)
+            
+        except Exception:
+            return "Calificado automáticamente. Revisión manual recomendada."
 
 class TopicReadinessService(VerificationBaseService):
     """

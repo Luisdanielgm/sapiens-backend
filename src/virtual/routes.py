@@ -1557,7 +1557,7 @@ def trigger_next_topic():
         progress = data.get('progress', 0)
         
         # 1. Validar progreso mínimo
-        if progress < 0.8:
+        if progress < 80:
             return APIRoute.error(
                 ErrorCodes.BAD_REQUEST,
                 "El progreso debe ser mayor al 80% para activar siguiente generación de temas",

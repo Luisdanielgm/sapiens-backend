@@ -468,16 +468,35 @@ def upload_evaluation_submission(evaluation_id):
 @study_plan_bp.route('/evaluations/<evaluation_id>/submissions', methods=['GET'])
 @APIRoute.standard(auth_required_flag=True, roles=[ROLES["TEACHER"]])
 def list_evaluation_submissions(evaluation_id):
-    """Lista todas las entregas de una evaluación."""
-    submissions = evaluation_service.get_submissions_by_evaluation(evaluation_id)
+    """Lista todas las entregas de una evaluación. Opcionalmente filtra por student_id."""
+    student_id = request.args.get('student_id')
+    if student_id:
+        submissions = evaluation_service.get_submissions_by_evaluation_and_student(evaluation_id, student_id)
+    else:
+        submissions = evaluation_service.get_submissions_by_evaluation(evaluation_id)
     submissions = ensure_json_serializable(submissions)
     return APIRoute.success(data={"submissions": submissions})
 
 
+@study_plan_bp.route('/evaluation/submission/<submission_id>', methods=['PUT'])
+@APIRoute.standard(auth_required_flag=True, roles=[ROLES["TEACHER"], ROLES["ADMIN"]], required_fields=['grade'])
+def grade_submission_manual(submission_id):
+    """Califica manualmente una entrega de estudiante."""
+    data = request.get_json() or {}
+    grade_data = {
+        'grade': data.get('grade'),
+        'feedback': data.get('feedback', ''),
+        'graded_by': request.user_id
+    }
+    success, message = evaluation_service.grade_submission(submission_id, grade_data)
+    if success:
+        return APIRoute.success(data={"message": message}, message=message)
+    return APIRoute.error(ErrorCodes.OPERATION_FAILED, message)
+
 @study_plan_bp.route('/submissions/<submission_id>/grade', methods=['POST'])
 @APIRoute.standard(auth_required_flag=True, roles=[ROLES["TEACHER"], ROLES["ADMIN"]], required_fields=['grade'])
 def grade_submission(submission_id):
-    """Califica una entrega de estudiante."""
+    """Califica una entrega de estudiante (endpoint legacy)."""
     data = request.get_json() or {}
     grade_data = {
         'grade': data.get('grade'),
