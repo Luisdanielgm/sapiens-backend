@@ -70,12 +70,51 @@ Fase 1 – Corrección de Errores e Integración Básica:
 5.	Endpoint virtualization-settings: Si tras revisión se concluye que no es necesario intervención manual del profesor para “habilitar” un módulo (porque el sistema chequea contenidos publicados), entonces eliminar la función updateVirtualizationSettings del frontend para evitar llamadas 404. Si sí se quiere esa funcionalidad (por ejemplo, permitir forzar virtualización aunque falte contenido), implementarla en backend: PUT /api/modules/<id>/virtualization-settings que setee Module.virtualization_requirements o un flag ready_for_virtualization. En tal caso, usarlo en get_virtualization_readiness para decidir ready/not ready.
 6.	Trigger Next Topic bug: Arreglar la condición en backend para generación de próximo tema: cambiar if progress < 0.8: a if progress < 80: (u optar por manejar siempre 0-1 float consistentemente en front y back). Este bug menor debe corregirse para que la generación fluida de temas funcione como esperado[111].
 7.	Sidebar alumno – generación inicial: Modificar el componente de sidebar del estudiante de forma que, si la lista de módulos virtuales viene vacía, ofrezca iniciar el curso. Concretamente: si virtualModules.length === 0, mostrar un botón “Generar primer módulo” que llame al servicio de generación progresiva. Ese servicio (startProgressiveGeneration ya implementado en front) hace POST /api/virtual/progressive-generation con studentId y planId[116][117], obteniendo posiblemente un immediate_result con el primer módulo[7]. Tras esta llamada, refrescar la lista de módulos virtuales para que aparezca el recién creado. Nota: El backend ya maneja que en esa llamada se genere el primer módulo instantáneamente[5][6], por lo que la UX será inmediata. Esto cierra el bug del menú lateral.
-8.	Entregas de Evaluaciones (Tareas) – Subida y Listado:
-9.	Endpoint de subida: Implementar en backend un endpoint POST /api/study-plan/evaluation/<eval_id>/submit accesible a estudiantes. Este endpoint recibirá un archivo (multipart) o JSON con content/url según submission_type. En su lógica: crear un registro en resources (si es archivo, subir a storage y guardar URL), luego instanciar EvaluationResource(evaluation_id, resource_id, role="submission", created_by=student_id). Opcional: también crear un EvaluationSubmission entry para notas, aunque puede no ser necesario inicialmente. Devolver status 201.
-10.	Endpoint de listado: Implementar GET /api/study-plan/evaluation/<eval_id>/submissions?student_id=.... Este buscará en evaluation_resources aquellos con evaluation_id y role "submission", filtrando por student (esto se deduce vía Resource -> quizás incluir created_by o usar EvaluationSubmission si se decidió guardar). Devolver lista de recursos (con campos como nombre archivo, url) o de un objeto que combine info de recurso y calificación si disponible.
-11.	Integración front: Ajustar submitDeliverable() en frontend (observado en EvaluationManager.tsx importado[118]) para que use el nuevo endpoint. Este se llamará cuando el alumno suba un archivo en el componente de entrega (posiblemente a implementar). Además, en la vista del profesor, hacer que getEvaluationResources(eid,'submission', studentId) apunte a /submissions?student_id. Tras implementar, la sección de entregables mostrará los archivos entregados con sus links[119].
-12.	Nota: Como atajo, se podría usar el módulo resources existente: permitir a estudiante usar POST /api/resources (actualmente orientado a profesor) pero indicando en el body evaluation_id para que el backend sepa asociarlo. Sin embargo, es más limpio tener la ruta contextual de evaluación.
-13.	Calificación de entregas: Agregar funcionalidad para que el profesor califique entregas manualmente. Puede ser mediante PUT /api/study-plan/evaluation/submission/<submission_id> con grade y feedback. Alternativamente, aprovechar el endpoint /evaluation/result existente: permitir que si requires_submission, el profesor llame a record_result con evaluation_id y student_id una vez revisado el archivo. Dado que ya existe ese endpoint[63], podemos usarlo: el profesor ingresará la nota en la UI (campo de texto o slider), y al guardar invocamos record_result. Así evitamos crear duplicidad de rutas. Solo asegurarse de reflejar ese resultado en la interfaz (el frontend ya al cargar evaluaciones con studentId obtiene resultados y los muestra en resultsMap[48]).
+8.	✅ IMPLEMENTADO - Sistema de Entregas de Estudiantes:
+
+**ESTADO ACTUAL CORREGIDO:**
+El sistema de entregas YA ESTÁ IMPLEMENTADO en el backend con los siguientes endpoints funcionales:
+- ✅ `POST /api/study-plan/evaluations/<evaluation_id>/submissions` - Permite a estudiantes subir archivos como entregas
+- ✅ `GET /api/study-plan/evaluations/<evaluation_id>/submissions` - Lista todas las entregas de una evaluación (con filtro opcional por student_id)
+- ✅ `PUT /api/study-plan/evaluation/submission/<submission_id>` - Calificación manual de entregas por profesores
+- ✅ Modelos: `EvaluationSubmission` con campos para metadatos, notas, feedback, y control de intentos
+- ✅ Servicios: `create_submission()`, `grade_submission()`, `get_submissions_by_evaluation_and_student()`
+- ✅ Validaciones: verificación de evaluation_id, student_id, manejo de resubmisiones y límites de intentos
+- ✅ Integración con auto-grading: soporte para corrección automática cuando `auto_grading=true`
+
+**🔄 RECOMENDACIONES PARA COMPLETAR LA INTEGRACIÓN:**
+
+9.1. **Frontend - Integración de Entregas:**
+   - Actualizar `submitDeliverable()` en `EvaluationManager.tsx` para usar el endpoint correcto: `POST /api/study-plan/evaluations/${evaluationId}/submissions`
+   - Implementar `getEvaluationResources()` para listar entregas usando: `GET /api/study-plan/evaluations/${evaluationId}/submissions?student_id=${studentId}`
+   - Agregar componente para mostrar historial de intentos de entrega del estudiante
+   - Implementar interfaz para que estudiantes vean el estado de sus entregas (pendiente, calificada, feedback)
+
+9.2. **Funcionalidades Adicionales Recomendadas:**
+   - Endpoint para que estudiantes consulten solo sus propias entregas: `GET /api/study-plan/student/submissions`
+   - Sistema de notificaciones cuando una entrega es calificada
+   - Límites configurables de intentos de entrega por evaluación
+   - Soporte para múltiples archivos por entrega
+   - Validación de tipos de archivo permitidos por evaluación
+   - Historial detallado de intentos con timestamps y versiones
+
+9.3. **Mejoras de UX:**
+   - Indicadores visuales del estado de entrega (subida, procesando, calificada)
+   - Preview de archivos entregados antes de envío final
+   - Confirmación de entrega exitosa con detalles
+   - Integración con el sistema de progreso del estudiante
+**NOTA IMPORTANTE:** La documentación anterior contenía información incorrecta. El endpoint sugerido `POST /api/study-plan/evaluation/<eval_id>/submit` NO es necesario implementar, ya que el sistema actual usa un enfoque más robusto y RESTful con `POST /api/study-plan/evaluations/<evaluation_id>/submissions` que ya maneja todas las funcionalidades requeridas.
+
+**PRÓXIMOS PASOS PRIORITARIOS:**
+1. Actualizar el frontend para usar los endpoints correctos ya implementados
+2. Implementar las funcionalidades adicionales recomendadas según las necesidades del usuario
+3. Mejorar la experiencia de usuario con las sugerencias de UX listadas arriba
+4. Considerar implementar notificaciones en tiempo real para entregas calificadas
+**SISTEMA DE CALIFICACIÓN YA IMPLEMENTADO:**
+La calificación de entregas YA ESTÁ FUNCIONAL con `PUT /api/study-plan/evaluation/submission/<submission_id>` que permite a profesores asignar notas y feedback directamente a las entregas. Este endpoint es más específico y apropiado que usar el endpoint genérico de resultados.
+
+**RESUMEN DEL ESTADO ACTUAL:**
+El sistema de entregas de estudiantes está **COMPLETAMENTE IMPLEMENTADO** en el backend. Solo requiere ajustes menores en el frontend para usar los endpoints correctos y agregar las funcionalidades adicionales recomendadas para mejorar la experiencia de usuario.
 14.	✅ IMPLEMENTADO - Auto-corrección integración: La arquitectura de auto-corrección está implementada con división de responsabilidades entre frontend y backend. El procesamiento multimodal (OCR, análisis de imágenes/PDFs) se maneja completamente en el frontend usando Gemini, que procesa los archivos y extrae el texto/contenido. El backend recibe los resultados procesados y maneja la lógica de corrección a través de CorrectionService.start_correction_task. Cuando una evaluación tiene auto_grading=True y se recibe una entrega, el flujo es: 1) Frontend procesa el archivo con Gemini (OCR/análisis), 2) Frontend envía los resultados al backend vía POST /api/correction/start, 3) Backend gestiona la tarea de corrección y almacena los resultados. Esta arquitectura evita que el backend maneje procesamiento de imágenes/PDFs directamente, delegando el procesamiento multimodal al frontend que tiene acceso directo a Gemini.
 15.	Pulir Evaluaciones y Resultados:
 16.	Ahora que EvaluationResult fue deprecado a favor de ContentResult[62], verificar que todos los lugares lo usan. En especial:
