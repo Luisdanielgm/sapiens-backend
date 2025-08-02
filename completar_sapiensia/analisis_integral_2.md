@@ -39,7 +39,7 @@ Conclusión del Análisis del Estado: La plataforma SapiensIA ya implementa la m
 2. **Eliminación en Cascada** - Verificar y completar borrado de datos virtuales relacionados
 3. **Marketplace de Cursos Públicos y Suscripciones** - Planificado para fases posteriores
 4. **Aplicación Móvil** - API lista, falta desarrollo de app nativa
-5. **Integración completa de IA para auto-corrección** - Estructura implementada, falta conexión con servicios de IA
+5. **✅ IMPLEMENTADO - Integración de IA para auto-corrección** - Arquitectura implementada con procesamiento multimodal en frontend (Gemini) y gestión de tareas en backend
 6. **Endpoints específicos para subida de entregas de estudiantes** - Falta endpoint dedicado POST para entregas
 7. **Ajustes finos de frontend vs backend** - Algunas rutas requieren sincronización
 8. **Temporizador Pomodoro completo** - Contexto iniciado, falta UI completa
@@ -47,7 +47,7 @@ Conclusión del Análisis del Estado: La plataforma SapiensIA ya implementa la m
 ### PRIORIDADES INMEDIATAS:
 1. Completar endpoints de subida de entregas para estudiantes
 2. Implementar eliminación en cascada completa
-3. Integrar servicios de IA para corrección automática
+3. ✅ IMPLEMENTADO - Servicios de IA para corrección automática integrados (procesamiento multimodal en frontend)
 4. Sincronizar rutas de frontend con backend (especialmente perfiles cognitivos)
 5. Finalizar UI del temporizador Pomodoro
 Incoherencias Detectadas entre Frontend y Backend
@@ -76,7 +76,7 @@ Fase 1 – Corrección de Errores e Integración Básica:
 11.	Integración front: Ajustar submitDeliverable() en frontend (observado en EvaluationManager.tsx importado[118]) para que use el nuevo endpoint. Este se llamará cuando el alumno suba un archivo en el componente de entrega (posiblemente a implementar). Además, en la vista del profesor, hacer que getEvaluationResources(eid,'submission', studentId) apunte a /submissions?student_id. Tras implementar, la sección de entregables mostrará los archivos entregados con sus links[119].
 12.	Nota: Como atajo, se podría usar el módulo resources existente: permitir a estudiante usar POST /api/resources (actualmente orientado a profesor) pero indicando en el body evaluation_id para que el backend sepa asociarlo. Sin embargo, es más limpio tener la ruta contextual de evaluación.
 13.	Calificación de entregas: Agregar funcionalidad para que el profesor califique entregas manualmente. Puede ser mediante PUT /api/study-plan/evaluation/submission/<submission_id> con grade y feedback. Alternativamente, aprovechar el endpoint /evaluation/result existente: permitir que si requires_submission, el profesor llame a record_result con evaluation_id y student_id una vez revisado el archivo. Dado que ya existe ese endpoint[63], podemos usarlo: el profesor ingresará la nota en la UI (campo de texto o slider), y al guardar invocamos record_result. Así evitamos crear duplicidad de rutas. Solo asegurarse de reflejar ese resultado en la interfaz (el frontend ya al cargar evaluaciones con studentId obtiene resultados y los muestra en resultsMap[48]).
-14.	Auto-corrección integracion: Una vez que las entregas están almacenadas como recursos, conectar con la corrección automática. Es decir, cuando se recibe un PDF/imágen como entrega y la evaluación tiene auto_grading=True, llamar internamente a CorrectionService.start_correction_task (ya usado en /api/correction/start). Quizá esto se haga mediante un trigger asíncrono o de forma explícita: el profesor tras plazo de entrega podría seleccionar “Calificar automáticamente” y el front llamaría /api/correction/start con el submission_resource_id. En cualquier caso, confirmar que el flujo de CorrectionTask se puede iniciar con entregas estudiantiles, no solo con exámenes subidos por profesor. Este punto puede quedar para Fase 2 si es complejo, pero conviene planificarlo.
+14.	✅ IMPLEMENTADO - Auto-corrección integración: La arquitectura de auto-corrección está implementada con división de responsabilidades entre frontend y backend. El procesamiento multimodal (OCR, análisis de imágenes/PDFs) se maneja completamente en el frontend usando Gemini, que procesa los archivos y extrae el texto/contenido. El backend recibe los resultados procesados y maneja la lógica de corrección a través de CorrectionService.start_correction_task. Cuando una evaluación tiene auto_grading=True y se recibe una entrega, el flujo es: 1) Frontend procesa el archivo con Gemini (OCR/análisis), 2) Frontend envía los resultados al backend vía POST /api/correction/start, 3) Backend gestiona la tarea de corrección y almacena los resultados. Esta arquitectura evita que el backend maneje procesamiento de imágenes/PDFs directamente, delegando el procesamiento multimodal al frontend que tiene acceso directo a Gemini.
 15.	Pulir Evaluaciones y Resultados:
 16.	Ahora que EvaluationResult fue deprecado a favor de ContentResult[62], verificar que todos los lugares lo usan. En especial:
 o	El endpoint record_evaluation_result ya llama a servicio que usa ContentResult[64], correcto.
