@@ -121,6 +121,9 @@ class InstituteMember:
         user_id: str,
         role: str,
         permissions: Optional[Dict[str, Any]] = None,
+        workspace_type: str = "INSTITUTE",
+        workspace_name: Optional[str] = None,
+        class_id: Optional[str] = None,
         joined_at: Optional[datetime] = None,
         _id: Optional[ObjectId] = None
     ):
@@ -129,6 +132,9 @@ class InstituteMember:
         self.user_id = ObjectId(user_id)
         self.role = role
         self.permissions = permissions or {}
+        self.workspace_type = workspace_type
+        self.workspace_name = workspace_name
+        self.class_id = ObjectId(class_id) if class_id else None
         self.joined_at = joined_at or datetime.now()
 
     def to_dict(self) -> Dict[str, Any]:
@@ -139,5 +145,9 @@ class InstituteMember:
             "user_id": self.user_id,
             "role": self.role,
             "permissions": self.permissions,
-            "joined_at": self.joined_at
+            "workspace_type": self.workspace_type,
+            "workspace_name": self.workspace_name,
+            "joined_at": self.joined_at,
         }
+        if self.class_id:
+            base_dict["class_id"] = self.class_id

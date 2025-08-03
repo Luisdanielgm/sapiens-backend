@@ -35,9 +35,16 @@ def register():
         success, user_id_or_error = user_service.register_user(data)
 
         if success:
-            institutes = membership_service.get_user_institutes(user_id_or_error)
-            institute_id = str(institutes[0]['_id']) if institutes else None
-            claims = {"institute_id": institute_id} if institute_id else None
+            workspaces = membership_service.get_user_workspaces(user_id_or_error)
+            if workspaces:
+                first_ws = workspaces[0]
+                claims = {
+                    "workspace_id": first_ws["_id"],
+                    "institute_id": first_ws["institute_id"],
+                    "role": first_ws["role"]
+                }
+            else:
+                claims = None
             access_token = create_access_token(identity=user_id_or_error, additional_claims=claims)
             user_info = user_service.get_user_info(data['email'])
             return APIRoute.success(
@@ -99,9 +106,16 @@ def login():
 
         # -- Generación de Token --
         if user_info:
-            institutes = membership_service.get_user_institutes(user_info['id'])
-            institute_id = str(institutes[0]['_id']) if institutes else None
-            claims = {"institute_id": institute_id} if institute_id else None
+            workspaces = membership_service.get_user_workspaces(user_info['id'])
+            if workspaces:
+                first_ws = workspaces[0]
+                claims = {
+                    "workspace_id": first_ws["_id"],
+                    "institute_id": first_ws["institute_id"],
+                    "role": first_ws["role"]
+                }
+            else:
+                claims = None
             access_token = create_access_token(identity=user_info['id'], additional_claims=claims)
             return APIRoute.success(
                 data={"token": access_token, "user": user_info},

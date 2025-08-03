@@ -42,13 +42,20 @@ class MembershipService(VerificationBaseService):
         if not institute:
             raise AppException("Instituto no encontrado", ErrorCodes.INSTITUTE_NOT_FOUND)
 
-        # Verificar que el usuario no sea ya miembro
+        workspace_type = member_data.get('workspace_type', 'INSTITUTE')
+
+        # Verificar que el usuario no sea ya miembro del mismo workspace
         existing_member = self.collection.find_one({
             "institute_id": ObjectId(member_data['institute_id']),
-            "user_id": ObjectId(member_data['user_id'])
+            "user_id": ObjectId(member_data['user_id']),
+            "workspace_type": workspace_type
         })
         if existing_member:
-            raise AppException("El usuario ya es miembro del instituto", ErrorCodes.ALREADY_EXISTS)
+            raise AppException("El usuario ya es miembro del workspace", ErrorCodes.ALREADY_EXISTS)
+
+        member_data.setdefault('workspace_type', workspace_type)
+        member_data.setdefault('workspace_name', None)
+        member_data.setdefault('class_id', None)
 
         # Crear y guardar el nuevo miembro
         member = InstituteMember(**member_data)
@@ -378,6 +385,40 @@ class MembershipService(VerificationBaseService):
             return enriched_institutes
         except Exception as e:
             print(f"Error al obtener institutos del usuario: {str(e)}")
+            return []
+
+    def get_user_workspaces(self, user_id: str) -> List[Dict]:
+        """
+        Obtiene todos los workspaces de los que un usuario es miembro.
+        """
+        try:
+            memberships = list(self.collection.find({"user_id": ObjectId(user_id)}))
+            if not memberships:
+                return []
+
+            institute_ids = [m["institute_id"] for m in memberships]
+            institutes = list(get_db().institutes.find({"_id": {"$in": institute_ids}}))
+            institute_map = {str(inst["_id"]): inst for inst in institutes}
+
+            workspaces = []
+            for m in memberships:
+                inst = institute_map.get(str(m["institute_id"]))
+                workspace = {
+                    "_id": str(m["_id"]),
+                    "institute_id": str(m["institute_id"]),
+                    "workspace_type": m.get("workspace_type", "INSTITUTE"),
+                    "workspace_name": m.get("workspace_name") or (inst.get("name") if inst else None),
+                    "role": m.get("role"),
+                }
+                if inst:
+                    workspace["institute"] = {
+                        "name": inst.get("name"),
+                        "status": inst.get("status"),
+                    }
+                workspaces.append(workspace)
+            return workspaces
+        except Exception as e:
+            print(f"Error al obtener workspaces del usuario: {str(e)}")
             return []
 
     def get_user_classes(self, user_id: str) -> List[Dict]:

@@ -114,8 +114,12 @@ def setup_database_indexes():
         except Exception as e:
             logger.warning(f"No se pudo eliminar el índice existente: {str(e)}")
             
-        # Crear el nuevo índice con unique=True
-        db.institute_members.create_index([("institute_id", ASCENDING), ("user_id", ASCENDING)], unique=True)
+        # Crear el nuevo índice con unique=True incluyendo workspace_type
+        db.institute_members.create_index([
+            ("institute_id", ASCENDING),
+            ("user_id", ASCENDING),
+            ("workspace_type", ASCENDING)
+        ], unique=True)
         db.institute_members.create_index([("user_id", ASCENDING)])
         db.institute_members.create_index([("role", ASCENDING)])
         

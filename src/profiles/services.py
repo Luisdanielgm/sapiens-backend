@@ -801,14 +801,7 @@ class ProfileService(VerificationBaseService):
         if not user_role:
             return False, f"No se pudo determinar el rol del usuario: {user_id_or_email}"
             
-        # --- Mapeo de Roles Individuales a Roles Base ---
-        if user_role == "INDIVIDUAL_TEACHER":
-            base_role = "TEACHER"
-        elif user_role == "INDIVIDUAL_STUDENT":
-            base_role = "STUDENT"
-        else:
-            base_role = user_role
-        # ------------------------------------------------
+        base_role = user_role
 
         if base_role == "TEACHER":
             return self.create_teacher_profile(user_id_or_email, {})

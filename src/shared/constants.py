@@ -17,11 +17,14 @@ ROLES = {
     "STUDENT": "student",
     "TEACHER": "teacher",
     "INSTITUTE_ADMIN": "institute_admin",
-    "ADMIN": "admin",
-    "SUPER_ADMIN": "super_admin", # Rol para administración total del sistema
-    "SYSTEM": "system",             # Rol para procesos internos y automáticos
-    "INDIVIDUAL_TEACHER": "individual_teacher", # Rol para profesores independientes
-    "INDIVIDUAL_STUDENT": "individual_student"  # Rol para estudiantes autodidactas
+    "ADMIN": "admin"
+}
+
+# Types of workspaces
+WORKSPACE_TYPES = {
+    "INSTITUTE": "INSTITUTE",
+    "INDIVIDUAL_TEACHER": "INDIVIDUAL_TEACHER",
+    "INDIVIDUAL_STUDENT": "INDIVIDUAL_STUDENT",
 }
 
 # Niveles de dificultad
