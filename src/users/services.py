@@ -96,45 +96,6 @@ class UserService(VerificationBaseService):
                     logging.error(f"Error al crear los perfiles de instituto: {str(profile_error)}")
                     # Continuar a pesar del error en la creación del perfil
 
-            # Flujo para Usuarios Individuales (Profesores y Estudiantes)
-            elif user_role in ['INDIVIDUAL_TEACHER', 'INDIVIDUAL_STUDENT']:
-                db = get_db()
-                
-                # 1. Obtener/Crear Instituto y Entidades Académicas Genéricas
-                generic_entities = self.generic_academic_service.get_or_create_generic_entities()
-                institute_id = ObjectId(generic_entities["institute_id"])
-                
-                # 2. Vincular al usuario como miembro del instituto genérico
-                db.institute_members.insert_one({
-                    'institute_id': institute_id,
-                    'user_id': user_id,
-                    'role': user_role, # Mantener su rol específico
-                    'joined_at': datetime.now()
-                })
-
-                # 3. Flujo especial para profesores individuales: crear una clase personal
-                if user_role == 'INDIVIDUAL_TEACHER':
-                    # Usar los IDs de las entidades genéricas para crear la clase
-                    class_data = {
-                        "name": f"Clase Personal de {user.name}",
-                        "description": "Tu espacio para crear y gestionar tus propios planes de estudio.",
-                        "institute_id": generic_entities["institute_id"],
-                        "level_id": generic_entities["level_id"],
-                        "academic_period_id": generic_entities["academic_period_id"],
-                        "subject_id": generic_entities["subject_id"],
-                        "section_id": generic_entities["section_id"],
-                        "created_by": str(user_id)
-                    }
-                    try:
-                        success, class_id_or_msg = self.class_service.create_class(class_data)
-                        if success:
-                            logging.info(f"Clase personal creada para profesor individual {user_id}: {class_id_or_msg}")
-                        else:
-                            logging.warning(f"No se pudo crear la clase personal para {user_id}: {class_id_or_msg}")
-                    except Exception as e:
-                        logging.error(f"Error creando clase para profesor individual: {str(e)}")
-
-
             # Crear perfiles para el usuario según su rol
             try:
                 # Usar el servicio de perfiles para crear el perfil adecuado
