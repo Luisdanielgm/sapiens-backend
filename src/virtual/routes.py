@@ -1596,7 +1596,7 @@ def trigger_next_topic():
         )
 
 @virtual_bp.route('/process-queue', methods=['POST'])
-@APIRoute.standard(auth_required_flag=True, roles=[ROLES.get("TEACHER", "TEACHER"), "SYSTEM"])
+@APIRoute.standard(auth_required_flag=True, roles=[ROLES["ADMIN"]])
 def process_generation_queue():
     """
     Procesa tareas pendientes de la cola de generación.
@@ -2143,7 +2143,7 @@ def get_student_progress():
         )
 
 @virtual_bp.route('/content/<virtual_content_id>/trigger-next', methods=['POST'])
-@APIRoute.standard(auth_required_flag=True, roles=[ROLES["STUDENT"], ROLES["SYSTEM"]])
+@APIRoute.standard(auth_required_flag=True, roles=[ROLES["STUDENT"]])
 def trigger_next_topic_generation(virtual_content_id):
     """
     Endpoint manual para activar la generación del siguiente tema.
@@ -2338,7 +2338,7 @@ def complete_virtual_module(module_id):
 # ===== ENDPOINTS DE BULK OPERATIONS =====
 
 @virtual_bp.route('/student/<student_id>/complete-reading-contents', methods=['POST'])
-@APIRoute.standard(auth_required_flag=True, roles=[ROLES["TEACHER"], ROLES["SYSTEM"]])
+@APIRoute.standard(auth_required_flag=True, roles=[ROLES["TEACHER"]])
 def bulk_complete_reading_contents(student_id):
     """
     Completa en lote todos los contenidos de lectura pendientes de un estudiante.
@@ -2408,7 +2408,7 @@ def bulk_complete_reading_contents(student_id):
 # ===== ENDPOINTS PARA SINCRONIZACIÓN AUTOMÁTICA =====
 
 @virtual_bp.route('/module/<virtual_module_id>/sync-auto', methods=['POST'])
-@APIRoute.standard(auth_required_flag=True, roles=[ROLES["TEACHER"], ROLES["SYSTEM"]])
+@APIRoute.standard(auth_required_flag=True, roles=[ROLES["TEACHER"]])
 def auto_sync_module(virtual_module_id):
     """
     Sincroniza automáticamente un módulo virtual si es necesario.
@@ -2458,7 +2458,7 @@ def auto_sync_module(virtual_module_id):
         )
 
 @virtual_bp.route('/sync/bulk', methods=['POST'])
-@APIRoute.standard(auth_required_flag=True, roles=[ROLES["TEACHER"], ROLES["INSTITUTE_ADMIN"], ROLES["SYSTEM"]])
+@APIRoute.standard(auth_required_flag=True, roles=[ROLES["TEACHER"], ROLES["INSTITUTE_ADMIN"]])
 def bulk_auto_sync():
     """
     Sincroniza múltiples módulos virtuales en lote.
@@ -2497,7 +2497,7 @@ def bulk_auto_sync():
         )
 
 @virtual_bp.route('/sync/schedule', methods=['POST'])
-@APIRoute.standard(auth_required_flag=True, roles=[ROLES["SYSTEM"], ROLES["INSTITUTE_ADMIN"]])
+@APIRoute.standard(auth_required_flag=True, roles=[ROLES["INSTITUTE_ADMIN"]])
 def schedule_auto_sync():
     """
     Programa sincronización automática periódica.
@@ -2597,7 +2597,7 @@ def get_sync_status(virtual_module_id):
         )
 
 @virtual_bp.route('/sync/detect-changes/<module_id>', methods=['POST'])
-@APIRoute.standard(auth_required_flag=True, roles=[ROLES["TEACHER"], ROLES["SYSTEM"]])
+@APIRoute.standard(auth_required_flag=True, roles=[ROLES["TEACHER"]])
 def detect_module_changes(module_id):
     """
     Detecta cambios en un módulo original específico.
@@ -2647,7 +2647,7 @@ def detect_module_changes(module_id):
 # ===== ENDPOINTS PARA COLA OPTIMIZADA =====
 
 @virtual_bp.route('/module/<virtual_module_id>/queue/maintain', methods=['POST'])
-@APIRoute.standard(auth_required_flag=True, roles=[ROLES["STUDENT"], ROLES["TEACHER"], ROLES["SYSTEM"]])
+@APIRoute.standard(auth_required_flag=True, roles=[ROLES["STUDENT"], ROLES["TEACHER"]])
 def maintain_topic_queue(virtual_module_id):
     """
     Mantiene la cola de temas virtuales asegurando que siempre haya 2 temas disponibles.
@@ -2682,7 +2682,7 @@ def maintain_topic_queue(virtual_module_id):
         )
 
 @virtual_bp.route('/topic/<virtual_topic_id>/trigger-progress', methods=['POST'])
-@APIRoute.standard(auth_required_flag=True, roles=[ROLES["STUDENT"], ROLES["SYSTEM"]])
+@APIRoute.standard(auth_required_flag=True, roles=[ROLES["STUDENT"]])
 def trigger_progress(virtual_topic_id):
     """
     Activa el trigger de progreso para un tema específico.
@@ -2762,7 +2762,7 @@ def get_queue_status(virtual_module_id):
         )
 
 @virtual_bp.route('/queue/bulk-initialize', methods=['POST'])
-@APIRoute.standard(auth_required_flag=True, roles=[ROLES["TEACHER"], ROLES["INSTITUTE_ADMIN"], ROLES["SYSTEM"]])
+@APIRoute.standard(auth_required_flag=True, roles=[ROLES["TEACHER"], ROLES["INSTITUTE_ADMIN"]])
 def bulk_initialize_queues():
     """
     Inicializa colas para múltiples módulos virtuales en lote.
@@ -2802,7 +2802,7 @@ def bulk_initialize_queues():
         )
 
 @virtual_bp.route('/topic/<virtual_topic_id>/unlock', methods=['POST'])
-@APIRoute.standard(auth_required_flag=True, roles=[ROLES["TEACHER"], ROLES["SYSTEM"]])
+@APIRoute.standard(auth_required_flag=True, roles=[ROLES["TEACHER"]])
 def unlock_topic_manual(virtual_topic_id):
     """
     Desbloquea manualmente un tema virtual.
@@ -2849,7 +2849,7 @@ def unlock_topic_manual(virtual_topic_id):
         )
 
 @virtual_bp.route('/queue/health-check', methods=['GET'])
-@APIRoute.standard(auth_required_flag=True, roles=[ROLES["SYSTEM"], ROLES["INSTITUTE_ADMIN"]])
+@APIRoute.standard(auth_required_flag=True, roles=[ROLES["INSTITUTE_ADMIN"]])
 def queue_health_check():
     """
     Verifica el estado de salud del sistema de colas.
@@ -3042,7 +3042,7 @@ def optimize_module_queue(module_id):
 
 
 @virtual_bp.route('/admin/queues/bulk-optimize', methods=['POST'])
-@APIRoute.standard(auth_required_flag=True, roles=[ROLES["TEACHER"], ROLES["INSTITUTE_ADMIN"], ROLES["SYSTEM"]])
+@APIRoute.standard(auth_required_flag=True, roles=[ROLES["TEACHER"], ROLES["INSTITUTE_ADMIN"]])
 def bulk_optimize_all_queues():
     """Optimiza múltiples colas de módulos virtuales en lote (endpoint administrativo)."""
     try:

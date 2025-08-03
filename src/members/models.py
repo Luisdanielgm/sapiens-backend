@@ -34,6 +34,9 @@ class InstituteMember(Member):
                  user_id: str,
                  role: str,
                  permissions: Optional[Dict] = None,
+                 workspace_type: str = "INSTITUTE",
+                 workspace_name: Optional[str] = None,
+                 class_id: Optional[str] = None,
                  status: str = "active"):
         super().__init__(user_id, role, status)
         self.institute_id = ObjectId(institute_id)
@@ -42,13 +45,20 @@ class InstituteMember(Member):
             "financial": False,
             "admin": role == "INSTITUTE_ADMIN"
         }
+        self.workspace_type = workspace_type
+        self.workspace_name = workspace_name
+        self.class_id = ObjectId(class_id) if class_id else None
 
     def to_dict(self) -> dict:
         base_dict = super().to_dict()
         base_dict.update({
             "institute_id": self.institute_id,
             "permissions": self.permissions,
+            "workspace_type": self.workspace_type,
+            "workspace_name": self.workspace_name,
         })
+        if self.class_id:
+            base_dict["class_id"] = self.class_id
         return base_dict
 
 class ClassMember(Member):

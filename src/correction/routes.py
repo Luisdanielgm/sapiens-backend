@@ -121,7 +121,7 @@ def update_correction_task(task_id):
 
 @correction_bp.route('/process-next', methods=['POST'])
 @jwt_required()
-@role_required(ROLES["SYSTEM"]) # Solo procesos del sistema pueden llamar a este endpoint
+@role_required(ROLES["ADMIN"])  # Solo administradores pueden llamar a este endpoint
 def process_next_correction_task():
     """
     Procesa la siguiente tarea de corrección pendiente en la cola.

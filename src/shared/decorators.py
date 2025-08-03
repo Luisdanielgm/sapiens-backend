@@ -1,6 +1,6 @@
 from functools import wraps
 from flask import request, jsonify, current_app
-from flask_jwt_extended import verify_jwt_in_request, get_jwt_identity
+from flask_jwt_extended import verify_jwt_in_request, get_jwt_identity, get_jwt
 import jwt
 from bson.objectid import ObjectId
 from src.shared.database import get_db
@@ -117,12 +117,16 @@ def role_required(required_roles):
             user_id = request.user_id
             db = get_db()
             
-            # Primero verificar si el usuario tiene el rol directamente en su documento
+            # Verificar rol presente en el token
+            claims = get_jwt()
+            token_role = claims.get("role")
+            if token_role and token_role in all_roles:
+                return f(*args, **kwargs)
+
+            # Verificar rol global del usuario en la base de datos
             user = db.users.find_one({"_id": ObjectId(user_id)})
-            if user and "role" in user:
-                # Comprobar tanto en minúsculas como en mayúsculas
-                if user["role"] in all_roles:
-                    return f(*args, **kwargs)
+            if user and "role" in user and user["role"] in all_roles:
+                return f(*args, **kwargs)
             
             # Roles que pueden ser verificados en institutos
             institute_roles = ['ADMIN', 'INSTITUTE_ADMIN', 'TEACHER', 'STUDENT']
