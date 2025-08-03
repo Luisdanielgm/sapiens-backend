@@ -14,6 +14,7 @@ from src.profiles.services import ProfileService
 import bcrypt
 from src.classes.services import ClassService
 from src.institute.services import GenericAcademicService
+from src.members.services import MembershipService
 
 # Función auxiliar para hacer objetos serializables
 def make_json_serializable(obj):
@@ -33,6 +34,7 @@ class UserService(VerificationBaseService):
         self.profile_service = ProfileService()
         self.class_service = ClassService()
         self.generic_academic_service = GenericAcademicService()
+        self.membership_service = MembershipService()
 
     def register_user(self, user_data: dict, institute_name: Optional[str] = None) -> Tuple[bool, str]:
         try:
@@ -95,6 +97,46 @@ class UserService(VerificationBaseService):
                 except Exception as profile_error:
                     logging.error(f"Error al crear los perfiles de instituto: {str(profile_error)}")
                     # Continuar a pesar del error en la creación del perfil
+
+            # Crear workspaces por defecto
+            try:
+                generic_entities = self.generic_academic_service.get_or_create_generic_entities()
+                generic_institute_id = generic_entities["institute_id"]
+
+                # Workspace de estudiante individual para todos
+                self.membership_service.add_institute_member({
+                    "institute_id": generic_institute_id,
+                    "user_id": str(user_id),
+                    "role": "student",
+                    "workspace_type": "INDIVIDUAL_STUDENT",
+                    "workspace_name": f"Aprendizaje de {user.name}"
+                })
+
+                # Workspace de profesor particular solo para docentes
+                if user_role == 'TEACHER':
+                    teacher_member_id = self.membership_service.add_institute_member({
+                        "institute_id": generic_institute_id,
+                        "user_id": str(user_id),
+                        "role": "teacher",
+                        "workspace_type": "INDIVIDUAL_TEACHER",
+                        "workspace_name": f"Clases de {user.name}"
+                    })
+
+                    class_data = {
+                        "institute_id": ObjectId(generic_entities["institute_id"]),
+                        "subject_id": ObjectId(generic_entities["subject_id"]),
+                        "section_id": ObjectId(generic_entities["section_id"]),
+                        "academic_period_id": ObjectId(generic_entities["academic_period_id"]),
+                        "level_id": ObjectId(generic_entities["level_id"]),
+                        "name": f"Clase Personal de {user.name}",
+                        "access_code": str(uuid.uuid4())[:8],
+                        "created_by": user_id
+                    }
+                    success_class, class_id = self.class_service.create_class(class_data)
+                    if success_class:
+                        self.membership_service.update_institute_member(teacher_member_id, {"class_id": class_id})
+            except Exception as ws_error:
+                logging.error(f"Error al crear workspaces por defecto: {str(ws_error)}")
 
             # Crear perfiles para el usuario según su rol
             try:
