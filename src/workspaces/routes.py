@@ -1,13 +1,17 @@
-from flask_jwt_extended import get_jwt_identity, create_access_token
+from flask import request
+from flask_jwt_extended import get_jwt_identity, create_access_token, get_jwt
 from bson import ObjectId
 
 from src.shared.standardization import APIBlueprint, APIRoute, ErrorCodes
 from src.shared.logging import log_error
+from src.shared.decorators import workspace_access_required, workspace_owner_required, workspace_type_required
 from src.members.services import MembershipService
+from src.workspaces.services import WorkspaceService
 from src.shared.database import get_db
 
 workspaces_bp = APIBlueprint('workspaces', __name__)
 membership_service = MembershipService()
+workspace_service = WorkspaceService()
 
 @workspaces_bp.route('/', methods=['GET'])
 @APIRoute.standard(auth_required_flag=True)
@@ -104,3 +108,126 @@ def switch_workspace(workspace_id):
     except Exception as e:
         log_error(f"Error switching workspace: {str(e)}", e, "workspaces.routes")
         return APIRoute.error(ErrorCodes.SERVER_ERROR, "No se pudo cambiar de workspace")
+
+@workspaces_bp.route('/<workspace_id>', methods=['GET'])
+@APIRoute.standard(auth_required_flag=True)
+@workspace_access_required
+def get_workspace_details(workspace_id):
+    """
+    Obtiene los detalles de un workspace específico
+    """
+    try:
+        user_id = get_jwt_identity()
+        
+        # Obtener detalles del workspace (el acceso ya fue validado por el decorador)
+        workspace_details = workspace_service.get_workspace_details(workspace_id, user_id)
+        if not workspace_details:
+            return APIRoute.error(ErrorCodes.NOT_FOUND, "Workspace no encontrado")
+        
+        return APIRoute.success(data=workspace_details)
+        
+    except Exception as e:
+        log_error(f"Error getting workspace details: {str(e)}", e, "workspaces.routes")
+        return APIRoute.error(ErrorCodes.SERVER_ERROR, "No se pudieron obtener los detalles del workspace")
+
+@workspaces_bp.route('/personal', methods=['POST'])
+@APIRoute.standard(auth_required_flag=True)
+def create_personal_workspace():
+    """
+    Crea un nuevo workspace personal para el usuario
+    """
+    try:
+        user_id = get_jwt_identity()
+        data = request.get_json()
+        
+        # Validar datos requeridos
+        if not data or not data.get('workspace_name'):
+            return APIRoute.error(ErrorCodes.BAD_REQUEST, "El nombre del workspace es requerido")
+        
+        workspace_name = data['workspace_name'].strip()
+        if not workspace_name:
+            return APIRoute.error(ErrorCodes.BAD_REQUEST, "El nombre del workspace no puede estar vacío")
+        
+        # Validar longitud del nombre
+        if len(workspace_name) < 3 or len(workspace_name) > 50:
+            return APIRoute.error(ErrorCodes.BAD_REQUEST, "El nombre debe tener entre 3 y 50 caracteres")
+        
+        # Crear el workspace personal
+        workspace_id = workspace_service.create_personal_workspace(user_id, workspace_name)
+        if not workspace_id:
+            return APIRoute.error(ErrorCodes.SERVER_ERROR, "No se pudo crear el workspace personal")
+        
+        # Obtener detalles del workspace creado
+        workspace_details = workspace_service.get_workspace_details(workspace_id, user_id)
+        
+        return APIRoute.success(
+            data=workspace_details,
+            message="Workspace personal creado exitosamente"
+        )
+        
+    except Exception as e:
+        log_error(f"Error creating personal workspace: {str(e)}", e, "workspaces.routes")
+        return APIRoute.error(ErrorCodes.SERVER_ERROR, "No se pudo crear el workspace personal")
+
+@workspaces_bp.route('/<workspace_id>', methods=['PATCH'])
+@APIRoute.standard(auth_required_flag=True)
+@workspace_access_required
+@workspace_owner_required
+def update_workspace(workspace_id):
+    """
+    Actualiza la información de un workspace
+    """
+    try:
+        user_id = get_jwt_identity()
+        data = request.get_json()
+        
+        # Validar datos de actualización
+        if not data:
+            return APIRoute.error(ErrorCodes.BAD_REQUEST, "No se proporcionaron datos para actualizar")
+        
+        # Actualizar workspace (acceso y permisos ya validados por decoradores)
+        success = workspace_service.update_workspace(workspace_id, data)
+        if not success:
+            return APIRoute.error(ErrorCodes.SERVER_ERROR, "No se pudo actualizar el workspace")
+        
+        # Obtener detalles actualizados
+        workspace_details = workspace_service.get_workspace_details(workspace_id, user_id)
+        
+        return APIRoute.success(
+            data=workspace_details,
+            message="Workspace actualizado exitosamente"
+        )
+        
+    except Exception as e:
+        log_error(f"Error updating workspace: {str(e)}", e, "workspaces.routes")
+        return APIRoute.error(ErrorCodes.SERVER_ERROR, "No se pudo actualizar el workspace")
+
+@workspaces_bp.route('/<workspace_id>/study-plan', methods=['POST'])
+@APIRoute.standard(auth_required_flag=True)
+@workspace_access_required
+@workspace_type_required('INDIVIDUAL')
+def create_study_plan(workspace_id):
+    """
+    Crea un plan de estudio para un workspace individual de estudiante
+    """
+    try:
+        user_id = get_jwt_identity()
+        data = request.get_json()
+        
+        # Validar datos del plan de estudio
+        if not data or not data.get('study_plan_data'):
+            return APIRoute.error(ErrorCodes.BAD_REQUEST, "Los datos del plan de estudio son requeridos")
+        
+        # Crear el plan de estudio (acceso y tipo ya validados por decoradores)
+        study_plan_id = workspace_service.create_study_plan(workspace_id, user_id, data['study_plan_data'])
+        if not study_plan_id:
+            return APIRoute.error(ErrorCodes.SERVER_ERROR, "No se pudo crear el plan de estudio")
+        
+        return APIRoute.success(
+            data={"study_plan_id": study_plan_id},
+            message="Plan de estudio creado exitosamente"
+        )
+        
+    except Exception as e:
+        log_error(f"Error creating study plan: {str(e)}", e, "workspaces.routes")
+        return APIRoute.error(ErrorCodes.SERVER_ERROR, "No se pudo crear el plan de estudio")

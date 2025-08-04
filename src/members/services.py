@@ -449,3 +449,155 @@ class MembershipService(VerificationBaseService):
         except Exception as e:
             print(f"Error al obtener clases: {str(e)}")
             return []
+
+    # ========== WORKSPACE MANAGEMENT ==========
+    def get_workspace_membership(self, workspace_id: str, user_id: str) -> Optional[Dict]:
+        """
+        Obtiene la membresía de un usuario en un workspace específico
+        
+        Args:
+            workspace_id: ID del workspace (membership ID)
+            user_id: ID del usuario
+            
+        Returns:
+            Optional[Dict]: Información de la membresía o None si no existe
+        """
+        try:
+            validate_object_id(workspace_id, "ID de workspace")
+            validate_object_id(user_id, "ID de usuario")
+            
+            membership = self.collection.find_one({
+                "_id": ObjectId(workspace_id),
+                "user_id": ObjectId(user_id)
+            })
+            
+            if membership:
+                membership["_id"] = str(membership["_id"])
+                membership["institute_id"] = str(membership["institute_id"])
+                membership["user_id"] = str(membership["user_id"])
+                
+            return membership
+        except Exception as e:
+            print(f"Error al obtener membresía del workspace: {str(e)}")
+            return None
+
+    def check_workspace_ownership(self, workspace_id: str, user_id: str) -> bool:
+        """
+        Verifica si un usuario es propietario de un workspace
+        
+        Args:
+            workspace_id: ID del workspace (membership ID)
+            user_id: ID del usuario
+            
+        Returns:
+            bool: True si el usuario es propietario, False en caso contrario
+        """
+        try:
+            membership = self.get_workspace_membership(workspace_id, user_id)
+            return membership is not None and membership.get('role') == 'OWNER'
+        except Exception:
+            return False
+
+    def get_workspace_members(self, institute_id: str, workspace_type: str, workspace_name: Optional[str] = None) -> List[Dict]:
+        """
+        Obtiene todos los miembros de un workspace específico
+        
+        Args:
+            institute_id: ID del instituto
+            workspace_type: Tipo de workspace (INSTITUTE, INDIVIDUAL)
+            workspace_name: Nombre del workspace (opcional, para workspaces individuales)
+            
+        Returns:
+            List[Dict]: Lista de miembros del workspace
+        """
+        try:
+            validate_object_id(institute_id, "ID de instituto")
+            
+            query = {
+                "institute_id": ObjectId(institute_id),
+                "workspace_type": workspace_type
+            }
+            
+            if workspace_name:
+                query["workspace_name"] = workspace_name
+                
+            members = list(self.collection.find(query))
+            
+            # Enriquecer con información de usuarios
+            for member in members:
+                member["_id"] = str(member["_id"])
+                member["institute_id"] = str(member["institute_id"])
+                member["user_id"] = str(member["user_id"])
+                
+                user = get_db().users.find_one({"_id": ObjectId(member["user_id"])})
+                if user:
+                    member["user"] = {
+                        "name": user.get("name", ""),
+                        "email": user.get("email", ""),
+                        "picture": user.get("picture", "")
+                    }
+                    
+            return members
+        except Exception as e:
+            print(f"Error al obtener miembros del workspace: {str(e)}")
+            return []
+
+    def update_workspace_membership(self, workspace_id: str, update_data: dict) -> bool:
+        """
+        Actualiza la información de una membresía de workspace
+        
+        Args:
+            workspace_id: ID del workspace (membership ID)
+            update_data: Datos a actualizar
+            
+        Returns:
+            bool: True si se actualizó correctamente, False en caso contrario
+        """
+        try:
+            validate_object_id(workspace_id, "ID de workspace")
+            
+            # Agregar timestamp de actualización
+            update_data["updated_at"] = datetime.utcnow()
+            
+            result = self.collection.update_one(
+                {"_id": ObjectId(workspace_id)},
+                {"$set": update_data}
+            )
+            
+            return result.modified_count > 0
+        except Exception as e:
+            print(f"Error al actualizar membresía del workspace: {str(e)}")
+            return False
+
+    def create_personal_workspace_membership(self, user_id: str, institute_id: str, workspace_name: str) -> Optional[str]:
+        """
+        Crea una membresía para un workspace personal
+        
+        Args:
+            user_id: ID del usuario
+            institute_id: ID del instituto genérico
+            workspace_name: Nombre del workspace personal
+            
+        Returns:
+            Optional[str]: ID de la membresía creada o None si falló
+        """
+        try:
+            member_data = {
+                'user_id': user_id,
+                'institute_id': institute_id,
+                'role': 'OWNER',
+                'workspace_type': 'INDIVIDUAL',
+                'workspace_name': workspace_name,
+                'permissions': {
+                    'can_edit': True,
+                    'can_delete': True,
+                    'can_invite': False,
+                    'can_manage_content': True
+                },
+                'joined_at': datetime.utcnow()
+            }
+            
+            return self.add_institute_member(member_data)
+        except Exception as e:
+            print(f"Error al crear membresía de workspace personal: {str(e)}")
+            return None

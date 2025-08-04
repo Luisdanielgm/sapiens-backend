@@ -296,3 +296,151 @@ def get_workspace_role():
 def get_workspace_filter():
     """Obtiene el filtro de workspace para consultas de base de datos"""
     return getattr(request, 'workspace_filter', {})
+
+def workspace_access_required(f):
+    """
+    Decorador para verificar que el usuario tiene acceso al workspace especificado en la URL
+    Debe usarse después de auth_required
+    """
+    @wraps(f)
+    def decorated_function(*args, **kwargs):
+        # Verificar que auth_required ha sido ejecutado primero
+        if not hasattr(request, 'user_id'):
+            return jsonify({
+                "success": False,
+                "error": "ERROR_AUTENTICACION",
+                "message": "Se requiere autenticación"
+            }), 401
+        
+        user_id = request.user_id
+        workspace_id = kwargs.get('workspace_id')
+        
+        if not workspace_id:
+            return jsonify({
+                "success": False,
+                "error": "ERROR_WORKSPACE",
+                "message": "ID de workspace requerido"
+            }), 400
+        
+        # Verificar que el usuario tiene acceso al workspace
+        db = get_db()
+        try:
+            membership = db.institute_members.find_one({
+                "_id": ObjectId(workspace_id),
+                "user_id": ObjectId(user_id)
+            })
+            
+            if not membership:
+                return jsonify({
+                    "success": False,
+                    "error": "ERROR_ACCESO",
+                    "message": "No tienes acceso a este workspace"
+                }), 403
+            
+            # Agregar información del workspace al request
+            request.current_workspace = membership
+            
+        except Exception as e:
+            return jsonify({
+                "success": False,
+                "error": "ERROR_SERVIDOR",
+                "message": "Error al verificar acceso al workspace"
+            }), 500
+        
+        return f(*args, **kwargs)
+    return decorated_function
+
+def workspace_owner_required(f):
+    """
+    Decorador para verificar que el usuario es propietario del workspace
+    Debe usarse después de workspace_access_required
+    """
+    @wraps(f)
+    def decorated_function(*args, **kwargs):
+        # Verificar que workspace_access_required ha sido ejecutado
+        if not hasattr(request, 'current_workspace'):
+            return jsonify({
+                "success": False,
+                "error": "ERROR_CONFIGURACION",
+                "message": "Decorador mal configurado: se requiere workspace_access_required"
+            }), 500
+        
+        workspace = request.current_workspace
+        if workspace.get('role') != 'OWNER':
+            return jsonify({
+                "success": False,
+                "error": "ERROR_PERMISO",
+                "message": "Solo el propietario puede realizar esta acción"
+            }), 403
+        
+        return f(*args, **kwargs)
+    return decorated_function
+
+def workspace_type_required(allowed_types):
+    """
+    Decorador para verificar que el workspace es de un tipo específico
+    Debe usarse después de workspace_access_required
+    
+    Args:
+        allowed_types: Lista de tipos de workspace permitidos (ej: ['INDIVIDUAL', 'INSTITUTE'])
+    """
+    if isinstance(allowed_types, str):
+        allowed_types = [allowed_types]
+    
+    def decorator(f):
+        @wraps(f)
+        def decorated_function(*args, **kwargs):
+            # Verificar que workspace_access_required ha sido ejecutado
+            if not hasattr(request, 'current_workspace'):
+                return jsonify({
+                    "success": False,
+                    "error": "ERROR_CONFIGURACION",
+                    "message": "Decorador mal configurado: se requiere workspace_access_required"
+                }), 500
+            
+            workspace = request.current_workspace
+            workspace_type = workspace.get('workspace_type', 'INSTITUTE')
+            
+            if workspace_type not in allowed_types:
+                return jsonify({
+                    "success": False,
+                    "error": "ERROR_TIPO_WORKSPACE",
+                    "message": f"Esta acción solo está permitida en workspaces de tipo: {', '.join(allowed_types)}"
+                }), 403
+            
+            return f(*args, **kwargs)
+        return decorated_function
+    return decorator
+
+def workspace_permission_required(permission):
+    """
+    Decorador para verificar que el usuario tiene un permiso específico en el workspace
+    Debe usarse después de workspace_access_required
+    
+    Args:
+        permission: Permiso requerido (ej: 'can_edit', 'can_delete', 'can_manage_content')
+    """
+    def decorator(f):
+        @wraps(f)
+        def decorated_function(*args, **kwargs):
+            # Verificar que workspace_access_required ha sido ejecutado
+            if not hasattr(request, 'current_workspace'):
+                return jsonify({
+                    "success": False,
+                    "error": "ERROR_CONFIGURACION",
+                    "message": "Decorador mal configurado: se requiere workspace_access_required"
+                }), 500
+            
+            workspace = request.current_workspace
+            permissions = workspace.get('permissions', {})
+            
+            if not permissions.get(permission, False):
+                return jsonify({
+                    "success": False,
+                    "error": "ERROR_PERMISO",
+                    "message": f"No tienes el permiso '{permission}' en este workspace"
+                }), 403
+            
+            return f(*args, **kwargs)
+        return decorated_function
+    return decorator
