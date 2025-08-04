@@ -12,7 +12,7 @@ STATUS = {
 APP_NAME = "sapiens-backend"
 APP_PREFIX = "/api"
 
-# Roles de usuario
+# Roles de usuario (roles obsoletos eliminados: SYSTEM, SUPER_ADMIN, INDIVIDUAL_TEACHER, INDIVIDUAL_STUDENT)
 ROLES = {
     "STUDENT": "student",
     "TEACHER": "teacher",

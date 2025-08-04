@@ -60,12 +60,17 @@ def auth_required(f):
                 
             # Guardar información relevante del usuario en el request
             request.user_id = user_id
-            # request.user_role = user.get("role") # Comentado o eliminado
-            # logger.info(f"Auth_required: Usuario autenticado con rol: {request.user_role}") # Comentado o modificado
+            
+            # Obtener información del workspace desde el JWT
+            claims = get_jwt()
+            request.workspace_id = claims.get("workspace_id")
+            request.institute_id = claims.get("institute_id")
+            request.workspace_role = claims.get("role")  # Rol específico del workspace
             
             user_main_role = user.get("role")
-            request.user_roles = [user_main_role] if user_main_role else [] # Establecer user_roles como lista
-            logger.info(f"Auth_required: Usuario autenticado con ID: {user_id}, Roles: {request.user_roles}")
+            request.user_roles = [user_main_role] if user_main_role else []
+            
+            logger.info(f"Auth_required: Usuario autenticado con ID: {user_id}, Rol global: {user_main_role}, Workspace: {request.workspace_id}, Rol workspace: {request.workspace_role}")
             
             return f(*args, **kwargs)
         except Exception as e:
@@ -117,13 +122,18 @@ def role_required(required_roles):
             user_id = request.user_id
             db = get_db()
             
-            # Verificar rol presente en el token
+            # 1. Priorizar workspace_role del JWT (más específico)
+            workspace_role = getattr(request, 'workspace_role', None)
+            if workspace_role and workspace_role in all_roles:
+                return f(*args, **kwargs)
+            
+            # 2. Verificar rol presente en el token (compatibilidad)
             claims = get_jwt()
             token_role = claims.get("role")
             if token_role and token_role in all_roles:
                 return f(*args, **kwargs)
 
-            # Verificar rol global del usuario en la base de datos
+            # 3. Verificar rol global del usuario en la base de datos
             user = db.users.find_one({"_id": ObjectId(user_id)})
             if user and "role" in user and user["role"] in all_roles:
                 return f(*args, **kwargs)
@@ -217,6 +227,72 @@ def validate_json(required_fields=None, schema=None):
         return decorated_function
     return decorator
 
+def workspace_required(f):
+    """Decorador para verificar que el usuario tiene un workspace activo"""
+    @wraps(f)
+    def decorated_function(*args, **kwargs):
+        # Verificar que auth_required ha sido ejecutado primero
+        if not hasattr(request, 'user_id'):
+            return jsonify({
+                "success": False,
+                "error": "ERROR_AUTENTICACION",
+                "message": "Se requiere autenticación"
+            }), 401
+        
+        workspace_id = getattr(request, 'workspace_id', None)
+        if not workspace_id:
+            return jsonify({
+                "success": False,
+                "error": "ERROR_WORKSPACE",
+                "message": "Se requiere un workspace activo"
+            }), 400
+        
+        return f(*args, **kwargs)
+    return decorated_function
+
+def workspace_filter(collection_name, workspace_field='institute_id'):
+    """Decorador para filtrar automáticamente por workspace en consultas de base de datos"""
+    def decorator(f):
+        @wraps(f)
+        def decorated_function(*args, **kwargs):
+            # Verificar que auth_required ha sido ejecutado primero
+            if not hasattr(request, 'user_id'):
+                return jsonify({
+                    "success": False,
+                    "error": "ERROR_AUTENTICACION",
+                    "message": "Se requiere autenticación"
+                }), 401
+            
+            # Obtener workspace_id del request
+            workspace_id = getattr(request, 'workspace_id', None)
+            institute_id = getattr(request, 'institute_id', None)
+            
+            # Agregar filtro de workspace al request para uso en la función
+            if workspace_id and institute_id:
+                request.workspace_filter = {workspace_field: ObjectId(institute_id)}
+            else:
+                request.workspace_filter = {}
+            
+            return f(*args, **kwargs)
+        return decorated_function
+    return decorator
+
 def get_auth_user_id():
     """Obtiene el ID del usuario autenticado"""
-    return getattr(request, 'user_id', None) 
+    return getattr(request, 'user_id', None)
+
+def get_workspace_id():
+    """Obtiene el ID del workspace activo"""
+    return getattr(request, 'workspace_id', None)
+
+def get_institute_id():
+    """Obtiene el ID del instituto del workspace activo"""
+    return getattr(request, 'institute_id', None)
+
+def get_workspace_role():
+    """Obtiene el rol del usuario en el workspace activo"""
+    return getattr(request, 'workspace_role', None)
+
+def get_workspace_filter():
+    """Obtiene el filtro de workspace para consultas de base de datos"""
+    return getattr(request, 'workspace_filter', {})

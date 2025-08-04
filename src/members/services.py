@@ -44,14 +44,29 @@ class MembershipService(VerificationBaseService):
 
         workspace_type = member_data.get('workspace_type', 'INSTITUTE')
 
-        # Verificar que el usuario no sea ya miembro del mismo workspace
-        existing_member = self.collection.find_one({
-            "institute_id": ObjectId(member_data['institute_id']),
-            "user_id": ObjectId(member_data['user_id']),
-            "workspace_type": workspace_type
-        })
-        if existing_member:
-            raise AppException("El usuario ya es miembro del workspace", ErrorCodes.ALREADY_EXISTS)
+        # Para el instituto genérico, permitir múltiples workspaces por usuario
+        # Solo verificar duplicados si no es el instituto genérico
+        if workspace_type != 'INSTITUTE':
+            existing_member = self.collection.find_one({
+                "institute_id": ObjectId(member_data['institute_id']),
+                "user_id": ObjectId(member_data['user_id']),
+                "workspace_type": workspace_type
+            })
+            if existing_member:
+                raise AppException("El usuario ya es miembro del workspace", ErrorCodes.ALREADY_EXISTS)
+        else:
+            # Para instituto genérico, verificar duplicados por workspace_name si se proporciona
+            query = {
+                "institute_id": ObjectId(member_data['institute_id']),
+                "user_id": ObjectId(member_data['user_id']),
+                "workspace_type": workspace_type
+            }
+            if member_data.get('workspace_name'):
+                query["workspace_name"] = member_data['workspace_name']
+            
+            existing_member = self.collection.find_one(query)
+            if existing_member:
+                raise AppException("El usuario ya es miembro del workspace", ErrorCodes.ALREADY_EXISTS)
 
         member_data.setdefault('workspace_type', workspace_type)
         member_data.setdefault('workspace_name', None)
@@ -433,4 +448,4 @@ class MembershipService(VerificationBaseService):
             return classes
         except Exception as e:
             print(f"Error al obtener clases: {str(e)}")
-            return [] 
+            return []
