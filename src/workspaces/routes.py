@@ -8,6 +8,7 @@ from src.shared.decorators import workspace_access_required, workspace_owner_req
 from src.members.services import MembershipService
 from src.workspaces.services import WorkspaceService
 from src.shared.database import get_db
+from src.shared.constants import normalize_role
 
 workspaces_bp = APIBlueprint('workspaces', __name__)
 membership_service = MembershipService()
@@ -28,7 +29,7 @@ def list_workspaces():
                 "institute_id": str(workspace["institute_id"]),
                 "workspace_type": workspace.get("workspace_type"),
                 "workspace_name": workspace.get("workspace_name"),
-                "role_in_workspace": workspace.get("role"),
+                "role_in_workspace": normalize_role(workspace.get("role")),
                 "status": workspace.get("status", "active"),
                 "joined_at": workspace.get("joined_at"),
                 "class_id": str(workspace["class_id"]) if workspace.get("class_id") else None,
@@ -77,7 +78,7 @@ def switch_workspace(workspace_id):
         claims = {
             "workspace_id": workspace_id,
             "institute_id": str(membership["institute_id"]),
-            "role": membership.get("role"),
+            "role": normalize_role(membership.get("role")),
             "workspace_type": membership.get("workspace_type"),
             "workspace_name": membership.get("workspace_name")
         }
@@ -94,7 +95,7 @@ def switch_workspace(workspace_id):
             "workspace_id": workspace_id,
             "workspace_type": membership.get("workspace_type"),
             "workspace_name": membership.get("workspace_name"),
-            "role_in_workspace": membership.get("role"),
+            "role_in_workspace": normalize_role(membership.get("role")),
             "institute_id": str(membership["institute_id"]),
             "class_id": str(membership["class_id"]) if membership.get("class_id") else None
         }
