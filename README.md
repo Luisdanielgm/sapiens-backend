@@ -41,6 +41,10 @@ Se han realizado las siguientes mejoras para optimizar el funcionamiento y mante
    - Nuevos campos para marcadores de personalización en `TopicContent`
    - Extracción automática de marcadores al crear o actualizar contenido
 
+8. **Normalización de Roles**:
+   - Los roles de usuario se devuelven ahora en mayúsculas en tokens y respuestas
+   - Evita inconsistencias entre frontend y backend
+
 ## Variables de Entorno Requeridas
 
 El proyecto usa las siguientes variables de entorno que deben configurarse en un archivo `.env`:

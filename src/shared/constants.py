@@ -20,6 +20,11 @@ ROLES = {
     "ADMIN": "admin"
 }
 
+
+def normalize_role(role: str) -> str:
+    """Devuelve el rol en mayúsculas para las respuestas JSON."""
+    return role.upper() if isinstance(role, str) else role
+
 # Types of workspaces
 WORKSPACE_TYPES = {
     "INSTITUTE": "INSTITUTE",

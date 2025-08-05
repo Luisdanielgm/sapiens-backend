@@ -1,5 +1,6 @@
 import unittest
 from unittest.mock import patch, MagicMock
+from bson import ObjectId
 import sys
 import os
 
@@ -118,6 +119,27 @@ class TestWorkspacesEndpoints(unittest.TestCase):
             except (InvalidId, TypeError):
                 is_valid = False
             self.assertFalse(is_valid, f"Expected {invalid_id} to be invalid")
+
+    def test_get_user_workspaces_normalizes_role(self):
+        """Verifica que los roles se devuelvan en mayúsculas"""
+        with patch.object(self.membership_service.collection, 'find') as mock_find, \
+             patch('src.members.services.get_db') as mock_get_db:
+            mock_find.return_value = [
+                {
+                    "_id": ObjectId("507f1f77bcf86cd799439014"),
+                    "institute_id": ObjectId("507f1f77bcf86cd799439015"),
+                    "user_id": ObjectId(self.test_user_id),
+                    "workspace_type": "INSTITUTE",
+                    "workspace_name": "Test",
+                    "role": "teacher"
+                }
+            ]
+            mock_db = MagicMock()
+            mock_get_db.return_value = mock_db
+            mock_db.institutes.find.return_value = [{"_id": ObjectId("507f1f77bcf86cd799439015"), "name": "Inst"}]
+
+            workspaces = self.membership_service.get_user_workspaces(self.test_user_id)
+            self.assertEqual(workspaces[0]['role'], 'TEACHER')
 
 
 if __name__ == '__main__':

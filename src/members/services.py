@@ -3,7 +3,7 @@ from bson import ObjectId
 from datetime import datetime
 
 from src.shared.database import get_db
-from src.shared.constants import ROLES
+from src.shared.constants import ROLES, normalize_role
 from src.shared.exceptions import AppException
 from src.shared.validators import is_valid_object_id, validate_object_id
 from src.shared.standardization import VerificationBaseService, ErrorCodes
@@ -391,7 +391,7 @@ class MembershipService(VerificationBaseService):
                 membership_info = membership_map.get(institute_id_str)
                 
                 if membership_info:
-                    institute["user_role"] = membership_info.get("role")
+                    institute["user_role"] = normalize_role(membership_info.get("role"))
                     institute["user_permissions"] = membership_info.get("permissions", {})
                     institute["joined_at"] = membership_info.get("joined_at")
                 
@@ -423,7 +423,7 @@ class MembershipService(VerificationBaseService):
                     "institute_id": str(m["institute_id"]),
                     "workspace_type": m.get("workspace_type", "INSTITUTE"),
                     "workspace_name": m.get("workspace_name") or (inst.get("name") if inst else None),
-                    "role": m.get("role"),
+                    "role": normalize_role(m.get("role")),
                 }
                 if inst:
                     workspace["institute"] = {
