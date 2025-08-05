@@ -120,7 +120,7 @@ def get_workspace_details(workspace_id):
         user_id = get_jwt_identity()
         
         # Obtener detalles del workspace (el acceso ya fue validado por el decorador)
-        workspace_details = workspace_service.get_workspace_details(workspace_id, user_id)
+        workspace_details = workspace_service.get_workspace_by_id(workspace_id, user_id)
         if not workspace_details:
             return APIRoute.error(ErrorCodes.NOT_FOUND, "Workspace no encontrado")
         
@@ -152,17 +152,20 @@ def create_personal_workspace():
         if len(workspace_name) < 3 or len(workspace_name) > 50:
             return APIRoute.error(ErrorCodes.BAD_REQUEST, "El nombre debe tener entre 3 y 50 caracteres")
         
-        # Crear el workspace personal
-        workspace_id = workspace_service.create_personal_workspace(user_id, workspace_name)
-        if not workspace_id:
-            return APIRoute.error(ErrorCodes.SERVER_ERROR, "No se pudo crear el workspace personal")
+        # Preparar datos del workspace
+        workspace_data = {
+            "workspace_name": workspace_name,
+            "workspace_type": data.get("workspace_type", "INDIVIDUAL_STUDENT")  # Por defecto estudiante individual
+        }
         
-        # Obtener detalles del workspace creado
-        workspace_details = workspace_service.get_workspace_details(workspace_id, user_id)
+        # Crear el workspace personal
+        success, message, response_data = workspace_service.create_personal_workspace(user_id, workspace_data)
+        if not success:
+            return APIRoute.error(ErrorCodes.SERVER_ERROR, message or "No se pudo crear el workspace personal")
         
         return APIRoute.success(
-            data=workspace_details,
-            message="Workspace personal creado exitosamente"
+            data=response_data,
+            message=message or "Workspace personal creado exitosamente"
         )
         
     except Exception as e:
@@ -186,12 +189,12 @@ def update_workspace(workspace_id):
             return APIRoute.error(ErrorCodes.BAD_REQUEST, "No se proporcionaron datos para actualizar")
         
         # Actualizar workspace (acceso y permisos ya validados por decoradores)
-        success = workspace_service.update_workspace(workspace_id, data)
+        success, message, response_data = workspace_service.update_workspace_info(workspace_id, user_id, data)
         if not success:
-            return APIRoute.error(ErrorCodes.SERVER_ERROR, "No se pudo actualizar el workspace")
+            return APIRoute.error(ErrorCodes.SERVER_ERROR, message or "No se pudo actualizar el workspace")
         
         # Obtener detalles actualizados
-        workspace_details = workspace_service.get_workspace_details(workspace_id, user_id)
+        workspace_details = workspace_service.get_workspace_by_id(workspace_id, user_id)
         
         return APIRoute.success(
             data=workspace_details,
@@ -219,13 +222,13 @@ def create_study_plan(workspace_id):
             return APIRoute.error(ErrorCodes.BAD_REQUEST, "Los datos del plan de estudio son requeridos")
         
         # Crear el plan de estudio (acceso y tipo ya validados por decoradores)
-        study_plan_id = workspace_service.create_study_plan(workspace_id, user_id, data['study_plan_data'])
-        if not study_plan_id:
-            return APIRoute.error(ErrorCodes.SERVER_ERROR, "No se pudo crear el plan de estudio")
+        success, message, response_data = workspace_service.create_study_plan_for_workspace(workspace_id, user_id, data['study_plan_data'])
+        if not success:
+            return APIRoute.error(ErrorCodes.SERVER_ERROR, message or "No se pudo crear el plan de estudio")
         
         return APIRoute.success(
-            data={"study_plan_id": study_plan_id},
-            message="Plan de estudio creado exitosamente"
+            data=response_data,
+            message=message or "Plan de estudio creado exitosamente"
         )
         
     except Exception as e:

@@ -1,6 +1,6 @@
 from flask import request, jsonify
 from bson import ObjectId
-from flask_jwt_extended import get_jwt_identity
+from flask_jwt_extended import get_jwt_identity, get_jwt
 
 from src.shared.standardization import APIBlueprint, APIRoute, ErrorCodes
 from src.shared.constants import ROLES
@@ -243,7 +243,18 @@ def get_teacher_classes(teacher_id_or_email):
     Obtiene todas las clases de un profesor.
     """
     try:
-        classes = membership_service.get_classes_by_teacher(teacher_id_or_email)
+        # Obtener información del workspace del JWT
+        jwt_claims = get_jwt()
+        workspace_type = jwt_claims.get('workspace_type')
+        workspace_user_id = get_jwt_identity()
+        class_id = jwt_claims.get('class_id')
+        
+        classes = membership_service.get_classes_by_teacher(
+            teacher_id_or_email, 
+            workspace_type=workspace_type, 
+            workspace_user_id=workspace_user_id, 
+            class_id=class_id
+        )
         return APIRoute.success(data=classes)
     except Exception as e:
         return APIRoute.error(str(e), 500)
@@ -255,7 +266,18 @@ def get_student_classes(student_id_or_email):
     Obtiene todas las clases de un estudiante.
     """
     try:
-        classes = membership_service.get_classes_by_student(student_id_or_email)
+        # Obtener información del workspace del JWT
+        jwt_claims = get_jwt()
+        workspace_type = jwt_claims.get('workspace_type')
+        workspace_user_id = get_jwt_identity()
+        class_id = jwt_claims.get('class_id')
+        
+        classes = membership_service.get_classes_by_student(
+            student_id_or_email, 
+            workspace_type=workspace_type, 
+            workspace_user_id=workspace_user_id, 
+            class_id=class_id
+        )
         return APIRoute.success(data=classes)
     except Exception as e:
         return APIRoute.error(str(e), 500)
@@ -518,4 +540,4 @@ def handle_options(path=None):
     """
     Manejador para solicitudes OPTIONS - requerido para CORS
     """
-    return "", 200 
+    return "", 200

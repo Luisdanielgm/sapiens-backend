@@ -408,7 +408,7 @@ class MembershipService(VerificationBaseService):
             print(f"Error al obtener miembros de la clase: {str(e)}")
             return []
 
-    def get_classes_by_teacher(self, teacher_id_or_email: str) -> List[Dict]:
+    def get_classes_by_teacher(self, teacher_id_or_email: str, workspace_type: str = None, workspace_user_id: str = None, class_id: str = None) -> List[Dict]:
         try:
             # Determinar si es email o ID
             if "@" in teacher_id_or_email:
@@ -427,9 +427,15 @@ class MembershipService(VerificationBaseService):
             
             # Obtener detalles de cada clase
             class_ids = [m["class_id"] for m in memberships]
-            classes = list(self.db.classes.find({
-                "_id": {"$in": class_ids}
-            }))
+            query = {"_id": {"$in": class_ids}}
+            
+            # Aplicar filtros de workspace si es necesario
+            if workspace_type and workspace_user_id:
+                from src.workspaces.services import WorkspaceService
+                workspace_service = WorkspaceService()
+                query = workspace_service.apply_workspace_filters(query, workspace_type, workspace_user_id, class_id)
+            
+            classes = list(self.db.classes.find(query))
             
             # Procesar resultados
             result = []
@@ -461,7 +467,7 @@ class MembershipService(VerificationBaseService):
             print(f"Error al obtener clases del profesor: {str(e)}")
             return []
 
-    def get_classes_by_student(self, student_id_or_email: str) -> List[Dict]:
+    def get_classes_by_student(self, student_id_or_email: str, workspace_type: str = None, workspace_user_id: str = None, class_id: str = None) -> List[Dict]:
         try:
             # Determinar si es email o ID
             if "@" in student_id_or_email:
@@ -480,9 +486,15 @@ class MembershipService(VerificationBaseService):
             
             # Obtener detalles de cada clase
             class_ids = [m["class_id"] for m in memberships]
-            classes = list(self.db.classes.find({
-                "_id": {"$in": class_ids}
-            }))
+            query = {"_id": {"$in": class_ids}}
+            
+            # Aplicar filtros de workspace si es necesario
+            if workspace_type and workspace_user_id:
+                from src.workspaces.services import WorkspaceService
+                workspace_service = WorkspaceService()
+                query = workspace_service.apply_workspace_filters(query, workspace_type, workspace_user_id, class_id)
+            
+            classes = list(self.db.classes.find(query))
             
             # Procesar resultados
             result = []
@@ -767,4 +779,4 @@ class SubperiodService(VerificationBaseService):
             return False, "No se pudo eliminar el subperiodo"
         except Exception as e:
             print(f"Error al eliminar subperiodo: {str(e)}")
-            return False, str(e) 
+            return False, str(e)

@@ -354,6 +354,12 @@ def workspace_owner_required(f):
     """
     Decorador para verificar que el usuario es propietario del workspace
     Debe usarse después de workspace_access_required
+    
+    Para workspaces individuales (INDIVIDUAL_STUDENT, INDIVIDUAL_TEACHER):
+    - El usuario que tiene acceso es automáticamente el propietario
+    
+    Para workspaces institucionales (INSTITUTE):
+    - Se verifica que el usuario tenga rol de administrador del instituto
     """
     @wraps(f)
     def decorated_function(*args, **kwargs):
@@ -366,11 +372,20 @@ def workspace_owner_required(f):
             }), 500
         
         workspace = request.current_workspace
-        if workspace.get('role') != 'OWNER':
+        workspace_type = workspace.get('workspace_type', 'INSTITUTE')
+        
+        # Para workspaces individuales, el usuario que tiene acceso es el propietario
+        if workspace_type in ['INDIVIDUAL_STUDENT', 'INDIVIDUAL_TEACHER']:
+            # Si llegó hasta aquí, ya pasó workspace_access_required, por lo tanto es el propietario
+            return f(*args, **kwargs)
+        
+        # Para workspaces institucionales, verificar rol de administrador
+        user_role = workspace.get('role')
+        if user_role not in ['INSTITUTE_ADMIN', 'ADMIN']:
             return jsonify({
                 "success": False,
                 "error": "ERROR_PERMISO",
-                "message": "Solo el propietario puede realizar esta acción"
+                "message": "Solo el administrador del instituto puede realizar esta acción"
             }), 403
         
         return f(*args, **kwargs)
@@ -383,6 +398,7 @@ def workspace_type_required(allowed_types):
     
     Args:
         allowed_types: Lista de tipos de workspace permitidos (ej: ['INDIVIDUAL', 'INSTITUTE'])
+                      'INDIVIDUAL' es compatible con 'INDIVIDUAL_STUDENT' e 'INDIVIDUAL_TEACHER'
     """
     if isinstance(allowed_types, str):
         allowed_types = [allowed_types]
@@ -401,7 +417,16 @@ def workspace_type_required(allowed_types):
             workspace = request.current_workspace
             workspace_type = workspace.get('workspace_type', 'INSTITUTE')
             
-            if workspace_type not in allowed_types:
+            # Expandir tipos permitidos para compatibilidad
+            expanded_allowed_types = []
+            for allowed_type in allowed_types:
+                if allowed_type == 'INDIVIDUAL':
+                    # 'INDIVIDUAL' incluye ambos tipos específicos
+                    expanded_allowed_types.extend(['INDIVIDUAL_STUDENT', 'INDIVIDUAL_TEACHER'])
+                else:
+                    expanded_allowed_types.append(allowed_type)
+            
+            if workspace_type not in expanded_allowed_types:
                 return jsonify({
                     "success": False,
                     "error": "ERROR_TIPO_WORKSPACE",

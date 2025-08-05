@@ -1,4 +1,5 @@
 from flask import request
+from flask_jwt_extended import get_jwt
 from src.shared.standardization import APIBlueprint, APIRoute, ErrorCodes
 from src.shared.constants import ROLES
 from src.shared.database import get_db
@@ -929,7 +930,16 @@ def list_virtual_modules():
             "Faltan parámetros 'study_plan_id' o 'student_id'",
             status_code=400
         )
-    modules = virtual_module_service.get_student_modules(study_plan_id, student_id)
+    
+    # Extraer información de workspace del JWT
+    jwt_claims = get_jwt()
+    workspace_type = jwt_claims.get('workspace_type')
+    workspace_user_id = jwt_claims.get('workspace_user_id')
+    class_id = jwt_claims.get('class_id')
+    
+    modules = virtual_module_service.get_student_modules(
+        study_plan_id, student_id, workspace_type, workspace_user_id, class_id
+    )
     return APIRoute.success(data={"modules": modules})
 
 def generate_virtual_topics(module_id: str, student_id: str, virtual_module_id: str, cognitive_profile: dict, preferences: dict):

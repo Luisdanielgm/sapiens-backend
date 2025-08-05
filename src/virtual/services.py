@@ -106,19 +106,34 @@ class VirtualModuleService(VerificationBaseService):
             logging.error(f"Error al obtener detalles del módulo: {str(e)}")
             return None
 
-    def get_student_modules(self, study_plan_id: str, student_id: str) -> List[Dict]:
+    def get_student_modules(self, study_plan_id: str, student_id: str, workspace_type: str = None, workspace_user_id: str = None, class_id: str = None) -> List[Dict]:
         """
         Obtiene todos los módulos virtuales de un estudiante para un plan de estudios dado.
+        Aplica filtros de workspace según el tipo de workspace.
         """
         try:
             # Obtener IDs de módulos del plan de estudios
-            module_objs = self.db.modules.find({"study_plan_id": ObjectId(study_plan_id)}, {"_id": 1})
+            module_query = {"study_plan_id": ObjectId(study_plan_id)}
+            
+            # Aplicar filtros de workspace si están presentes
+            if workspace_type and workspace_user_id:
+                from src.workspaces.services import WorkspaceService
+                workspace_service = WorkspaceService()
+                module_query = workspace_service.apply_workspace_filters(
+                    module_query, workspace_type, workspace_user_id, class_id
+                )
+            
+            module_objs = self.db.modules.find(module_query, {"_id": 1})
             module_ids = [m["_id"] for m in module_objs]
+            
             # Buscar módulos virtuales del estudiante para esos módulos
-            vmods = list(self.collection.find({
+            virtual_module_query = {
                 "student_id": ObjectId(student_id),
                 "module_id": {"$in": module_ids}
-            }))
+            }
+            
+            vmods = list(self.collection.find(virtual_module_query))
+            
             # Convertir ObjectId a string
             for vm in vmods:
                 vm["_id"] = str(vm["_id"])
