@@ -3,6 +3,7 @@ from bson import ObjectId
 from datetime import datetime
 from src.shared.database import get_db
 from src.shared.exceptions import AppException
+from src.shared.constants import normalize_role
 from src.classes.services import ClassService
 from src.study_plans.services import StudyPlanService
 from src.members.services import MembershipService
@@ -99,7 +100,7 @@ class WorkspaceService:
                 "workspace_id": str(membership["_id"]),
                 "workspace_type": membership.get("workspace_type", "INSTITUTE"),
                 "workspace_name": membership.get("workspace_name", institute["name"]),
-                "role_in_workspace": membership["role"],
+                "role_in_workspace": normalize_role(membership["role"]),
                 "institute_id": str(membership["institute_id"]),
                 "class_id": str(membership["class_id"]) if membership.get("class_id") else None,
                 "status": membership.get("status", "active"),
@@ -190,7 +191,7 @@ class WorkspaceService:
                 "workspace_id": workspace_id,
                 "workspace_type": workspace_type,
                 "workspace_name": workspace_name.strip(),
-                "role_in_workspace": role,
+                "role_in_workspace": normalize_role(role),
                 "institute_id": str(generic_institute["_id"]),
                 "class_id": str(membership_data.get("class_id")) if membership_data.get("class_id") else None,
                 "message": "Workspace personal creado exitosamente"

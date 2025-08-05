@@ -9,7 +9,7 @@ from datetime import datetime
 from .services import UserService, CognitiveProfileService
 from src.shared.standardization import APIBlueprint, APIRoute, ErrorCodes
 from src.shared.utils import ensure_json_serializable
-from src.shared.constants import ROLES
+from src.shared.constants import ROLES, normalize_role
 from src.shared.exceptions import AppException
 from src.shared.database import get_db
 from src.shared.logging import log_error, log_info, log_warning
@@ -41,12 +41,14 @@ def register():
                 claims = {
                     "workspace_id": first_ws["_id"],
                     "institute_id": first_ws["institute_id"],
-                    "role": first_ws["role"]
+                    "role": normalize_role(first_ws["role"])
                 }
             else:
                 claims = None
             access_token = create_access_token(identity=user_id_or_error, additional_claims=claims)
             user_info = user_service.get_user_info(data['email'])
+            if user_info and user_info.get("role"):
+                user_info["role"] = normalize_role(user_info["role"])
             return APIRoute.success(
                 data={"token": access_token, "user": user_info},
                 message="Usuario registrado exitosamente.",
@@ -96,7 +98,7 @@ def login():
                     "id": str(user["_id"]),
                     "name": user["name"],
                     "email": user["email"],
-                    "role": user["role"]
+                    "role": normalize_role(user["role"])
                 }
         elif password:
             # --- Flujo de Login con Email/Contraseña ---
@@ -112,14 +114,16 @@ def login():
                 claims = {
                     "workspace_id": first_ws["_id"],
                     "institute_id": first_ws["institute_id"],
-                    "role": first_ws["role"]
+                    "role": normalize_role(first_ws["role"])
                 }
             else:
                 claims = None
             access_token = create_access_token(identity=user_info['id'], additional_claims=claims)
+            if user_info.get("role"):
+                user_info["role"] = normalize_role(user_info["role"])
             return APIRoute.success(
                 data={"token": access_token, "user": user_info},
-                message="Inicio de sesión exitoso."
+                message="Inicio de sesión exitoso.",
             )
         else:
             return APIRoute.error(ErrorCodes.AUTHENTICATION_ERROR, "Credenciales inválidas o usuario no encontrado.")
@@ -159,7 +163,7 @@ def switch_institute(institute_id):
         user_info = user_service.get_user_info_by_id(user_id)
         claims = {"institute_id": institute_id}
         if user_info and user_info.get("role"):
-            claims["role"] = user_info["role"]
+            claims["role"] = normalize_role(user_info["role"])
         token = create_access_token(identity=user_id, additional_claims=claims)
         return APIRoute.success(data={"token": token})
     except Exception as e:
