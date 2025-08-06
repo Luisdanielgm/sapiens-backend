@@ -635,9 +635,7 @@ class ProfileService(VerificationBaseService):
             if not user_id:
                 return False, f"Usuario no encontrado: {user_id_or_email}"
             
-            user_role = self.get_user_role(user_id_or_email)
-            if user_role != "STUDENT":
-                return False, f"El usuario no es un estudiante: {user_id_or_email}"
+            # Permitir que cualquier rol pueda crear un perfil cognitivo
             
             # Verificar si ya existe un perfil cognitivo
             existing_profile = self.db.cognitive_profiles.find_one({"user_id": user_id})
