@@ -1,8 +1,10 @@
 from flask import request
-from flask_jwt_extended import get_jwt
+from flask_jwt_extended import get_jwt, get_jwt_identity
 from src.shared.standardization import APIBlueprint, APIRoute, ErrorCodes
 from src.shared.constants import ROLES
 from src.shared.database import get_db
+from src.shared.decorators import auth_required, role_required, workspace_type_required, workspace_access_required
+from src.shared.middleware import apply_workspace_filter, get_current_workspace_info
 from bson import ObjectId
 from datetime import datetime
 import logging
@@ -1149,11 +1151,19 @@ def generate_personalized_content(topic_id: str, virtual_topic_id: str, cognitiv
         return False
 
 @virtual_bp.route('/module/<module_id>/progress', methods=['PUT'])
-@APIRoute.standard(auth_required_flag=True, required_fields=['progress', 'activity_data'])
+@auth_required
+@apply_workspace_filter('virtual_modules')
 def update_module_progress(module_id):
     """Actualiza el progreso de un estudiante en un módulo virtual"""
     try:
         data = request.get_json()
+        if not data:
+            return APIRoute.error(
+                ErrorCodes.BAD_REQUEST,
+                "Se requieren datos de progreso y actividad",
+                status_code=400
+            )
+        
         progress = data.get('progress')  # Porcentaje de progreso (0-100)
         completion_status = data.get('completion_status', None)  # Estado opcional
         activity_data = data.get('activity_data', {})  # Datos de actividad
@@ -1165,13 +1175,30 @@ def update_module_progress(module_id):
                 "El progreso debe ser un número entre 0 y 100",
                 status_code=400
             )
-            
+        
+        # Obtener información de workspace
+        jwt_claims = get_jwt()
+        workspace_info = get_current_workspace_info()
+        workspace_type = jwt_claims.get('workspace_type')
+        current_user_id = get_jwt_identity()
+        
+        # Construir filtro con workspace
+        module_filter = {"_id": ObjectId(module_id)}
+        if workspace_info:
+            if workspace_type == 'INDIVIDUAL_STUDENT':
+                module_filter["workspace_id"] = ObjectId(workspace_info['workspace_id'])
+                module_filter["student_id"] = ObjectId(current_user_id)
+            elif workspace_type == 'INDIVIDUAL_TEACHER':
+                module_filter["workspace_id"] = ObjectId(workspace_info['workspace_id'])
+            elif workspace_type == 'INSTITUTE':
+                module_filter["institute_id"] = ObjectId(workspace_info['workspace_id'])
+        
         # Verificar que el módulo virtual existe
-        virtual_module = get_db().virtual_modules.find_one({"_id": ObjectId(module_id)})
+        virtual_module = get_db().virtual_modules.find_one(module_filter)
         if not virtual_module:
             return APIRoute.error(
                 ErrorCodes.NOT_FOUND,
-                "Módulo virtual no encontrado",
+                "Módulo virtual no encontrado o sin acceso",
                 status_code=404
             )
             
@@ -2100,20 +2127,24 @@ def auto_complete_reading_content(virtual_content_id):
         )
 
 @virtual_bp.route('/student/progress', methods=['GET'])
-@APIRoute.standard(auth_required_flag=True, roles=[ROLES["STUDENT"], ROLES["TEACHER"]])
+@auth_required
+@role_required([ROLES["STUDENT"], ROLES["TEACHER"]])
+@apply_workspace_filter('virtual_modules')
 def get_student_progress():
     """
     Obtiene resumen completo del progreso del estudiante.
     Los estudiantes ven su propio progreso, los profesores pueden especificar student_id.
     """
     try:
-        from flask_jwt_extended import get_jwt_identity
         from .services import VirtualContentProgressService
         
         current_user_id = get_jwt_identity()
+        jwt_claims = get_jwt()
+        workspace_info = get_current_workspace_info()
+        workspace_type = jwt_claims.get('workspace_type')
         user_roles = getattr(request, 'user_roles', [])
         
-        # Determinar student_id
+        # Determinar student_id con restricciones de workspace
         if ROLES["TEACHER"] in user_roles:
             # Profesores pueden ver progreso de cualquier estudiante
             student_id = request.args.get('student_id', current_user_id)
@@ -2121,26 +2152,47 @@ def get_student_progress():
             # Estudiantes solo ven su propio progreso
             student_id = current_user_id
         
+        # En workspaces individuales, restringir acceso
+        if workspace_type in ['INDIVIDUAL_TEACHER', 'INDIVIDUAL_STUDENT']:
+            if student_id != current_user_id:
+                return APIRoute.error(
+                    ErrorCodes.PERMISSION_DENIED,
+                    "En workspaces individuales solo puedes ver tu propio progreso",
+                    status_code=403
+                )
+        
         # Filtro opcional por módulo
         virtual_module_id = request.args.get('virtual_module_id')
         
         progress_service = VirtualContentProgressService()
         progress_summary = progress_service.get_student_progress_summary(
-            student_id, virtual_module_id
+            student_id, virtual_module_id, workspace_info
         )
         
         # Enriquecer con información adicional si es necesario
         if virtual_module_id:
-            # Obtener información del módulo virtual
-            virtual_module = get_db().virtual_modules.find_one({
-                "_id": ObjectId(virtual_module_id)
-            })
+            # Obtener información del módulo virtual con filtro de workspace
+            module_filter = {"_id": ObjectId(virtual_module_id)}
+            if workspace_info:
+                if workspace_type == 'INDIVIDUAL_STUDENT':
+                    module_filter["workspace_id"] = ObjectId(workspace_info['workspace_id'])
+                elif workspace_type == 'INSTITUTE':
+                    module_filter["institute_id"] = ObjectId(workspace_info['workspace_id'])
+            
+            virtual_module = get_db().virtual_modules.find_one(module_filter)
             if virtual_module:
                 progress_summary["module_info"] = {
                     "name": virtual_module.get("name", ""),
                     "status": virtual_module.get("completion_status", "not_started"),
                     "overall_progress": virtual_module.get("progress", 0)
                 }
+        
+        # Agregar contexto de workspace
+        if workspace_info:
+            progress_summary["workspace_context"] = {
+                "workspace_type": workspace_type,
+                "workspace_name": workspace_info.get('name', '')
+            }
         
         return APIRoute.success(data=progress_summary)
         
@@ -2194,23 +2246,34 @@ def trigger_next_topic_generation(virtual_content_id):
 # ===== ENDPOINT DE COMPLETACIÓN DE MÓDULO =====
 
 @virtual_bp.route('/module/<module_id>/complete', methods=['POST'])
-@APIRoute.standard(auth_required_flag=True, roles=[ROLES["STUDENT"]])
+@auth_required
+@role_required([ROLES["STUDENT"]])
+@apply_workspace_filter('virtual_modules')
 def complete_virtual_module(module_id):
     """
     Marca un módulo como completado y activa aprendizaje adaptativo.
     Endpoint crítico para Fase 2B - activación automática de actualización de perfil.
     """
     try:
-        from flask_jwt_extended import get_jwt_identity
-        
         student_id = get_jwt_identity()
+        jwt_claims = get_jwt()
+        workspace_info = get_current_workspace_info()
+        workspace_type = jwt_claims.get('workspace_type')
         data = request.get_json() or {}
         
-        # Verificar que el módulo virtual existe y pertenece al estudiante
-        virtual_module = get_db().virtual_modules.find_one({
+        # Construir filtro con workspace
+        module_filter = {
             "_id": ObjectId(module_id),
             "student_id": ObjectId(student_id)
-        })
+        }
+        if workspace_info:
+            if workspace_type == 'INDIVIDUAL_STUDENT':
+                module_filter["workspace_id"] = ObjectId(workspace_info['workspace_id'])
+            elif workspace_type == 'INSTITUTE':
+                module_filter["institute_id"] = ObjectId(workspace_info['workspace_id'])
+        
+        # Verificar que el módulo virtual existe y pertenece al estudiante
+        virtual_module = get_db().virtual_modules.find_one(module_filter)
         
         if not virtual_module:
             return APIRoute.error(
@@ -2692,7 +2755,9 @@ def maintain_topic_queue(virtual_module_id):
         )
 
 @virtual_bp.route('/topic/<virtual_topic_id>/trigger-progress', methods=['POST'])
-@APIRoute.standard(auth_required_flag=True, roles=[ROLES["STUDENT"]])
+@auth_required
+@role_required([ROLES["STUDENT"]])
+@apply_workspace_filter('virtual_topics')
 def trigger_progress(virtual_topic_id):
     """
     Activa el trigger de progreso para un tema específico.
@@ -2718,6 +2783,36 @@ def trigger_progress(virtual_topic_id):
                 "progress_percentage debe estar entre 0 y 100",
                 status_code=400
             )
+        
+        # Obtener información de workspace
+        jwt_claims = get_jwt()
+        workspace_info = get_current_workspace_info()
+        workspace_type = jwt_claims.get('workspace_type')
+        current_user_id = get_jwt_identity()
+        
+        # Verificar acceso al tema virtual con filtro de workspace
+        topic_filter = {"_id": ObjectId(virtual_topic_id)}
+        if workspace_info:
+            # Obtener el módulo virtual asociado para verificar workspace
+            virtual_topic = get_db().virtual_topics.find_one(topic_filter)
+            if virtual_topic:
+                virtual_module_id = virtual_topic.get("virtual_module_id")
+                if virtual_module_id:
+                    module_filter = {"_id": ObjectId(virtual_module_id)}
+                    if workspace_type == 'INDIVIDUAL_STUDENT':
+                        module_filter["workspace_id"] = ObjectId(workspace_info['workspace_id'])
+                        module_filter["student_id"] = ObjectId(current_user_id)
+                    elif workspace_type == 'INSTITUTE':
+                        module_filter["institute_id"] = ObjectId(workspace_info['workspace_id'])
+                    
+                    # Verificar que el módulo existe en el workspace
+                    virtual_module = get_db().virtual_modules.find_one(module_filter)
+                    if not virtual_module:
+                        return APIRoute.error(
+                            ErrorCodes.PERMISSION_DENIED,
+                            "No tienes acceso a este tema virtual",
+                            status_code=403
+                        )
         
         queue_service = OptimizedQueueService()
         result = queue_service.trigger_on_progress(virtual_topic_id, progress_percentage)

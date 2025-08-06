@@ -5,6 +5,8 @@ from src.shared.standardization import APIBlueprint, APIRoute, ErrorCodes
 from src.shared.constants import ROLES
 from src.profiles.services import ProfileService
 from src.shared.logging import log_info, log_error
+from src.shared.decorators import auth_required, role_required, workspace_type_required, workspace_access_required
+from src.shared.middleware import apply_workspace_filter, get_current_workspace_info
 
 profiles_bp = APIBlueprint('profiles', __name__)
 profile_service = ProfileService()
@@ -105,7 +107,8 @@ def create_teacher_profile():
     )
 
 @profiles_bp.route('/teacher/<user_id_or_email>', methods=['GET'])
-@APIRoute.standard(auth_required_flag=True)
+@auth_required
+@apply_workspace_filter('teacher_profiles')
 def get_teacher_profile(user_id_or_email):
     """
     Obtiene el perfil de profesor para un usuario específico.
@@ -114,7 +117,21 @@ def get_teacher_profile(user_id_or_email):
         user_id_or_email: ID o email del usuario profesor
     """
     try:
-        profile = profile_service.get_teacher_profile(user_id_or_email)
+        # Obtener información del workspace actual
+        workspace_info = get_current_workspace_info()
+        workspace_type = workspace_info.get('workspace_type')
+        current_user_id = workspace_info.get('user_id')
+        
+        # En workspaces INDIVIDUAL_TEACHER, solo permitir acceso al propio perfil
+        if workspace_type == 'INDIVIDUAL_TEACHER':
+            if user_id_or_email != current_user_id and user_id_or_email != workspace_info.get('user_email'):
+                return APIRoute.error(
+                    ErrorCodes.FORBIDDEN,
+                    "Solo puedes acceder a tu propio perfil en workspace individual",
+                    status_code=403
+                )
+        
+        profile = profile_service.get_teacher_profile(user_id_or_email, workspace_info)
         
         if profile:
             return APIRoute.success(data={"profile": profile})
@@ -221,7 +238,8 @@ def create_student_profile():
     )
 
 @profiles_bp.route('/student/<user_id_or_email>', methods=['GET'])
-@APIRoute.standard(auth_required_flag=True)
+@auth_required
+@apply_workspace_filter('student_profiles')
 def get_student_profile(user_id_or_email):
     """
     Obtiene el perfil de estudiante para un usuario específico.
@@ -232,7 +250,21 @@ def get_student_profile(user_id_or_email):
     try:
         log_info(f"Solicitud de perfil estudiante para: {user_id_or_email}", "profiles.routes")
         
-        profile = profile_service.get_student_profile(user_id_or_email)
+        # Obtener información del workspace actual
+        workspace_info = get_current_workspace_info()
+        workspace_type = workspace_info.get('workspace_type')
+        current_user_id = workspace_info.get('user_id')
+        
+        # En workspaces INDIVIDUAL_STUDENT, solo permitir acceso al propio perfil
+        if workspace_type == 'INDIVIDUAL_STUDENT':
+            if user_id_or_email != current_user_id and user_id_or_email != workspace_info.get('user_email'):
+                return APIRoute.error(
+                    ErrorCodes.FORBIDDEN,
+                    "Solo puedes acceder a tu propio perfil en workspace individual",
+                    status_code=403
+                )
+        
+        profile = profile_service.get_student_profile(user_id_or_email, workspace_info)
         
         if profile:
             return APIRoute.success(data={"profile": profile})
@@ -282,7 +314,8 @@ def update_student_profile():
         )
 
 @profiles_bp.route('/student', methods=['GET'])
-@APIRoute.standard(auth_required_flag=True)
+@auth_required
+@apply_workspace_filter('student_profiles')
 def get_student_profile_by_query():
     """
     Obtiene el perfil de estudiante usando el email como parámetro de consulta.
@@ -301,7 +334,21 @@ def get_student_profile_by_query():
             
         log_info(f"Solicitud de perfil estudiante por query param para email: {email}", "profiles.routes")
         
-        profile = profile_service.get_student_profile(email)
+        # Obtener información del workspace actual
+        workspace_info = get_current_workspace_info()
+        workspace_type = workspace_info.get('workspace_type')
+        current_user_email = workspace_info.get('user_email')
+        
+        # En workspaces INDIVIDUAL_STUDENT, solo permitir acceso al propio perfil
+        if workspace_type == 'INDIVIDUAL_STUDENT':
+            if email != current_user_email:
+                return APIRoute.error(
+                    ErrorCodes.FORBIDDEN,
+                    "Solo puedes acceder a tu propio perfil en workspace individual",
+                    status_code=403
+                )
+        
+        profile = profile_service.get_student_profile(email, workspace_info)
         
         if profile:
             return APIRoute.success(data={"profile": profile})
@@ -873,4 +920,4 @@ def delete_cognitive_profile(user_id_or_email):
             ErrorCodes.SERVER_ERROR,
             str(e),
             status_code=500
-        ) 
+        )

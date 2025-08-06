@@ -2,6 +2,8 @@ from flask import request, jsonify
 from typing import Optional
 from src.shared.standardization import APIBlueprint, APIRoute, ErrorCodes
 from src.profiles.services import ProfileService
+from src.shared.decorators import auth_required, role_required, workspace_type_required, workspace_access_required
+from src.shared.middleware import apply_workspace_filter, get_current_workspace_info
 from .services import (
     StudyPlanService, 
     StudyPlanAssignmentService,
@@ -45,11 +47,24 @@ topic_readiness_service = TopicReadinessService()
 
 # Rutas para Plan de Estudio
 @study_plan_bp.route('/', methods=['POST'])
-@APIRoute.standard(auth_required_flag=True, required_fields=['version', 'author_id', 'name'])
+@auth_required
+@workspace_access_required
+@workspace_type_required(['INDIVIDUAL_TEACHER', 'INSTITUTE'])
 def create_study_plan():
     """Crea un nuevo plan de estudios"""
     data = request.get_json()
-    result = study_plan_service.create_study_plan(data)
+    workspace_info = get_current_workspace_info()
+    
+    # Validar campos requeridos
+    required_fields = ['version', 'name']
+    for field in required_fields:
+        if field not in data:
+            return APIRoute.error(ErrorCodes.MISSING_FIELD, f"Campo requerido: {field}")
+    
+    # Asignar author_id del usuario actual
+    data['author_id'] = request.user_id
+    
+    result = study_plan_service.create_study_plan(data, workspace_info=workspace_info)
     return APIRoute.success(
         {"id": result},
         message="Plan de estudios creado exitosamente",
@@ -57,18 +72,32 @@ def create_study_plan():
     )
 
 @study_plan_bp.route('/', methods=['GET'])
-@APIRoute.standard(auth_required_flag=True)
+@auth_required
+@apply_workspace_filter('study_plans')
 def list_study_plans():
     """
-    Lista todos los planes de estudio, con filtros opcionales.
+    Lista todos los planes de estudio, con filtros opcionales por workspace.
     - `email`: Filtra por el email del autor.
     - `institute_id`: Filtra por el instituto al que están asociados los planes.
     """
     try:
+        workspace_info = get_current_workspace_info()
+        workspace_type = workspace_info.get('workspace_type')
+        current_user_id = request.user_id
+        
         email = request.args.get('email')
         institute_id = request.args.get('institute_id')
         
-        study_plans = study_plan_service.list_study_plans(email=email, institute_id=institute_id)
+        # En workspaces individuales, restringir acceso a planes propios
+        if workspace_type in ['INDIVIDUAL_TEACHER', 'INDIVIDUAL_STUDENT']:
+            # Solo permitir ver planes del usuario actual
+            email = request.user_email
+        
+        study_plans = study_plan_service.list_study_plans(
+            email=email, 
+            institute_id=institute_id,
+            workspace_info=workspace_info
+        )
         
         return APIRoute.success(data=study_plans)
     except Exception as e:
@@ -79,11 +108,23 @@ def list_study_plans():
         )
 
 @study_plan_bp.route('/<plan_id>', methods=['GET'])
-@APIRoute.standard(auth_required_flag=True)
+@auth_required
+@apply_workspace_filter('study_plans')
 def get_study_plan(plan_id):
     """Obtiene un plan de estudios con sus módulos, temas y evaluaciones"""
-    plan = study_plan_service.get_study_plan(plan_id)
+    workspace_info = get_current_workspace_info()
+    workspace_type = workspace_info.get('workspace_type')
+    current_user_id = request.user_id
+    
+    plan = study_plan_service.get_study_plan(plan_id, workspace_info=workspace_info)
+    
     if plan:
+        # En workspaces individuales, verificar que el plan pertenece al usuario
+        if workspace_type in ['INDIVIDUAL_TEACHER', 'INDIVIDUAL_STUDENT']:
+            plan_author_id = plan.get('author_id')
+            if str(plan_author_id) != str(current_user_id):
+                return APIRoute.error(ErrorCodes.FORBIDDEN, "No tienes acceso a este plan de estudios")
+        
         plan = ensure_json_serializable(plan)
         return APIRoute.success(data=plan)
     return APIRoute.error(ErrorCodes.NOT_FOUND, "Plan de estudios no encontrado")

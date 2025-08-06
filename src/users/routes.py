@@ -76,30 +76,48 @@ def login():
         user_info = None
 
         if google_credential:
-            # --- Flujo de Login con Google (Corregido) ---
-            user = user_service.collection.find_one({
-                "email": email,
-                # El usuario debe ser de Google o no tener un proveedor definido (para usuarios antiguos)
-                "$or": [
-                    {"provider": "google"},
-                    {"provider": {"$exists": False}}
-                ]
-            })
+            # --- Flujo de Login con Google Mejorado ---
+            import requests
+            # Validar ID token
+            validation_url = f"https://oauth2.googleapis.com/tokeninfo?id_token={google_credential}"
+            response = requests.get(validation_url)
+            if response.status_code != 200:
+                return APIRoute.error(ErrorCodes.AUTHENTICATION_ERROR, "Token de Google inválido")
+            token_data = response.json()
+            if token_data.get('email') != email:
+                return APIRoute.error(ErrorCodes.AUTHENTICATION_ERROR, "Email no coincide con el token")
+
+            # Buscar usuario
+            user = user_service.collection.find_one({"email": email})
 
             if user:
-                # Si el usuario es antiguo y no tiene proveedor, actualizarlo
+                # Actualizar proveedor si necesario
                 if not user.get("provider"):
                     user_service.collection.update_one(
                         {"_id": user["_id"]},
                         {"$set": {"provider": "google", "updated_at": datetime.now()}}
                     )
-
-                user_info = {
-                    "id": str(user["_id"]),
-                    "name": user["name"],
-                    "email": user["email"],
-                    "role": normalize_role(user["role"])
+            else:
+                # Crear nuevo usuario
+                new_user_data = {
+                    "email": email,
+                    "name": token_data.get('name', email.split('@')[0]),
+                    "role": "STUDENT",
+                    "provider": "google",
+                    "created_at": datetime.now(),
+                    "updated_at": datetime.now()
                 }
+                success, user_id = user_service.register_user(new_user_data)  # Ajustar si register_user necesita más campos
+                if not success:
+                    return APIRoute.error(ErrorCodes.CREATION_ERROR, user_id)
+                user = user_service.collection.find_one({"_id": ObjectId(user_id)})
+
+            user_info = {
+                "id": str(user["_id"]),
+                "name": user["name"],
+                "email": user["email"],
+                "role": normalize_role(user["role"])
+            }
         elif password:
             # --- Flujo de Login con Email/Contraseña ---
             user_info = user_service.login_user(email, password)
@@ -199,3 +217,8 @@ def reset_password():
     except Exception as e:
         log_error(f"Error en reset_password: {str(e)}", e, "users.routes")
         return APIRoute.error(ErrorCodes.SERVER_ERROR, "No se pudo actualizar la contraseña.")
+
+@users_bp.route('/verify-token', methods=['GET'])
+@APIRoute.standard(auth_required_flag=True)
+def verify_token():
+    return APIRoute.success()

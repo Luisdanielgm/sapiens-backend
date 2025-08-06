@@ -469,3 +469,74 @@ def workspace_permission_required(permission):
             return f(*args, **kwargs)
         return decorated_function
     return decorator
+
+def workspace_role_required(required_roles):
+    """
+    Decorador para verificar que el usuario tiene uno de los roles requeridos en el workspace
+    Debe usarse después de workspace_access_required
+    
+    Args:
+        required_roles: Lista de roles requeridos o rol único (ej: ['OWNER', 'ADMIN'] o 'OWNER')
+    """
+    if isinstance(required_roles, str):
+        required_roles = [required_roles]
+    
+    def decorator(f):
+        @wraps(f)
+        def decorated_function(*args, **kwargs):
+            # Verificar que workspace_access_required ha sido ejecutado
+            if not hasattr(request, 'current_workspace'):
+                return jsonify({
+                    "success": False,
+                    "error": "ERROR_CONFIGURACION",
+                    "message": "Decorador mal configurado: se requiere workspace_access_required"
+                }), 500
+            
+            workspace = request.current_workspace
+            user_role = workspace.get('role')
+            
+            if user_role not in required_roles:
+                return jsonify({
+                    "success": False,
+                    "error": "ERROR_PERMISO",
+                    "message": f"Se requiere uno de los siguientes roles: {', '.join(required_roles)}"
+                }), 403
+            
+            return f(*args, **kwargs)
+        return decorated_function
+    return decorator
+
+def workspace_data_isolation_required(f):
+    """
+    Decorador para asegurar el aislamiento de datos por workspace_type
+    Debe usarse después de workspace_access_required
+    
+    Este decorador agrega filtros automáticos para asegurar que:
+    - INDIVIDUAL_STUDENT: Solo ve sus propios datos
+    - INDIVIDUAL_TEACHER: Solo ve datos de su clase personal
+    - INSTITUTE: Ve datos del instituto completo
+    """
+    @wraps(f)
+    def decorated_function(*args, **kwargs):
+        # Verificar que workspace_access_required ha sido ejecutado
+        if not hasattr(request, 'current_workspace'):
+            return jsonify({
+                "success": False,
+                "error": "ERROR_CONFIGURACION",
+                "message": "Decorador mal configurado: se requiere workspace_access_required"
+            }), 500
+        
+        from src.shared.middleware import apply_workspace_data_filters
+        
+        workspace = request.current_workspace
+        user_id = request.user_id
+        
+        # Usar la función de middleware para aplicar filtros
+        base_query = {}
+        isolation_filters = apply_workspace_data_filters(base_query, workspace, user_id)
+        
+        # Agregar filtros al request para uso en la función
+        request.isolation_filters = isolation_filters
+        
+        return f(*args, **kwargs)
+    return decorated_function

@@ -117,12 +117,13 @@ class ProfileService(VerificationBaseService):
             log_error(f"Error al crear perfil de profesor: {str(e)}", e, "profiles.services")
             return False, str(e)
     
-    def get_teacher_profile(self, user_id_or_email: str) -> Optional[Dict]:
+    def get_teacher_profile(self, user_id_or_email: str, workspace_info: Dict = None) -> Optional[Dict]:
         """
         Obtiene el perfil de profesor para un usuario específico.
         
         Args:
             user_id_or_email: ID o email del usuario profesor
+            workspace_info: Información del workspace actual (opcional)
             
         Returns:
             Dict: Información del perfil de profesor si existe, None en caso contrario
@@ -130,8 +131,25 @@ class ProfileService(VerificationBaseService):
         user_id = self._get_user_id(user_id_or_email)
         if not user_id:
             return None
+        
+        # Construir filtro base
+        filter_query = {"user_id": user_id}
+        
+        # Aplicar filtrado por workspace si se proporciona
+        if workspace_info:
+            workspace_type = workspace_info.get('workspace_type')
+            workspace_id = workspace_info.get('workspace_id')
             
-        profile = self.db.teacher_profiles.find_one({"user_id": user_id})
+            if workspace_type == 'INDIVIDUAL_TEACHER':
+                # En workspaces individuales, filtrar por workspace_id
+                filter_query["workspace_id"] = ObjectId(workspace_id)
+            elif workspace_type == 'INSTITUTE':
+                # En workspaces institucionales, filtrar por institute_id
+                institute_id = workspace_info.get('institute_id')
+                if institute_id:
+                    filter_query["institute_id"] = ObjectId(institute_id)
+            
+        profile = self.db.teacher_profiles.find_one(filter_query)
         if not profile:
             return None
             
@@ -146,6 +164,13 @@ class ProfileService(VerificationBaseService):
                 "name": user.get("name", ""),
                 "email": user.get("email", ""),
                 "picture": user.get("picture", "")
+            }
+        
+        # Agregar información del workspace si está disponible
+        if workspace_info:
+            profile["workspace_context"] = {
+                "workspace_type": workspace_info.get('workspace_type'),
+                "workspace_name": workspace_info.get('workspace_name')
             }
             
         return profile
@@ -253,13 +278,14 @@ class ProfileService(VerificationBaseService):
             log_error(f"Error al crear perfil de estudiante: {str(e)}", e, "profiles.services")
             return False, str(e)
     
-    def get_student_profile(self, user_id_or_email: str) -> Optional[Dict]:
+    def get_student_profile(self, user_id_or_email: str, workspace_info: Dict = None) -> Optional[Dict]:
         """
         Obtiene el perfil de estudiante para un usuario específico.
         Si el perfil no existe pero el usuario sí, intenta crearlo automáticamente.
         
         Args:
             user_id_or_email: ID o email del usuario estudiante
+            workspace_info: Información del workspace actual (opcional)
             
         Returns:
             Dict: Información del perfil de estudiante si existe, None en caso contrario
@@ -282,8 +308,25 @@ class ProfileService(VerificationBaseService):
                 
             log_info(f"ID de usuario encontrado: {user_id}", "profiles.services")
             
-            # Buscar perfil por user_id exacto
-            profile = self.db.student_profiles.find_one({"user_id": user_id})
+            # Construir filtro base
+            filter_query = {"user_id": user_id}
+            
+            # Aplicar filtrado por workspace si se proporciona
+            if workspace_info:
+                workspace_type = workspace_info.get('workspace_type')
+                workspace_id = workspace_info.get('workspace_id')
+                
+                if workspace_type == 'INDIVIDUAL_STUDENT':
+                    # En workspaces individuales, filtrar por workspace_id
+                    filter_query["workspace_id"] = ObjectId(workspace_id)
+                elif workspace_type == 'INSTITUTE':
+                    # En workspaces institucionales, filtrar por institute_id
+                    institute_id = workspace_info.get('institute_id')
+                    if institute_id:
+                        filter_query["institute_id"] = ObjectId(institute_id)
+            
+            # Buscar perfil con filtros aplicados
+            profile = self.db.student_profiles.find_one(filter_query)
             
             # Si no se encuentra, verificar si existe un perfil pero con una representación diferente del ObjectId
             if not profile:
@@ -358,6 +401,13 @@ class ProfileService(VerificationBaseService):
                         "name": user.get("name", ""),
                         "email": user.get("email", ""),
                         "picture": user.get("picture", "")
+                    }
+                
+                # Agregar información del workspace si está disponible
+                if workspace_info:
+                    profile["workspace_context"] = {
+                        "workspace_type": workspace_info.get('workspace_type'),
+                        "workspace_name": workspace_info.get('workspace_name')
                     }
                     
                 return profile
@@ -1309,4 +1359,4 @@ class ProfileService(VerificationBaseService):
             return result.deleted_count > 0
         except Exception as e:
             log_error(f"Error al eliminar perfil de instituto: {str(e)}", e, "profiles.services")
-            return False 
+            return False

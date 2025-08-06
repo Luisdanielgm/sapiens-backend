@@ -4,6 +4,13 @@ from flask_jwt_extended import get_jwt_identity, get_jwt
 
 from src.shared.standardization import APIBlueprint, APIRoute, ErrorCodes
 from src.shared.constants import ROLES
+from src.shared.decorators import (
+    auth_required, 
+    role_required, 
+    workspace_type_required,
+    workspace_access_required
+)
+from src.shared.middleware import apply_workspace_filter, get_current_workspace_info
 from .services import ClassService, MembershipService, SubperiodService
 from src.shared.database import get_db
 
@@ -15,13 +22,28 @@ subperiod_service = SubperiodService()
 
 # Rutas para manejo de clases
 @classes_bp.route('/create', methods=['POST'])
-@APIRoute.standard(auth_required_flag=True, roles=[ROLES["TEACHER"], ROLES["INSTITUTE_ADMIN"]])
+@auth_required
+@role_required([ROLES["TEACHER"], ROLES["INSTITUTE_ADMIN"]])
+@apply_workspace_filter('classes')
 def create_class():
     """
     Crea una nueva clase con los parámetros especificados.
     El usuario creador se agrega automáticamente como miembro con rol de profesor.
     """
     try:
+        # Obtener información del workspace actual
+        workspace_info = get_current_workspace_info()
+        workspace_type = workspace_info.get('workspace_type')
+        
+        # Para workspaces individuales de profesor, validar que sea el usuario actual
+        if workspace_type == 'INDIVIDUAL_TEACHER':
+            if request.user_id != workspace_info.get('user_id'):
+                return APIRoute.error(
+                    ErrorCodes.FORBIDDEN,
+                    "Solo puedes crear clases en tu workspace individual",
+                    status_code=403
+                )
+        
         # Validar que vienen los campos requeridos
         required_fields = ['subject_id', 'section_id', 'academic_period_id', 'level_id', 'name', 'access_code']
         for field in required_fields:
@@ -31,15 +53,11 @@ def create_class():
         # Obtener el usuario actual
         user_id = get_jwt_identity()
         
-        # Obtener información del instituto del usuario
-        db = get_db()
-        user = db.users.find_one({"_id": ObjectId(user_id)})
-        if not user:
-            return APIRoute.error(ErrorCodes.USER_NOT_FOUND, "Usuario no encontrado", status_code=404)
-        
-        # Crear la clase
+        # Crear la clase con información del workspace
         class_data = {
-            'institute_id': request.json.get('institute_id') or ObjectId(user.get('institute_id')),
+            'institute_id': ObjectId(workspace_info.get('institute_id')),
+            'workspace_id': ObjectId(workspace_info.get('workspace_id')),
+            'workspace_type': workspace_type,
             'subject_id': ObjectId(request.json['subject_id']),
             'section_id': ObjectId(request.json['section_id']),
             'academic_period_id': ObjectId(request.json['academic_period_id']),
@@ -54,7 +72,7 @@ def create_class():
         if 'schedule' in request.json:
             class_data['schedule'] = request.json['schedule']
         
-        success, result = class_service.create_class(class_data)
+        success, result = class_service.create_class(class_data, workspace_info)
 
         if success:
             return APIRoute.success(data={"id": result}, message="Clase creada exitosamente", status_code=201)
@@ -64,13 +82,16 @@ def create_class():
         return APIRoute.error(ErrorCodes.SERVER_ERROR, str(e), status_code=500)
 
 @classes_bp.route('/<class_id>', methods=['GET'])
-@APIRoute.standard(auth_required_flag=True, roles=[ROLES["TEACHER"], ROLES["STUDENT"], ROLES["INSTITUTE_ADMIN"]])
+@auth_required
+@role_required([ROLES["TEACHER"], ROLES["STUDENT"], ROLES["INSTITUTE_ADMIN"]])
+@apply_workspace_filter('classes')
 def get_class_details(class_id):
     """
     Obtiene los detalles de una clase específica.
     """
     try:
-        class_details = class_service.get_class_details(class_id)
+        workspace_info = get_current_workspace_info()
+        class_details = class_service.get_class_details(class_id, workspace_info)
         if class_details:
             return APIRoute.success(data=class_details)
         else:
@@ -79,12 +100,27 @@ def get_class_details(class_id):
         return APIRoute.error(str(e), 500)
 
 @classes_bp.route('/<class_id>/update', methods=['PUT'])
-@APIRoute.standard(auth_required_flag=True, roles=[ROLES["TEACHER"], ROLES["INSTITUTE_ADMIN"]])
+@auth_required
+@role_required([ROLES["TEACHER"], ROLES["INSTITUTE_ADMIN"]])
+@apply_workspace_filter('classes')
 def update_class(class_id):
     """
     Actualiza una clase existente.
     """
     try:
+        # Obtener información del workspace actual
+        workspace_info = get_current_workspace_info()
+        workspace_type = workspace_info.get('workspace_type')
+        
+        # Para workspaces individuales de profesor, validar que sea el usuario actual
+        if workspace_type == 'INDIVIDUAL_TEACHER':
+            if request.user_id != workspace_info.get('user_id'):
+                return APIRoute.error(
+                    ErrorCodes.FORBIDDEN,
+                    "Solo puedes actualizar clases en tu workspace individual",
+                    status_code=403
+                )
+        
         # Validar que viene al menos un campo para actualizar
         if not request.json:
             return APIRoute.error("No se proporcionaron datos para actualizar", 400)
@@ -100,7 +136,7 @@ def update_class(class_id):
         if not updates:
             return APIRoute.error("No se proporcionaron campos válidos para actualizar", 400)
         
-        success, result = class_service.update_class(class_id, updates)
+        success, result = class_service.update_class(class_id, updates, workspace_info)
 
         if success:
             return APIRoute.success(data={"message": result})
@@ -110,7 +146,9 @@ def update_class(class_id):
         return APIRoute.error(str(e), 500)
 
 @classes_bp.route('/<class_id>', methods=['DELETE'])
-@APIRoute.standard(auth_required_flag=True, roles=[ROLES["TEACHER"], ROLES["INSTITUTE_ADMIN"]])
+@auth_required
+@role_required([ROLES["TEACHER"], ROLES["INSTITUTE_ADMIN"]])
+@apply_workspace_filter('classes')
 def delete_class(class_id):
     """
     Elimina una clase específica si no tiene dependencias.
@@ -119,7 +157,20 @@ def delete_class(class_id):
         class_id: ID de la clase a eliminar
     """
     try:
-        success, message = class_service.delete_class(class_id)
+        # Obtener información del workspace actual
+        workspace_info = get_current_workspace_info()
+        workspace_type = workspace_info.get('workspace_type')
+        
+        # Para workspaces individuales de profesor, validar que sea el usuario actual
+        if workspace_type == 'INDIVIDUAL_TEACHER':
+            if request.user_id != workspace_info.get('user_id'):
+                return APIRoute.error(
+                    ErrorCodes.FORBIDDEN,
+                    "Solo puedes eliminar clases en tu workspace individual",
+                    status_code=403
+                )
+        
+        success, message = class_service.delete_class(class_id, workspace_info)
 
         if success:
             return APIRoute.success(data={"message": message})
@@ -136,7 +187,9 @@ def delete_class(class_id):
         )
 
 @classes_bp.route('/<class_id>/check-dependencies', methods=['GET'])
-@APIRoute.standard(auth_required_flag=True, roles=[ROLES["TEACHER"], ROLES["INSTITUTE_ADMIN"]])
+@auth_required
+@role_required([ROLES["TEACHER"], ROLES["INSTITUTE_ADMIN"]])
+@apply_workspace_filter('classes')
 def check_class_dependencies(class_id):
     """
     Verifica si una clase tiene dependencias que impiden su eliminación.
@@ -145,8 +198,14 @@ def check_class_dependencies(class_id):
         class_id: ID de la clase a verificar
     """
     try:
-        # Verificar que la clase existe
-        class_data = class_service.collection.find_one({"_id": ObjectId(class_id)})
+        # Obtener información del workspace actual
+        workspace_info = get_current_workspace_info()
+        
+        # Verificar que la clase existe y pertenece al workspace
+        class_data = class_service.collection.find_one({
+            "_id": ObjectId(class_id),
+            "workspace_id": ObjectId(workspace_info.get('workspace_id'))
+        })
         if not class_data:
             return APIRoute.error(
                 ErrorCodes.NOT_FOUND,
@@ -183,12 +242,26 @@ def check_class_dependencies(class_id):
 
 # Rutas para manejo de miembros de la clase
 @classes_bp.route('/<class_id>/members/add', methods=['POST'])
-@APIRoute.standard(auth_required_flag=True, roles=[ROLES["TEACHER"], ROLES["INSTITUTE_ADMIN"]])
+@auth_required
+@role_required([ROLES["TEACHER"], ROLES["INSTITUTE_ADMIN"]])
+@apply_workspace_filter('classes')
 def add_class_member(class_id):
     """
     Agrega un miembro a una clase.
     """
     try:
+        # Obtener información del workspace actual
+        workspace_info = get_current_workspace_info()
+        workspace_type = workspace_info.get('workspace_type')
+        
+        # Para workspaces individuales, no se pueden agregar miembros
+        if workspace_type in ['INDIVIDUAL_TEACHER', 'INDIVIDUAL_STUDENT']:
+            return APIRoute.error(
+                ErrorCodes.FORBIDDEN,
+                "No se pueden agregar miembros en workspaces individuales",
+                status_code=403
+            )
+        
         # Validar que vienen los campos requeridos
         if 'user_id' not in request.json or 'role' not in request.json:
             return APIRoute.error("Se requieren los campos user_id y role", 400)
@@ -200,7 +273,7 @@ def add_class_member(class_id):
         if role not in ["TEACHER", "STUDENT"]:
             return APIRoute.error("Rol no válido. Debe ser 'TEACHER' o 'STUDENT'", 400)
         
-        success, result = membership_service.add_member(class_id, user_id, role)
+        success, result = membership_service.add_member(class_id, user_id, role, workspace_info)
 
         if success:
             return APIRoute.success(data={"id": result}, status_code=201)
@@ -210,7 +283,9 @@ def add_class_member(class_id):
         return APIRoute.error(str(e), 500)
 
 @classes_bp.route('/<class_id>/members', methods=['GET'])
-@APIRoute.standard(auth_required_flag=True, roles=[ROLES["TEACHER"], ROLES["STUDENT"], ROLES["INSTITUTE_ADMIN"]])
+@auth_required
+@role_required([ROLES["TEACHER"], ROLES["STUDENT"], ROLES["INSTITUTE_ADMIN"]])
+@apply_workspace_filter('classes')
 def get_class_members(class_id):
     """
     Obtiene todos los miembros de una clase.
@@ -219,6 +294,9 @@ def get_class_members(class_id):
         role: (opcional) Filtrar miembros por rol ('TEACHER' o 'STUDENT')
     """
     try:
+        # Obtener información del workspace actual
+        workspace_info = get_current_workspace_info()
+        
         # Obtener el parámetro role de la consulta si existe
         role = request.args.get('role')
         
@@ -231,52 +309,62 @@ def get_class_members(class_id):
             )
         
         # Modificar el servicio para filtrar por rol
-        members = membership_service.get_class_members(class_id, role)
+        members = membership_service.get_class_members(class_id, role, workspace_info)
         return APIRoute.success(data=members)
     except Exception as e:
         return APIRoute.error(str(e), 500)
 
 @classes_bp.route('/teacher/<teacher_id_or_email>', methods=['GET'])
-@APIRoute.standard(auth_required_flag=True)
+@auth_required
+@apply_workspace_filter('classes')
 def get_teacher_classes(teacher_id_or_email):
     """
     Obtiene todas las clases de un profesor.
     """
     try:
-        # Obtener información del workspace del JWT
-        jwt_claims = get_jwt()
-        workspace_type = jwt_claims.get('workspace_type')
-        workspace_user_id = get_jwt_identity()
-        class_id = jwt_claims.get('class_id')
+        # Obtener información del workspace actual
+        workspace_info = get_current_workspace_info()
+        workspace_type = workspace_info.get('workspace_type')
+        
+        # Para workspaces individuales de profesor, validar que sea el usuario actual
+        if workspace_type == 'INDIVIDUAL_TEACHER':
+            if teacher_id_or_email != request.user_id:
+                return APIRoute.error(
+                    ErrorCodes.FORBIDDEN,
+                    "Solo puedes acceder a tus propias clases en workspace individual",
+                    status_code=403
+                )
         
         classes = membership_service.get_classes_by_teacher(
-            teacher_id_or_email, 
-            workspace_type=workspace_type, 
-            workspace_user_id=workspace_user_id, 
-            class_id=class_id
+            teacher_id_or_email, workspace_info
         )
         return APIRoute.success(data=classes)
     except Exception as e:
         return APIRoute.error(str(e), 500)
 
 @classes_bp.route('/student/<student_id_or_email>', methods=['GET'])
-@APIRoute.standard(auth_required_flag=True)
+@auth_required
+@apply_workspace_filter('classes')
 def get_student_classes(student_id_or_email):
     """
     Obtiene todas las clases de un estudiante.
     """
     try:
-        # Obtener información del workspace del JWT
-        jwt_claims = get_jwt()
-        workspace_type = jwt_claims.get('workspace_type')
-        workspace_user_id = get_jwt_identity()
-        class_id = jwt_claims.get('class_id')
+        # Obtener información del workspace actual
+        workspace_info = get_current_workspace_info()
+        workspace_type = workspace_info.get('workspace_type')
+        
+        # Para workspaces individuales de estudiante, validar que sea el usuario actual
+        if workspace_type == 'INDIVIDUAL_STUDENT':
+            if student_id_or_email != request.user_id:
+                return APIRoute.error(
+                    ErrorCodes.FORBIDDEN,
+                    "Solo puedes acceder a tus propias clases en workspace individual",
+                    status_code=403
+                )
         
         classes = membership_service.get_classes_by_student(
-            student_id_or_email, 
-            workspace_type=workspace_type, 
-            workspace_user_id=workspace_user_id, 
-            class_id=class_id
+            student_id_or_email, workspace_info
         )
         return APIRoute.success(data=classes)
     except Exception as e:
@@ -295,7 +383,9 @@ def get_class_students(class_id):
         return APIRoute.error(str(e), 500)
 
 @classes_bp.route('/<class_id>/members/<member_id>', methods=['DELETE'])
-@APIRoute.standard(auth_required_flag=True, roles=[ROLES["TEACHER"], ROLES["INSTITUTE_ADMIN"]])
+@auth_required
+@role_required([ROLES["TEACHER"], ROLES["INSTITUTE_ADMIN"]])
+@apply_workspace_filter('classes')
 def remove_class_member(class_id, member_id):
     """
     Elimina un miembro de una clase.
@@ -305,7 +395,19 @@ def remove_class_member(class_id, member_id):
         member_id: ID del miembro a eliminar
     """
     try:
-        success, message = membership_service.remove_member(class_id, member_id)
+        # Obtener información del workspace actual
+        workspace_info = get_current_workspace_info()
+        workspace_type = workspace_info.get('workspace_type')
+        
+        # Para workspaces individuales, no se pueden eliminar miembros
+        if workspace_type in ['INDIVIDUAL_TEACHER', 'INDIVIDUAL_STUDENT']:
+            return APIRoute.error(
+                ErrorCodes.FORBIDDEN,
+                "No se pueden eliminar miembros en workspaces individuales",
+                status_code=403
+            )
+        
+        success, message = membership_service.remove_member(class_id, member_id, workspace_info)
 
         if success:
             return APIRoute.success(data={"message": message})
@@ -322,7 +424,9 @@ def remove_class_member(class_id, member_id):
         )
 
 @classes_bp.route('/<class_id>/members/add-by-email', methods=['POST'])
-@APIRoute.standard(auth_required_flag=True, roles=[ROLES["TEACHER"], ROLES["INSTITUTE_ADMIN"]])
+@auth_required
+@role_required([ROLES["TEACHER"], ROLES["INSTITUTE_ADMIN"]])
+@apply_workspace_filter('classes')
 def add_class_member_by_email(class_id):
     """
     Agrega un miembro a una clase mediante su email.
@@ -331,6 +435,18 @@ def add_class_member_by_email(class_id):
         class_id: ID de la clase
     """
     try:
+        # Obtener información del workspace actual
+        workspace_info = get_current_workspace_info()
+        workspace_type = workspace_info.get('workspace_type')
+        
+        # Para workspaces individuales, no se pueden agregar miembros
+        if workspace_type in ['INDIVIDUAL_TEACHER', 'INDIVIDUAL_STUDENT']:
+            return APIRoute.error(
+                ErrorCodes.FORBIDDEN,
+                "No se pueden agregar miembros en workspaces individuales",
+                status_code=403
+            )
+        
         # Validar que vienen los campos requeridos
         if 'email' not in request.json or 'role' not in request.json:
             return APIRoute.error(
@@ -358,7 +474,7 @@ def add_class_member_by_email(class_id):
                 status_code=400
             )
         
-        success, result = membership_service.add_member_by_email(class_id, email, role)
+        success, result = membership_service.add_member_by_email(class_id, email, role, workspace_info)
 
         if success:
             if isinstance(result, dict) and "message" in result:
@@ -379,12 +495,27 @@ def add_class_member_by_email(class_id):
 
 # Rutas para manejo de subperiodos
 @classes_bp.route('/<class_id>/subperiod/create', methods=['POST'])
-@APIRoute.standard(auth_required_flag=True, roles=[ROLES["TEACHER"], ROLES["INSTITUTE_ADMIN"]])
+@auth_required
+@role_required([ROLES["TEACHER"], ROLES["INSTITUTE_ADMIN"]])
+@apply_workspace_filter('classes')
 def create_subperiod(class_id):
     """
     Crea un nuevo subperíodo para una clase.
     """
     try:
+        # Obtener información del workspace actual
+        workspace_info = get_current_workspace_info()
+        workspace_type = workspace_info.get('workspace_type')
+        
+        # Para workspaces individuales de profesor, validar que sea el usuario actual
+        if workspace_type == 'INDIVIDUAL_TEACHER':
+            if request.user_id != workspace_info.get('user_id'):
+                return APIRoute.error(
+                    ErrorCodes.FORBIDDEN,
+                    "Solo puedes crear subperíodos en tu workspace individual",
+                    status_code=403
+                )
+        
         # Validar que vienen los campos requeridos
         required_fields = ['name', 'start_date', 'end_date']
         for field in required_fields:
@@ -397,6 +528,8 @@ def create_subperiod(class_id):
         # Crear el subperiodo
         subperiod_data = {
             'class_id': ObjectId(class_id),
+            'workspace_id': ObjectId(workspace_info.get('workspace_id')),
+            'workspace_type': workspace_type,
             'name': request.json['name'],
             'start_date': request.json['start_date'],
             'end_date': request.json['end_date'],
@@ -404,7 +537,7 @@ def create_subperiod(class_id):
             'created_by': ObjectId(user_id)
         }
         
-        success, result = subperiod_service.create_subperiod(subperiod_data)
+        success, result = subperiod_service.create_subperiod(subperiod_data, workspace_info)
 
         if success:
             return APIRoute.success(data={"id": result}, status_code=201)
@@ -414,19 +547,26 @@ def create_subperiod(class_id):
         return APIRoute.error(str(e), 500)
 
 @classes_bp.route('/<class_id>/subperiods', methods=['GET'])
-@APIRoute.standard(auth_required_flag=True, roles=[ROLES["TEACHER"], ROLES["STUDENT"]])
+@auth_required
+@role_required([ROLES["TEACHER"], ROLES["STUDENT"]])
+@apply_workspace_filter('classes')
 def get_class_subperiods(class_id):
     """
     Obtiene todos los subperíodos de una clase.
     """
     try:
-        subperiods = subperiod_service.get_class_subperiods(class_id)
+        # Obtener información del workspace actual
+        workspace_info = get_current_workspace_info()
+        
+        subperiods = subperiod_service.get_class_subperiods(class_id, workspace_info)
         return APIRoute.success(data=subperiods)
     except Exception as e:
         return APIRoute.error(str(e), 500)
 
 @classes_bp.route('/<class_id>/subperiod/<subperiod_id>', methods=['PUT'])
-@APIRoute.standard(auth_required_flag=True, roles=[ROLES["TEACHER"], ROLES["INSTITUTE_ADMIN"]])
+@auth_required
+@role_required([ROLES["TEACHER"], ROLES["INSTITUTE_ADMIN"]])
+@apply_workspace_filter('classes')
 def update_subperiod(class_id, subperiod_id):
     """
     Actualiza un subperíodo existente.
@@ -442,6 +582,19 @@ def update_subperiod(class_id, subperiod_id):
         status: (opcional) Nuevo estado ('active' o 'inactive')
     """
     try:
+        # Obtener información del workspace actual
+        workspace_info = get_current_workspace_info()
+        workspace_type = workspace_info.get('workspace_type')
+        
+        # Para workspaces individuales de profesor, validar que sea el usuario actual
+        if workspace_type == 'INDIVIDUAL_TEACHER':
+            if request.user_id != workspace_info.get('user_id'):
+                return APIRoute.error(
+                    ErrorCodes.FORBIDDEN,
+                    "Solo puedes actualizar subperíodos en tu workspace individual",
+                    status_code=403
+                )
+        
         # Verificar que vienen datos para actualizar
         if not request.json:
             return APIRoute.error(
@@ -453,7 +606,8 @@ def update_subperiod(class_id, subperiod_id):
         # Verificar que el subperíodo pertenece a la clase especificada
         subperiod = subperiod_service.collection.find_one({
             "_id": ObjectId(subperiod_id),
-            "class_id": ObjectId(class_id)
+            "class_id": ObjectId(class_id),
+            "workspace_id": ObjectId(workspace_info.get('workspace_id'))
         })
         
         if not subperiod:
@@ -464,7 +618,7 @@ def update_subperiod(class_id, subperiod_id):
             )
         
         # Actualizar el subperíodo
-        success, message = subperiod_service.update_subperiod(subperiod_id, request.json)
+        success, message = subperiod_service.update_subperiod(subperiod_id, request.json, workspace_info)
 
         if success:
             return APIRoute.success(data={"message": message})
@@ -481,7 +635,9 @@ def update_subperiod(class_id, subperiod_id):
         )
 
 @classes_bp.route('/<class_id>/subperiod/<subperiod_id>', methods=['DELETE'])
-@APIRoute.standard(auth_required_flag=True, roles=[ROLES["TEACHER"], ROLES["INSTITUTE_ADMIN"]])
+@auth_required
+@role_required([ROLES["TEACHER"], ROLES["INSTITUTE_ADMIN"]])
+@apply_workspace_filter('classes')
 def delete_subperiod(class_id, subperiod_id):
     """
     Elimina un subperíodo existente.
@@ -491,10 +647,24 @@ def delete_subperiod(class_id, subperiod_id):
         subperiod_id: ID del subperíodo a eliminar
     """
     try:
+        # Obtener información del workspace actual
+        workspace_info = get_current_workspace_info()
+        workspace_type = workspace_info.get('workspace_type')
+        
+        # Para workspaces individuales de profesor, validar que sea el usuario actual
+        if workspace_type == 'INDIVIDUAL_TEACHER':
+            if request.user_id != workspace_info.get('user_id'):
+                return APIRoute.error(
+                    ErrorCodes.FORBIDDEN,
+                    "Solo puedes eliminar subperíodos en tu workspace individual",
+                    status_code=403
+                )
+        
         # Verificar que el subperíodo pertenece a la clase especificada
         subperiod = subperiod_service.collection.find_one({
             "_id": ObjectId(subperiod_id),
-            "class_id": ObjectId(class_id)
+            "class_id": ObjectId(class_id),
+            "workspace_id": ObjectId(workspace_info.get('workspace_id'))
         })
         
         if not subperiod:
@@ -505,7 +675,7 @@ def delete_subperiod(class_id, subperiod_id):
             )
         
         # Eliminar el subperíodo
-        success, message = subperiod_service.delete_subperiod(subperiod_id)
+        success, message = subperiod_service.delete_subperiod(subperiod_id, workspace_info)
 
         if success:
             return APIRoute.success(data={"message": message})
@@ -522,14 +692,19 @@ def delete_subperiod(class_id, subperiod_id):
         )
 
 @classes_bp.route('/level/<level_id>', methods=['GET'])
-@APIRoute.standard(auth_required_flag=True, roles=[ROLES["INSTITUTE_ADMIN"]])
+@auth_required
+@role_required([ROLES["INSTITUTE_ADMIN"]])
+@apply_workspace_filter('classes')
 def get_level_classes(level_id):
     """
     Obtiene todas las clases de un nivel específico.
     Solo accesible para administradores del instituto.
     """
     try:
-        classes = class_service.get_classes_by_level(level_id)
+        # Obtener información del workspace actual
+        workspace_info = get_current_workspace_info()
+        
+        classes = class_service.get_classes_by_level(level_id, workspace_info)
         return APIRoute.success(data=classes)
     except Exception as e:
         return APIRoute.error(str(e), 500)

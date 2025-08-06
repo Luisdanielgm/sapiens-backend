@@ -26,12 +26,13 @@ class StudyPlanService(VerificationBaseService):
     def __init__(self):
         super().__init__(collection_name="study_plans_per_subject")
 
-    def create_study_plan(self, plan_data: dict) -> str:
+    def create_study_plan(self, plan_data: dict, workspace_info: Dict = None) -> str:
         """
         Crea un nuevo plan de estudios.
         
         Args:
             plan_data: Datos del plan de estudios
+            workspace_info: Información del workspace actual (opcional)
             
         Returns:
             ID del plan de estudios creado
@@ -40,13 +41,26 @@ class StudyPlanService(VerificationBaseService):
             AppException: Si ocurre un error durante la creación
         """
         try:
-            # Primero obtener el ID del usuario usando el email
-            user = get_db().users.find_one({"email": plan_data['author_id']})
-            if not user:
-                raise AppException("Usuario no encontrado", AppException.NOT_FOUND)
+            # Si author_id es un email, convertirlo a ObjectId
+            if isinstance(plan_data['author_id'], str) and '@' in plan_data['author_id']:
+                user = get_db().users.find_one({"email": plan_data['author_id']})
+                if not user:
+                    raise AppException("Usuario no encontrado", AppException.NOT_FOUND)
+                plan_data['author_id'] = str(user['_id'])
             
-            # Reemplazar el email por el ID del usuario
-            plan_data['author_id'] = str(user['_id'])
+            # Agregar información del workspace si está disponible
+            if workspace_info:
+                workspace_type = workspace_info.get('workspace_type')
+                workspace_id = workspace_info.get('workspace_id')
+                
+                if workspace_type == 'INDIVIDUAL_TEACHER':
+                    plan_data['workspace_id'] = ObjectId(workspace_id)
+                    plan_data['workspace_type'] = workspace_type
+                elif workspace_type == 'INSTITUTE':
+                    institute_id = workspace_info.get('institute_id')
+                    if institute_id:
+                        plan_data['institute_id'] = ObjectId(institute_id)
+                    plan_data['workspace_type'] = workspace_type
             
             study_plan = StudyPlanPerSubject(**plan_data)
             result = self.collection.insert_one(study_plan.to_dict())
@@ -152,8 +166,9 @@ class StudyPlanService(VerificationBaseService):
         self,
         email: Optional[str] = None,
         institute_id: Optional[str] = None,
+        workspace_info: Dict = None
     ) -> List[Dict]:
-        """Devuelve los planes de estudio filtrados por autor o instituto."""
+        """Devuelve los planes de estudio filtrados por autor, instituto y workspace."""
         try:
             query = {}
 
@@ -169,6 +184,20 @@ class StudyPlanService(VerificationBaseService):
                     logging.error(
                         "institute_id inválido en list_study_plans: %s", institute_id
                     )
+            
+            # Aplicar filtrado por workspace si se proporciona
+            if workspace_info:
+                workspace_type = workspace_info.get('workspace_type')
+                workspace_id = workspace_info.get('workspace_id')
+                
+                if workspace_type == 'INDIVIDUAL_TEACHER':
+                    # En workspaces individuales de profesor, filtrar por workspace_id
+                    query["workspace_id"] = ObjectId(workspace_id)
+                elif workspace_type == 'INSTITUTE':
+                    # En workspaces institucionales, filtrar por institute_id
+                    institute_id = workspace_info.get('institute_id')
+                    if institute_id:
+                        query["institute_id"] = ObjectId(institute_id)
 
             plans = list(self.collection.find(query))
 
@@ -184,7 +213,7 @@ class StudyPlanService(VerificationBaseService):
             logging.error(f"Error al listar planes: {str(e)}")
             return []
 
-    def get_study_plan(self, plan_id: str) -> Optional[Dict]:
+    def get_study_plan(self, plan_id: str, workspace_info: Dict = None) -> Optional[Dict]:
         try:
             plan = self.collection.find_one({"_id": ObjectId(plan_id)})
             if not plan:
@@ -231,6 +260,14 @@ class StudyPlanService(VerificationBaseService):
                 module["evaluations"] = evaluations
 
             plan["modules"] = modules
+            
+            # Agregar información del workspace si está disponible
+            if workspace_info:
+                plan["workspace_context"] = {
+                    "workspace_type": workspace_info.get('workspace_type'),
+                    "workspace_name": workspace_info.get('workspace_name')
+                }
+            
             return plan
         except Exception as e:
             logging.error(f"Error al obtener plan de estudio: {str(e)}")

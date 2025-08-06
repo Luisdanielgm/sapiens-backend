@@ -2369,13 +2369,14 @@ class VirtualContentProgressService(VerificationBaseService):
         
         return self.complete_content_automatically(virtual_content_id, student_id, completion_data)
     
-    def get_student_progress_summary(self, student_id: str, virtual_module_id: str = None) -> Dict:
+    def get_student_progress_summary(self, student_id: str, virtual_module_id: str = None, workspace_info: Dict = None) -> Dict:
         """
         Obtiene un resumen completo del progreso del estudiante.
         
         Args:
             student_id: ID del estudiante
             virtual_module_id: ID del módulo virtual (opcional)
+            workspace_info: Información del workspace para filtrado (opcional)
             
         Returns:
             Dict con estadísticas de progreso
@@ -2383,11 +2384,69 @@ class VirtualContentProgressService(VerificationBaseService):
         try:
             # Filtro base
             base_filter = {"student_id": ObjectId(student_id)}
+            
+            # Aplicar filtro de workspace si está disponible
+            if workspace_info:
+                workspace_type = workspace_info.get('workspace_type')
+                workspace_id = workspace_info.get('workspace_id')
+                
+                if workspace_type and workspace_id:
+                    # Obtener módulos virtuales del workspace
+                    module_filter = {"student_id": ObjectId(student_id)}
+                    if workspace_type == 'INDIVIDUAL_STUDENT':
+                        module_filter["workspace_id"] = ObjectId(workspace_id)
+                    elif workspace_type == 'INSTITUTE':
+                        module_filter["institute_id"] = ObjectId(workspace_id)
+                    
+                    workspace_modules = list(self.db.virtual_modules.find(module_filter))
+                    workspace_module_ids = [vm["_id"] for vm in workspace_modules]
+                    
+                    if workspace_module_ids:
+                        # Obtener temas de estos módulos
+                        workspace_topics = list(self.db.virtual_topics.find({
+                            "virtual_module_id": {"$in": workspace_module_ids}
+                        }))
+                        workspace_topic_ids = [vt["_id"] for vt in workspace_topics]
+                        
+                        if workspace_topic_ids:
+                            base_filter["virtual_topic_id"] = {"$in": workspace_topic_ids}
+                        else:
+                            # No hay temas en el workspace, retornar vacío
+                            base_filter["virtual_topic_id"] = {"$in": []}
+                    else:
+                        # No hay módulos en el workspace, retornar vacío
+                        base_filter["virtual_topic_id"] = {"$in": []}
+            
             if virtual_module_id:
                 # Obtener temas del módulo específico
-                virtual_topics = list(self.db.virtual_topics.find({
-                    "virtual_module_id": ObjectId(virtual_module_id)
-                }))
+                module_filter = {"virtual_module_id": ObjectId(virtual_module_id)}
+                
+                # Si hay workspace_info, verificar que el módulo pertenezca al workspace
+                if workspace_info:
+                    workspace_type = workspace_info.get('workspace_type')
+                    workspace_id = workspace_info.get('workspace_id')
+                    
+                    if workspace_type and workspace_id:
+                        vm_filter = {"_id": ObjectId(virtual_module_id)}
+                        if workspace_type == 'INDIVIDUAL_STUDENT':
+                            vm_filter["workspace_id"] = ObjectId(workspace_id)
+                        elif workspace_type == 'INSTITUTE':
+                            vm_filter["institute_id"] = ObjectId(workspace_id)
+                        
+                        # Verificar que el módulo existe en el workspace
+                        if not self.db.virtual_modules.find_one(vm_filter):
+                            # Módulo no pertenece al workspace, retornar vacío
+                            return {
+                                "total_contents": 0,
+                                "completed_contents": 0,
+                                "completion_rate": 0,
+                                "total_time_spent": 0,
+                                "average_score": 0,
+                                "content_types_progress": {},
+                                "workspace_filtered": True
+                            }
+                
+                virtual_topics = list(self.db.virtual_topics.find(module_filter))
                 topic_ids = [vt["_id"] for vt in virtual_topics]
                 base_filter["virtual_topic_id"] = {"$in": topic_ids}
             

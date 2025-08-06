@@ -4,7 +4,14 @@ from bson import ObjectId
 
 from src.shared.standardization import APIBlueprint, APIRoute, ErrorCodes
 from src.shared.logging import log_error
-from src.shared.decorators import workspace_access_required, workspace_owner_required, workspace_type_required
+from src.shared.decorators import (
+    workspace_access_required, 
+    workspace_owner_required, 
+    workspace_type_required,
+    auth_required,
+    role_required
+)
+from src.shared.middleware import get_current_workspace_info
 from src.members.services import MembershipService
 from src.workspaces.services import WorkspaceService
 from src.shared.database import get_db
@@ -31,6 +38,7 @@ def list_workspaces():
                 "workspace_name": workspace.get("workspace_name"),
                 "role_in_workspace": normalize_role(workspace.get("role")),
                 "status": workspace.get("status", "active"),
+                "is_active": workspace.get("status") == "active",
                 "joined_at": workspace.get("joined_at"),
                 "class_id": str(workspace["class_id"]) if workspace.get("class_id") else None,
                 "metadata": {
@@ -199,39 +207,166 @@ def update_workspace(workspace_id):
         
         return APIRoute.success(
             data=workspace_details,
-            message="Workspace actualizado exitosamente"
+            message=message or "Workspace actualizado exitosamente"
         )
         
     except Exception as e:
         log_error(f"Error updating workspace: {str(e)}", e, "workspaces.routes")
         return APIRoute.error(ErrorCodes.SERVER_ERROR, "No se pudo actualizar el workspace")
 
+# Nuevos endpoints específicos para workspaces individuales
+
 @workspaces_bp.route('/<workspace_id>/study-plan', methods=['POST'])
-@APIRoute.standard(auth_required_flag=True)
+@auth_required
 @workspace_access_required
-@workspace_type_required('INDIVIDUAL')
+@workspace_type_required(['INDIVIDUAL_STUDENT'])
 def create_study_plan(workspace_id):
     """
-    Crea un plan de estudio para un workspace individual de estudiante
+    Generar plan de estudio personalizado para INDIVIDUAL_STUDENT
     """
     try:
         user_id = get_jwt_identity()
         data = request.get_json()
         
-        # Validar datos del plan de estudio
-        if not data or not data.get('study_plan_data'):
-            return APIRoute.error(ErrorCodes.BAD_REQUEST, "Los datos del plan de estudio son requeridos")
+        # Validar datos requeridos
+        if not data or not data.get('description'):
+            return APIRoute.error(ErrorCodes.BAD_REQUEST, "La descripción es requerida")
         
-        # Crear el plan de estudio (acceso y tipo ya validados por decoradores)
-        success, message, response_data = workspace_service.create_study_plan_for_workspace(workspace_id, user_id, data['study_plan_data'])
+        # Procesar archivo PDF si se proporciona
+        pdf_file = request.files.get('pdf_file') if request.files else None
+        
+        # Crear plan de estudio
+        success, message, study_plan_data = workspace_service.create_personal_study_plan(
+            workspace_id=workspace_id,
+            user_id=user_id,
+            description=data['description'],
+            objectives=data.get('objectives', []),
+            pdf_file=pdf_file
+        )
+        
         if not success:
-            return APIRoute.error(ErrorCodes.SERVER_ERROR, message or "No se pudo crear el plan de estudio")
+            return APIRoute.error(ErrorCodes.SERVER_ERROR, message)
         
         return APIRoute.success(
-            data=response_data,
-            message=message or "Plan de estudio creado exitosamente"
+            data=study_plan_data,
+            message="Plan de estudio creado exitosamente"
         )
         
     except Exception as e:
         log_error(f"Error creating study plan: {str(e)}", e, "workspaces.routes")
         return APIRoute.error(ErrorCodes.SERVER_ERROR, "No se pudo crear el plan de estudio")
+
+@workspaces_bp.route('/<workspace_id>/progress', methods=['GET'])
+@auth_required
+@workspace_access_required
+def get_workspace_progress(workspace_id):
+    """
+    Obtener progreso específico del workspace individual
+    """
+    try:
+        user_id = get_jwt_identity()
+        jwt_claims = get_jwt()
+        workspace_type = jwt_claims.get('workspace_type')
+        
+        # Obtener progreso filtrado por workspace
+        progress_data = workspace_service.get_workspace_progress(
+            workspace_id=workspace_id,
+            user_id=user_id,
+            workspace_type=workspace_type
+        )
+        
+        return APIRoute.success(data=progress_data)
+        
+    except Exception as e:
+        log_error(f"Error getting workspace progress: {str(e)}", e, "workspaces.routes")
+        return APIRoute.error(ErrorCodes.SERVER_ERROR, "No se pudo obtener el progreso")
+
+@workspaces_bp.route('/<workspace_id>/summary', methods=['GET'])
+@auth_required
+@workspace_access_required
+def get_workspace_summary(workspace_id):
+    """
+    Obtener resumen general del workspace
+    """
+    try:
+        user_id = get_jwt_identity()
+        workspace_info = get_current_workspace_info()
+        
+        # Obtener resumen del workspace
+        summary_data = workspace_service.get_workspace_summary(
+            workspace_id=workspace_id,
+            user_id=user_id,
+            workspace_info=workspace_info
+        )
+        
+        return APIRoute.success(data=summary_data)
+        
+    except Exception as e:
+        log_error(f"Error getting workspace summary: {str(e)}", e, "workspaces.routes")
+        return APIRoute.error(ErrorCodes.SERVER_ERROR, "No se pudo obtener el resumen del workspace")
+
+@workspaces_bp.route('/<workspace_id>/individual/teacher/classes', methods=['GET'])
+@auth_required
+@workspace_access_required
+@workspace_type_required(['INDIVIDUAL_TEACHER'])
+def get_individual_teacher_classes(workspace_id):
+    """
+    Obtener clases específicas para profesor en workspace individual
+    """
+    try:
+        user_id = get_jwt_identity()
+        workspace_info = get_current_workspace_info()
+        
+        # Validar que el usuario es el propietario del workspace
+        if user_id != workspace_info.get('user_id'):
+            return APIRoute.error(
+                ErrorCodes.FORBIDDEN,
+                "Solo puedes acceder a tus propias clases en workspace individual"
+            )
+        
+        # Obtener clases del profesor individual
+        classes_data = workspace_service.get_individual_teacher_classes(
+            workspace_id=workspace_id,
+            teacher_id=user_id,
+            workspace_info=workspace_info
+        )
+        
+        return APIRoute.success(data=classes_data)
+        
+    except Exception as e:
+        log_error(f"Error getting individual teacher classes: {str(e)}", e, "workspaces.routes")
+        return APIRoute.error(ErrorCodes.SERVER_ERROR, "No se pudieron obtener las clases del profesor")
+
+@workspaces_bp.route('/<workspace_id>/individual/student/study-plans', methods=['GET'])
+@auth_required
+@workspace_access_required
+@workspace_type_required(['INDIVIDUAL_STUDENT'])
+def get_individual_student_study_plans(workspace_id):
+    """
+    Obtener planes de estudio específicos para estudiante en workspace individual
+    """
+    try:
+        user_id = get_jwt_identity()
+        workspace_info = get_current_workspace_info()
+        
+        # Validar que el usuario es el propietario del workspace
+        if user_id != workspace_info.get('user_id'):
+            return APIRoute.error(
+                ErrorCodes.FORBIDDEN,
+                "Solo puedes acceder a tus propios planes de estudio en workspace individual"
+            )
+        
+        # Obtener planes de estudio del estudiante individual
+        study_plans_data = workspace_service.get_individual_student_study_plans(
+            workspace_id=workspace_id,
+            student_id=user_id,
+            workspace_info=workspace_info
+        )
+        
+        return APIRoute.success(data=study_plans_data)
+        
+    except Exception as e:
+        log_error(f"Error getting individual student study plans: {str(e)}", e, "workspaces.routes")
+        return APIRoute.error(ErrorCodes.SERVER_ERROR, "No se pudieron obtener los planes de estudio del estudiante")
+
+# Duplicate function removed - keeping the first create_study_plan implementation above

@@ -202,7 +202,230 @@ class WorkspaceService:
         except Exception as e:
             if isinstance(e, AppException):
                 raise
-            raise AppException(f"Error al crear workspace: {str(e)}", AppException.INTERNAL_ERROR)
+            raise AppException(f"Error al crear workspace personal: {str(e)}", AppException.INTERNAL_ERROR)
+    
+    def create_personal_study_plan(self, workspace_id: str, user_id: str, description: str, 
+                                  objectives: List[str] = None, pdf_file = None) -> Tuple[bool, str, Dict[str, Any]]:
+        """Crear plan de estudio personalizado para workspace individual"""
+        try:
+            # Validar que es un workspace INDIVIDUAL_STUDENT
+            workspace = self.get_workspace_by_id(workspace_id, user_id)
+            if workspace['workspace_type'] != 'INDIVIDUAL_STUDENT':
+                raise AppException("Solo disponible para workspaces de estudiante individual", AppException.BAD_REQUEST)
+            
+            # Procesar archivo PDF si se proporciona
+            pdf_content = None
+            if pdf_file:
+                # Aquí iría la lógica de procesamiento de PDF
+                pdf_content = self._process_pdf_file(pdf_file)
+            
+            # Crear plan de estudio
+            study_plan_data = {
+                "user_id": ObjectId(user_id),
+                "workspace_id": ObjectId(workspace_id),
+                "description": description,
+                "objectives": objectives or [],
+                "pdf_content": pdf_content,
+                "status": "generating",
+                "created_at": datetime.utcnow()
+            }
+            
+            result = self.db.study_plans.insert_one(study_plan_data)
+            study_plan_id = str(result.inserted_id)
+            
+            # Iniciar generación asíncrona (integrar con sistema existente)
+            self._trigger_study_plan_generation(study_plan_id, description, objectives)
+            
+            response_data = {
+                "study_plan_id": study_plan_id,
+                "status": "generating",
+                "message": "Plan de estudio en generación"
+            }
+            
+            return True, "Plan de estudio creado exitosamente", response_data
+            
+        except Exception as e:
+            if isinstance(e, AppException):
+                raise
+            raise AppException(f"Error al crear plan de estudio: {str(e)}", AppException.INTERNAL_ERROR)
+    
+    def get_workspace_progress(self, workspace_id: str, user_id: str, workspace_type: str) -> Dict[str, Any]:
+        """Obtener progreso específico del workspace individual"""
+        try:
+            if workspace_type == 'INDIVIDUAL_STUDENT':
+                return self._get_individual_student_progress(workspace_id, user_id)
+            elif workspace_type == 'INDIVIDUAL_TEACHER':
+                return self._get_individual_teacher_progress(workspace_id, user_id)
+            else:
+                return self._get_institute_progress(workspace_id, user_id)
+                
+        except Exception as e:
+            raise AppException(f"Error al obtener progreso: {str(e)}", AppException.INTERNAL_ERROR)
+    
+    def get_workspace_summary(self, workspace_id: str, user_id: str, workspace_info: Dict[str, Any]) -> Dict[str, Any]:
+        """Obtener resumen general del workspace"""
+        try:
+            workspace_type = workspace_info.get('workspace_type')
+            
+            if workspace_type == 'INDIVIDUAL_STUDENT':
+                return self._get_individual_student_summary(workspace_id, user_id)
+            elif workspace_type == 'INDIVIDUAL_TEACHER':
+                return self._get_individual_teacher_summary(workspace_id, user_id)
+            else:
+                return self._get_institute_summary(workspace_id, user_id)
+                
+        except Exception as e:
+            raise AppException(f"Error al obtener resumen: {str(e)}", AppException.INTERNAL_ERROR)
+    
+    def get_individual_teacher_classes(self, workspace_id: str, teacher_id: str, workspace_info: Dict[str, Any]) -> Dict[str, Any]:
+        """Obtener clases específicas para profesor en workspace individual"""
+        try:
+            # Obtener clases creadas por el profesor
+            classes = list(self.db.classes.find({
+                "created_by": ObjectId(teacher_id),
+                "workspace_id": ObjectId(workspace_id)
+            }))
+            
+            # Formatear respuesta
+            formatted_classes = []
+            for cls in classes:
+                formatted_classes.append({
+                    "class_id": str(cls["_id"]),
+                    "name": cls.get("name"),
+                    "description": cls.get("description"),
+                    "status": cls.get("status", "active"),
+                    "created_at": cls.get("created_at"),
+                    "is_personal": cls.get("is_personal", False)
+                })
+            
+            return {
+                "classes": formatted_classes,
+                "total_count": len(formatted_classes),
+                "workspace_type": "INDIVIDUAL_TEACHER"
+            }
+            
+        except Exception as e:
+            raise AppException(f"Error al obtener clases del profesor: {str(e)}", AppException.INTERNAL_ERROR)
+    
+    def get_individual_student_study_plans(self, workspace_id: str, student_id: str, workspace_info: Dict[str, Any]) -> Dict[str, Any]:
+        """Obtener planes de estudio específicos para estudiante en workspace individual"""
+        try:
+            # Obtener planes de estudio del estudiante
+            study_plans = list(self.db.study_plans.find({
+                "user_id": ObjectId(student_id),
+                "workspace_id": ObjectId(workspace_id)
+            }))
+            
+            # Formatear respuesta
+            formatted_plans = []
+            for plan in study_plans:
+                formatted_plans.append({
+                    "study_plan_id": str(plan["_id"]),
+                    "description": plan.get("description"),
+                    "objectives": plan.get("objectives", []),
+                    "status": plan.get("status"),
+                    "created_at": plan.get("created_at"),
+                    "progress": plan.get("progress", 0)
+                })
+            
+            return {
+                "study_plans": formatted_plans,
+                "total_count": len(formatted_plans),
+                "workspace_type": "INDIVIDUAL_STUDENT"
+            }
+            
+        except Exception as e:
+            raise AppException(f"Error al obtener planes de estudio: {str(e)}", AppException.INTERNAL_ERROR)
+    
+    def _process_pdf_file(self, pdf_file) -> str:
+        """Procesar archivo PDF para extraer contenido"""
+        # Placeholder para procesamiento de PDF
+        # Aquí se integraría con el sistema de procesamiento de documentos
+        return "PDF content processed"
+    
+    def _trigger_study_plan_generation(self, study_plan_id: str, description: str, objectives: List[str]):
+        """Iniciar generación asíncrona del plan de estudio"""
+        # Placeholder para integración con sistema de generación
+        # Aquí se llamaría al servicio de IA para generar el plan
+        pass
+    
+    def _get_individual_student_progress(self, workspace_id: str, user_id: str) -> Dict[str, Any]:
+        """Obtener progreso específico de estudiante individual"""
+        # Obtener planes de estudio y su progreso
+        study_plans = list(self.db.study_plans.find({
+            "user_id": ObjectId(user_id),
+            "workspace_id": ObjectId(workspace_id)
+        }))
+        
+        total_plans = len(study_plans)
+        completed_plans = len([p for p in study_plans if p.get("status") == "completed"])
+        
+        return {
+            "total_study_plans": total_plans,
+            "completed_study_plans": completed_plans,
+            "completion_rate": (completed_plans / total_plans * 100) if total_plans > 0 else 0,
+            "workspace_type": "INDIVIDUAL_STUDENT"
+        }
+    
+    def _get_individual_teacher_progress(self, workspace_id: str, user_id: str) -> Dict[str, Any]:
+        """Obtener progreso específico de profesor individual"""
+        # Obtener clases creadas
+        classes = list(self.db.classes.find({
+            "created_by": ObjectId(user_id),
+            "workspace_id": ObjectId(workspace_id)
+        }))
+        
+        total_classes = len(classes)
+        active_classes = len([c for c in classes if c.get("status") == "active"])
+        
+        return {
+            "total_classes": total_classes,
+            "active_classes": active_classes,
+            "workspace_type": "INDIVIDUAL_TEACHER"
+        }
+    
+    def _get_institute_progress(self, workspace_id: str, user_id: str) -> Dict[str, Any]:
+        """Obtener progreso para workspace institucional"""
+        # Implementación para workspace institucional
+        return {
+            "workspace_type": "INSTITUTE",
+            "message": "Progreso institucional"
+        }
+    
+    def _get_individual_student_summary(self, workspace_id: str, user_id: str) -> Dict[str, Any]:
+        """Obtener resumen para estudiante individual"""
+        progress = self._get_individual_student_progress(workspace_id, user_id)
+        
+        return {
+            "workspace_type": "INDIVIDUAL_STUDENT",
+            "summary": {
+                "total_study_plans": progress["total_study_plans"],
+                "completion_rate": progress["completion_rate"],
+                "last_activity": datetime.utcnow().isoformat()
+            }
+        }
+    
+    def _get_individual_teacher_summary(self, workspace_id: str, user_id: str) -> Dict[str, Any]:
+        """Obtener resumen para profesor individual"""
+        progress = self._get_individual_teacher_progress(workspace_id, user_id)
+        
+        return {
+            "workspace_type": "INDIVIDUAL_TEACHER",
+            "summary": {
+                "total_classes": progress["total_classes"],
+                "active_classes": progress["active_classes"],
+                "last_activity": datetime.utcnow().isoformat()
+            }
+        }
+    
+    def _get_institute_summary(self, workspace_id: str, user_id: str) -> Dict[str, Any]:
+        """Obtener resumen para workspace institucional"""
+        return {
+            "workspace_type": "INSTITUTE",
+            "summary": {
+                "message": "Resumen institucional"
+            }
+        }
     
     def update_workspace_info(self, workspace_id: str, user_id: str, update_data: Dict[str, Any]) -> Tuple[bool, str, Dict[str, Any]]:
         """Actualizar información de workspace"""
