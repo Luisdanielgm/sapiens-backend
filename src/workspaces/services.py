@@ -622,3 +622,376 @@ class WorkspaceService:
                 query["_id"] = {"$in": []}
         
         return query
+
+    def get_personal_study_plans(self, workspace_id: str, user_id: str, workspace_type: str) -> Dict[str, Any]:
+        """Obtener planes de estudio personales del workspace"""
+        try:
+            # Buscar planes de estudio del usuario en este workspace
+            study_plans = list(self.db.study_plans.find({
+                "user_id": ObjectId(user_id),
+                "workspace_id": ObjectId(workspace_id)
+            }).sort("created_at", -1))
+            
+            # Convertir ObjectIds a strings
+            for plan in study_plans:
+                plan["_id"] = str(plan["_id"])
+                plan["user_id"] = str(plan["user_id"])
+                plan["workspace_id"] = str(plan["workspace_id"])
+                plan["institute_id"] = str(plan["institute_id"])
+            
+            return {
+                "study_plans": study_plans,
+                "total_count": len(study_plans)
+            }
+            
+        except Exception as e:
+            raise AppException(f"Error al obtener planes de estudio personales: {str(e)}", AppException.INTERNAL_ERROR)
+
+    def create_personal_study_plan_with_title(self, workspace_id: str, user_id: str, title: str, 
+                                             description: str = "", objectives: List[str] = None, 
+                                             pdf_file = None) -> Tuple[bool, str, Dict[str, Any]]:
+        """Crear un nuevo plan de estudio personal con título"""
+        try:
+            # Validar workspace
+            workspace = self.db.institute_members.find_one({
+                "_id": ObjectId(workspace_id),
+                "user_id": ObjectId(user_id)
+            })
+            
+            if not workspace:
+                return False, "Workspace no encontrado", {}
+            
+            # Procesar archivo PDF si se proporciona
+            document_url = None
+            if pdf_file:
+                document_url = self._process_pdf_file(pdf_file)
+            
+            # Crear plan de estudio
+            study_plan_data = {
+                "title": title.strip(),
+                "description": description.strip(),
+                "objectives": objectives or [],
+                "user_id": ObjectId(user_id),
+                "workspace_id": ObjectId(workspace_id),
+                "institute_id": ObjectId(workspace["institute_id"]),
+                "status": "active",
+                "created_at": datetime.utcnow(),
+                "updated_at": datetime.utcnow()
+            }
+            
+            if document_url:
+                study_plan_data["document_url"] = document_url
+            
+            # Insertar plan
+            result = self.db.study_plans.insert_one(study_plan_data)
+            study_plan_id = str(result.inserted_id)
+            
+            # Preparar respuesta
+            response_data = {
+                "study_plan_id": study_plan_id,
+                "title": title,
+                "description": description,
+                "objectives": objectives or [],
+                "status": "active",
+                "created_at": study_plan_data["created_at"].isoformat()
+            }
+            
+            return True, "Plan de estudio personal creado exitosamente", response_data
+            
+        except Exception as e:
+            return False, f"Error al crear plan de estudio: {str(e)}", {}
+
+    def get_study_goals(self, workspace_id: str, user_id: str, workspace_type: str) -> Dict[str, Any]:
+        """Obtener objetivos de estudio del workspace"""
+        try:
+            # Buscar objetivos de estudio del usuario en este workspace
+            goals = list(self.db.study_goals.find({
+                "user_id": ObjectId(user_id),
+                "workspace_id": ObjectId(workspace_id)
+            }).sort("created_at", -1))
+            
+            # Convertir ObjectIds a strings
+            for goal in goals:
+                goal["_id"] = str(goal["_id"])
+                goal["user_id"] = str(goal["user_id"])
+                goal["workspace_id"] = str(goal["workspace_id"])
+            
+            return {
+                "goals": goals,
+                "total_count": len(goals)
+            }
+            
+        except Exception as e:
+            raise AppException(f"Error al obtener objetivos de estudio: {str(e)}", AppException.INTERNAL_ERROR)
+
+    def create_study_goal(self, workspace_id: str, user_id: str, title: str, 
+                         description: str = "", target_date: str = None, 
+                         priority: str = "medium") -> Tuple[bool, str, Dict[str, Any]]:
+        """Crear un nuevo objetivo de estudio"""
+        try:
+            # Validar workspace
+            workspace = self.db.institute_members.find_one({
+                "_id": ObjectId(workspace_id),
+                "user_id": ObjectId(user_id)
+            })
+            
+            if not workspace:
+                return False, "Workspace no encontrado", {}
+            
+            # Validar prioridad
+            if priority not in ["low", "medium", "high"]:
+                priority = "medium"
+            
+            # Crear objetivo
+            goal_data = {
+                "title": title.strip(),
+                "description": description.strip(),
+                "user_id": ObjectId(user_id),
+                "workspace_id": ObjectId(workspace_id),
+                "priority": priority,
+                "status": "active",
+                "created_at": datetime.utcnow(),
+                "updated_at": datetime.utcnow()
+            }
+            
+            if target_date:
+                goal_data["target_date"] = target_date
+            
+            # Insertar objetivo
+            result = self.db.study_goals.insert_one(goal_data)
+            goal_id = str(result.inserted_id)
+            
+            # Preparar respuesta
+            response_data = {
+                "goal_id": goal_id,
+                "title": title,
+                "description": description,
+                "priority": priority,
+                "status": "active",
+                "created_at": goal_data["created_at"].isoformat()
+            }
+            
+            if target_date:
+                response_data["target_date"] = target_date
+            
+            return True, "Objetivo de estudio creado exitosamente", response_data
+            
+        except Exception as e:
+            return False, f"Error al crear objetivo de estudio: {str(e)}", {}
+
+    def update_study_goal(self, workspace_id: str, user_id: str, goal_id: str, 
+                         update_data: Dict[str, Any]) -> Tuple[bool, str, Dict[str, Any]]:
+        """Actualizar un objetivo de estudio"""
+        try:
+            # Validar que el objetivo pertenece al usuario y workspace
+            goal = self.db.study_goals.find_one({
+                "_id": ObjectId(goal_id),
+                "user_id": ObjectId(user_id),
+                "workspace_id": ObjectId(workspace_id)
+            })
+            
+            if not goal:
+                return False, "Objetivo no encontrado", {}
+            
+            # Preparar datos de actualización
+            update_fields = {}
+            if "title" in update_data:
+                update_fields["title"] = update_data["title"].strip()
+            if "description" in update_data:
+                update_fields["description"] = update_data["description"].strip()
+            if "priority" in update_data and update_data["priority"] in ["low", "medium", "high"]:
+                update_fields["priority"] = update_data["priority"]
+            if "target_date" in update_data:
+                update_fields["target_date"] = update_data["target_date"]
+            if "status" in update_data and update_data["status"] in ["active", "completed", "cancelled"]:
+                update_fields["status"] = update_data["status"]
+            
+            update_fields["updated_at"] = datetime.utcnow()
+            
+            # Actualizar objetivo
+            self.db.study_goals.update_one(
+                {"_id": ObjectId(goal_id)},
+                {"$set": update_fields}
+            )
+            
+            # Obtener objetivo actualizado
+            updated_goal = self.db.study_goals.find_one({"_id": ObjectId(goal_id)})
+            updated_goal["_id"] = str(updated_goal["_id"])
+            updated_goal["user_id"] = str(updated_goal["user_id"])
+            updated_goal["workspace_id"] = str(updated_goal["workspace_id"])
+            
+            return True, "Objetivo de estudio actualizado exitosamente", updated_goal
+            
+        except Exception as e:
+            return False, f"Error al actualizar objetivo de estudio: {str(e)}", {}
+
+    def delete_study_goal(self, workspace_id: str, user_id: str, goal_id: str) -> Tuple[bool, str]:
+        """Eliminar un objetivo de estudio"""
+        try:
+            # Validar que el objetivo pertenece al usuario y workspace
+            goal = self.db.study_goals.find_one({
+                "_id": ObjectId(goal_id),
+                "user_id": ObjectId(user_id),
+                "workspace_id": ObjectId(workspace_id)
+            })
+            
+            if not goal:
+                return False, "Objetivo no encontrado"
+            
+            # Eliminar objetivo
+            self.db.study_goals.delete_one({"_id": ObjectId(goal_id)})
+            
+            return True, "Objetivo de estudio eliminado exitosamente"
+            
+        except Exception as e:
+            return False, f"Error al eliminar objetivo de estudio: {str(e)}"
+
+    def get_personal_resources(self, workspace_id: str, user_id: str, workspace_type: str) -> Dict[str, Any]:
+        """Obtener recursos personales del workspace"""
+        try:
+            # Buscar recursos personales del usuario en este workspace
+            resources = list(self.db.personal_resources.find({
+                "user_id": ObjectId(user_id),
+                "workspace_id": ObjectId(workspace_id)
+            }).sort("created_at", -1))
+            
+            # Convertir ObjectIds a strings
+            for resource in resources:
+                resource["_id"] = str(resource["_id"])
+                resource["user_id"] = str(resource["user_id"])
+                resource["workspace_id"] = str(resource["workspace_id"])
+            
+            return {
+                "resources": resources,
+                "total_count": len(resources)
+            }
+            
+        except Exception as e:
+            raise AppException(f"Error al obtener recursos personales: {str(e)}", AppException.INTERNAL_ERROR)
+
+    def create_personal_resource(self, workspace_id: str, user_id: str, title: str, 
+                                description: str = "", resource_type: str = "document", 
+                                url: str = None, file = None) -> Tuple[bool, str, Dict[str, Any]]:
+        """Crear un nuevo recurso personal"""
+        try:
+            # Validar workspace
+            workspace = self.db.institute_members.find_one({
+                "_id": ObjectId(workspace_id),
+                "user_id": ObjectId(user_id)
+            })
+            
+            if not workspace:
+                return False, "Workspace no encontrado", {}
+            
+            # Procesar archivo si se proporciona
+            file_url = None
+            if file:
+                file_url = self._process_pdf_file(file)  # Reutilizar método existente
+            
+            # Crear recurso
+            resource_data = {
+                "title": title.strip(),
+                "description": description.strip(),
+                "resource_type": resource_type,
+                "user_id": ObjectId(user_id),
+                "workspace_id": ObjectId(workspace_id),
+                "status": "active",
+                "created_at": datetime.utcnow(),
+                "updated_at": datetime.utcnow()
+            }
+            
+            if url:
+                resource_data["url"] = url
+            if file_url:
+                resource_data["file_url"] = file_url
+            
+            # Insertar recurso
+            result = self.db.personal_resources.insert_one(resource_data)
+            resource_id = str(result.inserted_id)
+            
+            # Preparar respuesta
+            response_data = {
+                "resource_id": resource_id,
+                "title": title,
+                "description": description,
+                "resource_type": resource_type,
+                "status": "active",
+                "created_at": resource_data["created_at"].isoformat()
+            }
+            
+            if url:
+                response_data["url"] = url
+            if file_url:
+                response_data["file_url"] = file_url
+            
+            return True, "Recurso personal creado exitosamente", response_data
+            
+        except Exception as e:
+            return False, f"Error al crear recurso personal: {str(e)}", {}
+
+    def update_personal_resource(self, workspace_id: str, user_id: str, resource_id: str, 
+                                update_data: Dict[str, Any]) -> Tuple[bool, str, Dict[str, Any]]:
+        """Actualizar un recurso personal"""
+        try:
+            # Validar que el recurso pertenece al usuario y workspace
+            resource = self.db.personal_resources.find_one({
+                "_id": ObjectId(resource_id),
+                "user_id": ObjectId(user_id),
+                "workspace_id": ObjectId(workspace_id)
+            })
+            
+            if not resource:
+                return False, "Recurso no encontrado", {}
+            
+            # Preparar datos de actualización
+            update_fields = {}
+            if "title" in update_data:
+                update_fields["title"] = update_data["title"].strip()
+            if "description" in update_data:
+                update_fields["description"] = update_data["description"].strip()
+            if "resource_type" in update_data:
+                update_fields["resource_type"] = update_data["resource_type"]
+            if "url" in update_data:
+                update_fields["url"] = update_data["url"]
+            if "status" in update_data and update_data["status"] in ["active", "archived", "deleted"]:
+                update_fields["status"] = update_data["status"]
+            
+            update_fields["updated_at"] = datetime.utcnow()
+            
+            # Actualizar recurso
+            self.db.personal_resources.update_one(
+                {"_id": ObjectId(resource_id)},
+                {"$set": update_fields}
+            )
+            
+            # Obtener recurso actualizado
+            updated_resource = self.db.personal_resources.find_one({"_id": ObjectId(resource_id)})
+            updated_resource["_id"] = str(updated_resource["_id"])
+            updated_resource["user_id"] = str(updated_resource["user_id"])
+            updated_resource["workspace_id"] = str(updated_resource["workspace_id"])
+            
+            return True, "Recurso personal actualizado exitosamente", updated_resource
+            
+        except Exception as e:
+            return False, f"Error al actualizar recurso personal: {str(e)}", {}
+
+    def delete_personal_resource(self, workspace_id: str, user_id: str, resource_id: str) -> Tuple[bool, str]:
+        """Eliminar un recurso personal"""
+        try:
+            # Validar que el recurso pertenece al usuario y workspace
+            resource = self.db.personal_resources.find_one({
+                "_id": ObjectId(resource_id),
+                "user_id": ObjectId(user_id),
+                "workspace_id": ObjectId(workspace_id)
+            })
+            
+            if not resource:
+                return False, "Recurso no encontrado"
+            
+            # Eliminar recurso
+            self.db.personal_resources.delete_one({"_id": ObjectId(resource_id)})
+            
+            return True, "Recurso personal eliminado exitosamente"
+            
+        except Exception as e:
+            return False, f"Error al eliminar recurso personal: {str(e)}"

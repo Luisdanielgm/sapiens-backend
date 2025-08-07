@@ -369,4 +369,223 @@ def get_individual_student_study_plans(workspace_id):
         log_error(f"Error getting individual student study plans: {str(e)}", e, "workspaces.routes")
         return APIRoute.error(ErrorCodes.SERVER_ERROR, "No se pudieron obtener los planes de estudio del estudiante")
 
-# Duplicate function removed - keeping the first create_study_plan implementation above
+# Rutas para recursos personales del workspace
+@workspaces_bp.route('/<workspace_id>/personal-study-plans', methods=['GET', 'POST', 'OPTIONS'])
+@auth_required
+@workspace_access_required
+def personal_study_plans(workspace_id):
+    """
+    Gestionar planes de estudio personales del workspace
+    """
+    try:
+        user_id = get_jwt_identity()
+        jwt_claims = get_jwt()
+        workspace_type = jwt_claims.get('workspace_type')
+        
+        if request.method == 'GET':
+            # Obtener planes de estudio personales
+            study_plans = workspace_service.get_personal_study_plans(
+                workspace_id=workspace_id,
+                user_id=user_id,
+                workspace_type=workspace_type
+            )
+            return APIRoute.success(data=study_plans)
+            
+        elif request.method == 'POST':
+            # Crear nuevo plan de estudio personal
+            data = request.get_json()
+            if not data or not data.get('title'):
+                return APIRoute.error(ErrorCodes.BAD_REQUEST, "El título del plan es requerido")
+            
+            success, message, plan_data = workspace_service.create_personal_study_plan_with_title(
+                workspace_id=workspace_id,
+                user_id=user_id,
+                title=data['title'],
+                description=data.get('description', ''),
+                objectives=data.get('objectives', []),
+                pdf_file=request.files.get('pdf_file') if request.files else None
+            )
+            
+            if not success:
+                return APIRoute.error(ErrorCodes.SERVER_ERROR, message)
+            
+            return APIRoute.success(data=plan_data, message="Plan de estudio personal creado exitosamente")
+            
+        elif request.method == 'OPTIONS':
+            # Manejar preflight request para CORS
+            return APIRoute.success(data={}, message="OK")
+            
+    except Exception as e:
+        log_error(f"Error in personal study plans: {str(e)}", e, "workspaces.routes")
+        return APIRoute.error(ErrorCodes.SERVER_ERROR, "No se pudo procesar la solicitud")
+
+@workspaces_bp.route('/<workspace_id>/study-goals', methods=['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'])
+@auth_required
+@workspace_access_required
+def study_goals(workspace_id):
+    """
+    Gestionar objetivos de estudio del workspace
+    """
+    try:
+        user_id = get_jwt_identity()
+        jwt_claims = get_jwt()
+        workspace_type = jwt_claims.get('workspace_type')
+        
+        if request.method == 'GET':
+            # Obtener objetivos de estudio
+            goals = workspace_service.get_study_goals(
+                workspace_id=workspace_id,
+                user_id=user_id,
+                workspace_type=workspace_type
+            )
+            return APIRoute.success(data=goals)
+            
+        elif request.method == 'POST':
+            # Crear nuevo objetivo de estudio
+            data = request.get_json()
+            if not data or not data.get('title'):
+                return APIRoute.error(ErrorCodes.BAD_REQUEST, "El título del objetivo es requerido")
+            
+            success, message, goal_data = workspace_service.create_study_goal(
+                workspace_id=workspace_id,
+                user_id=user_id,
+                title=data['title'],
+                description=data.get('description', ''),
+                target_date=data.get('target_date'),
+                priority=data.get('priority', 'medium')
+            )
+            
+            if not success:
+                return APIRoute.error(ErrorCodes.SERVER_ERROR, message)
+            
+            return APIRoute.success(data=goal_data, message="Objetivo de estudio creado exitosamente")
+            
+        elif request.method == 'PUT':
+            # Actualizar objetivo de estudio
+            data = request.get_json()
+            goal_id = data.get('goal_id')
+            if not goal_id:
+                return APIRoute.error(ErrorCodes.BAD_REQUEST, "ID del objetivo es requerido")
+            
+            success, message, goal_data = workspace_service.update_study_goal(
+                workspace_id=workspace_id,
+                user_id=user_id,
+                goal_id=goal_id,
+                update_data=data
+            )
+            
+            if not success:
+                return APIRoute.error(ErrorCodes.SERVER_ERROR, message)
+            
+            return APIRoute.success(data=goal_data, message="Objetivo de estudio actualizado exitosamente")
+            
+        elif request.method == 'DELETE':
+            # Eliminar objetivo de estudio
+            goal_id = request.args.get('goal_id')
+            if not goal_id:
+                return APIRoute.error(ErrorCodes.BAD_REQUEST, "ID del objetivo es requerido")
+            
+            success, message = workspace_service.delete_study_goal(
+                workspace_id=workspace_id,
+                user_id=user_id,
+                goal_id=goal_id
+            )
+            
+            if not success:
+                return APIRoute.error(ErrorCodes.SERVER_ERROR, message)
+            
+            return APIRoute.success(message="Objetivo de estudio eliminado exitosamente")
+            
+        elif request.method == 'OPTIONS':
+            # Manejar preflight request para CORS
+            return APIRoute.success(data={}, message="OK")
+            
+    except Exception as e:
+        log_error(f"Error in study goals: {str(e)}", e, "workspaces.routes")
+        return APIRoute.error(ErrorCodes.SERVER_ERROR, "No se pudo procesar la solicitud")
+
+@workspaces_bp.route('/<workspace_id>/personal-resources', methods=['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'])
+@auth_required
+@workspace_access_required
+def personal_resources(workspace_id):
+    """
+    Gestionar recursos personales del workspace
+    """
+    try:
+        user_id = get_jwt_identity()
+        jwt_claims = get_jwt()
+        workspace_type = jwt_claims.get('workspace_type')
+        
+        if request.method == 'GET':
+            # Obtener recursos personales
+            resources = workspace_service.get_personal_resources(
+                workspace_id=workspace_id,
+                user_id=user_id,
+                workspace_type=workspace_type
+            )
+            return APIRoute.success(data=resources)
+            
+        elif request.method == 'POST':
+            # Crear nuevo recurso personal
+            data = request.get_json()
+            if not data or not data.get('title'):
+                return APIRoute.error(ErrorCodes.BAD_REQUEST, "El título del recurso es requerido")
+            
+            success, message, resource_data = workspace_service.create_personal_resource(
+                workspace_id=workspace_id,
+                user_id=user_id,
+                title=data['title'],
+                description=data.get('description', ''),
+                resource_type=data.get('resource_type', 'document'),
+                url=data.get('url'),
+                file=request.files.get('file') if request.files else None
+            )
+            
+            if not success:
+                return APIRoute.error(ErrorCodes.SERVER_ERROR, message)
+            
+            return APIRoute.success(data=resource_data, message="Recurso personal creado exitosamente")
+            
+        elif request.method == 'PUT':
+            # Actualizar recurso personal
+            data = request.get_json()
+            resource_id = data.get('resource_id')
+            if not resource_id:
+                return APIRoute.error(ErrorCodes.BAD_REQUEST, "ID del recurso es requerido")
+            
+            success, message, resource_data = workspace_service.update_personal_resource(
+                workspace_id=workspace_id,
+                user_id=user_id,
+                resource_id=resource_id,
+                update_data=data
+            )
+            
+            if not success:
+                return APIRoute.error(ErrorCodes.SERVER_ERROR, message)
+            
+            return APIRoute.success(data=resource_data, message="Recurso personal actualizado exitosamente")
+            
+        elif request.method == 'DELETE':
+            # Eliminar recurso personal
+            resource_id = request.args.get('resource_id')
+            if not resource_id:
+                return APIRoute.error(ErrorCodes.BAD_REQUEST, "ID del recurso es requerido")
+            
+            success, message = workspace_service.delete_personal_resource(
+                workspace_id=workspace_id,
+                user_id=user_id,
+                resource_id=resource_id
+            )
+            
+            if not success:
+                return APIRoute.error(ErrorCodes.SERVER_ERROR, message)
+            
+            return APIRoute.success(message="Recurso personal eliminado exitosamente")
+            
+        elif request.method == 'OPTIONS':
+            # Manejar preflight request para CORS
+            return APIRoute.success(data={}, message="OK")
+            
+    except Exception as e:
+        log_error(f"Error in personal resources: {str(e)}", e, "workspaces.routes")
+        return APIRoute.error(ErrorCodes.SERVER_ERROR, "No se pudo procesar la solicitud")
