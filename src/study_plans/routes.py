@@ -303,6 +303,27 @@ def get_module_topics(module_id):
     topics = ensure_json_serializable(topics)
     return APIRoute.success(data=topics)
 
+@study_plan_bp.route('/module/<module_id>/topics/publication-status', methods=['GET'])
+@APIRoute.standard(auth_required_flag=True)
+def get_module_topics_publication_status(module_id):
+    """Obtiene el estado de publicación de todos los topics de un módulo"""
+    try:
+        topics = topic_service.get_module_topics(module_id)
+        publication_status = []
+        
+        for topic in topics:
+            publication_status.append({
+                "topic_id": str(topic.get("_id")),
+                "name": topic.get("name"),
+                "published": topic.get("published", False)
+            })
+        
+        publication_status = ensure_json_serializable(publication_status)
+        return APIRoute.success(data={"topics": publication_status})
+    except Exception as e:
+        log_error(f"Error obteniendo estado de publicación de topics: {str(e)}")
+        return APIRoute.error(ErrorCodes.SERVER_ERROR, str(e), status_code=500)
+
 
 @study_plan_bp.route('/module/<module_id>/evaluations', methods=['GET'])
 @APIRoute.standard(auth_required_flag=True)
