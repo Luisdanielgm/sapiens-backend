@@ -295,6 +295,53 @@ def toggle_topic_publication(topic_id):
         )
     return APIRoute.error(ErrorCodes.UPDATE_ERROR, message)
 
+
+@study_plan_bp.route('/topic/theory', methods=['GET'])
+@APIRoute.standard(auth_required_flag=True)
+def get_topic_theory():
+    """Obtiene el contenido teórico de un tema"""
+    topic_id = request.args.get('topic_id')
+    if not topic_id:
+        return APIRoute.error(ErrorCodes.MISSING_FIELD, "ID del topic es requerido")
+    result = topic_service.get_theory_content(topic_id)
+    if not result:
+        return APIRoute.error(ErrorCodes.NOT_FOUND, "Topic no encontrado")
+    return APIRoute.success(data=result)
+
+
+@study_plan_bp.route('/topic/theory', methods=['PUT'])
+@APIRoute.standard(auth_required_flag=True, roles=[ROLES["TEACHER"]], required_fields=['topic_id', 'theory_content'])
+def update_topic_theory():
+    """Actualiza el contenido teórico de un tema"""
+    data = request.get_json()
+    topic_id = data.get('topic_id')
+    theory_content = data.get('theory_content', '')
+    success, message = topic_service.update_theory_content(topic_id, theory_content)
+    if success:
+        return APIRoute.success(message=message)
+    return APIRoute.error(ErrorCodes.UPDATE_ERROR, message)
+
+
+@study_plan_bp.route('/topic/theory', methods=['DELETE'])
+@APIRoute.standard(auth_required_flag=True, roles=[ROLES["TEACHER"]])
+def delete_topic_theory():
+    """Elimina el contenido teórico de un tema"""
+    topic_id = request.args.get('topic_id')
+    if not topic_id:
+        return APIRoute.error(ErrorCodes.MISSING_FIELD, "ID del topic es requerido")
+    success, message = topic_service.delete_theory_content(topic_id)
+    if success:
+        return APIRoute.success(message=message)
+    return APIRoute.error(ErrorCodes.DELETE_ERROR, message)
+
+
+@study_plan_bp.route('/topic/<topic_id>/readiness-status', methods=['GET'])
+@APIRoute.standard(auth_required_flag=True)
+def get_topic_readiness_status(topic_id):
+    """Verifica si un tema está listo para ser publicado"""
+    result = topic_readiness_service.check_readiness(topic_id)
+    return APIRoute.success(data=result)
+
 @study_plan_bp.route('/module/<module_id>/topics', methods=['GET'])
 @APIRoute.standard(auth_required_flag=True)
 def get_module_topics(module_id):

@@ -150,6 +150,22 @@ def get_topic_content(topic_id):
             status_code=500,
         )
 
+
+@content_bp.route('/topic/<topic_id>/type/<content_type>', methods=['GET'])
+@jwt_required()
+def get_topic_content_by_type(topic_id, content_type):
+    """Obtiene el contenido de un tema filtrado por tipo"""
+    try:
+        contents = content_service.get_topic_content(topic_id, content_type)
+        return APIRoute.success(data={"contents": contents})
+    except Exception as e:
+        logging.error(f"Error obteniendo contenido por tipo: {str(e)}")
+        return APIRoute.error(
+            ErrorCodes.SERVER_ERROR,
+            "Error interno del servidor",
+            status_code=500,
+        )
+
 @content_bp.route('/topic/<topic_id>/interactive', methods=['GET'])
 @jwt_required()
 def get_interactive_content(topic_id):
