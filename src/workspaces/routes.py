@@ -56,7 +56,7 @@ def list_workspaces():
         log_error(f"Error listing workspaces: {str(e)}", e, "workspaces.routes")
         return APIRoute.error(ErrorCodes.SERVER_ERROR, "No se pudieron obtener los workspaces")
 
-@workspaces_bp.route('/switch/<workspace_id>', methods=['POST'])
+@workspaces_bp.route('/switch/<string:workspace_id>', methods=['POST'])
 @APIRoute.standard(auth_required_flag=True)
 def switch_workspace(workspace_id):
     try:
@@ -118,7 +118,7 @@ def switch_workspace(workspace_id):
         log_error(f"Error switching workspace: {str(e)}", e, "workspaces.routes")
         return APIRoute.error(ErrorCodes.SERVER_ERROR, "No se pudo cambiar de workspace")
 
-@workspaces_bp.route('/<workspace_id>', methods=['GET'])
+@workspaces_bp.route('/<string:workspace_id>', methods=['GET'])
 @APIRoute.standard(auth_required_flag=True)
 @workspace_access_required
 def get_workspace_details(workspace_id):
@@ -181,7 +181,7 @@ def create_personal_workspace():
         log_error(f"Error creating personal workspace: {str(e)}", e, "workspaces.routes")
         return APIRoute.error(ErrorCodes.SERVER_ERROR, "No se pudo crear el workspace personal")
 
-@workspaces_bp.route('/<workspace_id>', methods=['PATCH'])
+@workspaces_bp.route('/<string:workspace_id>', methods=['PATCH'])
 @APIRoute.standard(auth_required_flag=True)
 @workspace_access_required
 @workspace_owner_required
@@ -216,7 +216,7 @@ def update_workspace(workspace_id):
 
 # Nuevos endpoints específicos para workspaces individuales
 
-@workspaces_bp.route('/<workspace_id>/study-plan', methods=['POST'])
+@workspaces_bp.route('/<string:workspace_id>/study-plan', methods=['POST'])
 @auth_required
 @workspace_access_required
 @workspace_type_required(['INDIVIDUAL_STUDENT'])
@@ -256,7 +256,7 @@ def create_study_plan(workspace_id):
         log_error(f"Error creating study plan: {str(e)}", e, "workspaces.routes")
         return APIRoute.error(ErrorCodes.SERVER_ERROR, "No se pudo crear el plan de estudio")
 
-@workspaces_bp.route('/<workspace_id>/progress', methods=['GET'])
+@workspaces_bp.route('/<string:workspace_id>/progress', methods=['GET'])
 @auth_required
 @workspace_access_required
 def get_workspace_progress(workspace_id):
@@ -281,7 +281,7 @@ def get_workspace_progress(workspace_id):
         log_error(f"Error getting workspace progress: {str(e)}", e, "workspaces.routes")
         return APIRoute.error(ErrorCodes.SERVER_ERROR, "No se pudo obtener el progreso")
 
-@workspaces_bp.route('/<workspace_id>/summary', methods=['GET'])
+@workspaces_bp.route('/<string:workspace_id>/summary', methods=['GET'])
 @auth_required
 @workspace_access_required
 def get_workspace_summary(workspace_id):
@@ -305,7 +305,7 @@ def get_workspace_summary(workspace_id):
         log_error(f"Error getting workspace summary: {str(e)}", e, "workspaces.routes")
         return APIRoute.error(ErrorCodes.SERVER_ERROR, "No se pudo obtener el resumen del workspace")
 
-@workspaces_bp.route('/<workspace_id>/individual/teacher/classes', methods=['GET'])
+@workspaces_bp.route('/<string:workspace_id>/individual/teacher/classes', methods=['GET'])
 @auth_required
 @workspace_access_required
 @workspace_type_required(['INDIVIDUAL_TEACHER'])
@@ -337,7 +337,7 @@ def get_individual_teacher_classes(workspace_id):
         log_error(f"Error getting individual teacher classes: {str(e)}", e, "workspaces.routes")
         return APIRoute.error(ErrorCodes.SERVER_ERROR, "No se pudieron obtener las clases del profesor")
 
-@workspaces_bp.route('/<workspace_id>/individual/student/study-plans', methods=['GET'])
+@workspaces_bp.route('/<string:workspace_id>/individual/student/study-plans', methods=['GET'])
 @auth_required
 @workspace_access_required
 @workspace_type_required(['INDIVIDUAL_STUDENT'])
@@ -370,7 +370,7 @@ def get_individual_student_study_plans(workspace_id):
         return APIRoute.error(ErrorCodes.SERVER_ERROR, "No se pudieron obtener los planes de estudio del estudiante")
 
 # Rutas para recursos personales del workspace
-@workspaces_bp.route('/<workspace_id>/personal-study-plans', methods=['GET', 'POST', 'OPTIONS'])
+@workspaces_bp.route('/<string:workspace_id>/personal-study-plans', methods=['GET','POST','OPTIONS'])
 @auth_required
 @workspace_access_required
 def personal_study_plans(workspace_id):
@@ -419,7 +419,7 @@ def personal_study_plans(workspace_id):
         log_error(f"Error in personal study plans: {str(e)}", e, "workspaces.routes")
         return APIRoute.error(ErrorCodes.SERVER_ERROR, "No se pudo procesar la solicitud")
 
-@workspaces_bp.route('/<workspace_id>/study-goals', methods=['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'])
+@workspaces_bp.route('/<string:workspace_id>/study-goals', methods=['GET','POST','PUT','DELETE','OPTIONS'])
 @auth_required
 @workspace_access_required
 def study_goals(workspace_id):
@@ -504,7 +504,7 @@ def study_goals(workspace_id):
         log_error(f"Error in study goals: {str(e)}", e, "workspaces.routes")
         return APIRoute.error(ErrorCodes.SERVER_ERROR, "No se pudo procesar la solicitud")
 
-@workspaces_bp.route('/<workspace_id>/personal-resources', methods=['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'])
+@workspaces_bp.route('/<string:workspace_id>/personal-resources', methods=['GET','POST','PUT','DELETE','OPTIONS'])
 @auth_required
 @workspace_access_required
 def personal_resources(workspace_id):
