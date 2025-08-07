@@ -294,9 +294,6 @@ def get_class_members(class_id):
         role: (opcional) Filtrar miembros por rol ('TEACHER' o 'STUDENT')
     """
     try:
-        # Obtener información del workspace actual
-        workspace_info = get_current_workspace_info()
-        
         # Obtener el parámetro role de la consulta si existe
         role = request.args.get('role')
         
@@ -309,7 +306,7 @@ def get_class_members(class_id):
             )
         
         # Modificar el servicio para filtrar por rol
-        members = membership_service.get_class_members(class_id, role, workspace_info)
+        members = membership_service.get_class_members(class_id, role)
         return APIRoute.success(data=members)
     except Exception as e:
         return APIRoute.error(str(e), 500)
@@ -555,10 +552,7 @@ def get_class_subperiods(class_id):
     Obtiene todos los subperíodos de una clase.
     """
     try:
-        # Obtener información del workspace actual
-        workspace_info = get_current_workspace_info()
-        
-        subperiods = subperiod_service.get_class_subperiods(class_id, workspace_info)
+        subperiods = subperiod_service.get_class_subperiods(class_id)
         return APIRoute.success(data=subperiods)
     except Exception as e:
         return APIRoute.error(str(e), 500)
