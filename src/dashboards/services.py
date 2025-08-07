@@ -305,6 +305,12 @@ class TeacherDashboardService(BaseService):
                 "created_at": datetime.now()
             }
 
+    def generate_individual_teacher_dashboard(self, teacher_id: str, workspace_info: Dict) -> Dict:
+        """Genera un dashboard individual para un profesor en workspace individual"""
+        # Para workspaces individuales, simplemente llamar al método principal
+        # ya que la lógica es la misma, solo cambia el contexto de workspace
+        return self.generate_teacher_dashboard(teacher_id)
+
 
 class StudentDashboardService(BaseService):
     """Servicio para generar dashboard de estudiantes"""
@@ -386,6 +392,12 @@ class StudentDashboardService(BaseService):
         except Exception as e:
             logging.getLogger(__name__).error(f"Error generando dashboard de estudiante: {str(e)}")
             return None
+
+    def generate_individual_student_dashboard(self, student_id: str, workspace_info: Dict, period_id: Optional[str] = None) -> Dict:
+        """Genera un dashboard individual para un estudiante en workspace individual"""
+        # Para workspaces individuales, simplemente llamar al método principal
+        # ya que la lógica es la misma, solo cambia el contexto de workspace
+        return self.generate_student_dashboard(student_id, period_id)
 
 
 class InstituteDashboardService(BaseService):

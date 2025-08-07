@@ -92,7 +92,7 @@ def get_teacher_dashboard():
                     logger.info(f"Override aceptado, usando ID: {teacher_id}")
             
             dashboard = teacher_dashboard_service.generate_teacher_dashboard(
-                teacher_id, workspace_info
+                teacher_id
             )
         
         if not dashboard:
@@ -135,7 +135,7 @@ def get_student_dashboard(student_id):
         period_id = request.args.get('period_id')  # Opcional
         
         dashboard = student_dashboard_service.generate_student_dashboard(
-            student_id, period_id, workspace_info
+            student_id, period_id
         )
         
         if not dashboard:
@@ -165,7 +165,7 @@ def get_institute_dashboard(institute_id):
         
         # Obtener dashboard general
         dashboard = institute_dashboard_service.generate_institute_dashboard(
-            institute_id, workspace_info
+            institute_id
         )
         if not dashboard:
             return APIRoute.error(
