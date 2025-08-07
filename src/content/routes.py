@@ -51,7 +51,7 @@ def get_content_types():
 
 @content_bp.route('/types', methods=['POST'])
 @jwt_required()
-@role_required(['admin'])
+@role_required([ROLES["ADMIN"]])
 def create_content_type():
     """
     Crea un nuevo tipo de contenido.
@@ -84,7 +84,7 @@ def create_content_type():
 
 @content_bp.route('/', methods=['POST'])
 @jwt_required()
-@role_required(['professor', 'admin'])
+@role_required([ROLES["TEACHER"], ROLES["ADMIN"]])
 def create_content():
     """
     Crea contenido de cualquier tipo (game, simulation, quiz, diagram, etc.)
@@ -187,7 +187,7 @@ def get_interactive_content(topic_id):
 
 @content_bp.route('/<content_id>', methods=['PUT'])
 @jwt_required()
-@role_required(['professor', 'admin'])
+@role_required([ROLES["TEACHER"], ROLES["ADMIN"]])
 def update_content(content_id):
     """
     Actualiza contenido existente.
@@ -212,7 +212,7 @@ def update_content(content_id):
 
 @content_bp.route('/<content_id>', methods=['DELETE'])
 @jwt_required()
-@role_required(['professor', 'admin'])
+@role_required([ROLES["TEACHER"], ROLES["ADMIN"]])
 def delete_content(content_id):
     """
     Elimina contenido (soft delete).
@@ -399,7 +399,7 @@ def get_student_results(student_id):
     try:
         # Verificar permisos: solo el mismo estudiante o profesores/admin
         current_user = get_jwt_identity()
-        if current_user != student_id and not g.user.get('role') in ['professor', 'admin']:
+        if current_user != student_id and not g.user.get('role') in [ROLES["TEACHER"], ROLES["ADMIN"]]:
             return APIRoute.error(
                 ErrorCodes.PERMISSION_DENIED,
                 "No autorizado para ver estos resultados",
@@ -449,7 +449,7 @@ def get_my_results():
 
 @content_bp.route('/games', methods=['POST'])
 @jwt_required()
-@role_required(['professor', 'admin'])
+@role_required([ROLES["TEACHER"], ROLES["ADMIN"]])
 def create_game_legacy():
     """
     Endpoint de compatibilidad para crear juegos.
@@ -482,7 +482,7 @@ def create_game_legacy():
 
 @content_bp.route('/simulations', methods=['POST'])
 @jwt_required()
-@role_required(['professor', 'admin'])
+@role_required([ROLES["TEACHER"], ROLES["ADMIN"]])
 def create_simulation_legacy():
     """
     Endpoint de compatibilidad para crear simulaciones.
@@ -514,7 +514,7 @@ def create_simulation_legacy():
 
 @content_bp.route('/quizzes', methods=['POST'])
 @jwt_required()
-@role_required(['professor', 'admin'])
+@role_required([ROLES["TEACHER"], ROLES["ADMIN"]])
 def create_quiz_legacy():
     """
     Endpoint de compatibilidad para crear quizzes.
@@ -552,7 +552,7 @@ generation_service = ContentGenerationService()
 
 @content_bp.route('/generate-batch', methods=['POST'])
 @jwt_required()
-@role_required(ROLES["TEACHER"])
+@role_required([ROLES["TEACHER"], ROLES["ADMIN"]])
 def generate_content_batch():
     """
     Inicia una tarea de generación de contenido en lote de forma asíncrona.
