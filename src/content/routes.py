@@ -28,7 +28,7 @@ content_result_service = ContentResultService()
 # ============================================
 
 @content_bp.route('/types', methods=['GET'])
-@jwt_required()
+@APIRoute.standard(auth_required_flag=True)
 def get_content_types():
     """
     Obtiene todos los tipos de contenido disponibles.
@@ -50,8 +50,7 @@ def get_content_types():
         )
 
 @content_bp.route('/types', methods=['POST'])
-@jwt_required()
-@role_required([ROLES["ADMIN"]])
+@APIRoute.standard(auth_required_flag=True, roles=[ROLES["ADMIN"]])
 def create_content_type():
     """
     Crea un nuevo tipo de contenido.
@@ -83,8 +82,7 @@ def create_content_type():
 # ============================================
 
 @content_bp.route('/', methods=['POST'])
-@jwt_required()
-@role_required([ROLES["TEACHER"], ROLES["ADMIN"]])
+@APIRoute.standard(auth_required_flag=True, roles=[ROLES["TEACHER"], ROLES["ADMIN"]])
 def create_content():
     """
     Crea contenido de cualquier tipo (game, simulation, quiz, diagram, etc.)
@@ -107,7 +105,7 @@ def create_content():
     """
     try:
         data = request.json
-        data['creator_id'] = get_jwt_identity()
+        data['creator_id'] = request.user_id
         
         success, result = content_service.create_content(data)
 
@@ -129,7 +127,7 @@ def create_content():
         )
 
 @content_bp.route('/topic/<topic_id>', methods=['GET'])
-@jwt_required()
+@APIRoute.standard(auth_required_flag=True)
 def get_topic_content(topic_id):
     """
     Obtiene todo el contenido de un tema.
@@ -152,7 +150,7 @@ def get_topic_content(topic_id):
 
 
 @content_bp.route('/topic/<topic_id>/type/<content_type>', methods=['GET'])
-@jwt_required()
+@APIRoute.standard(auth_required_flag=True)
 def get_topic_content_by_type(topic_id, content_type):
     """Obtiene el contenido de un tema filtrado por tipo"""
     try:
@@ -167,7 +165,7 @@ def get_topic_content_by_type(topic_id, content_type):
         )
 
 @content_bp.route('/topic/<topic_id>/interactive', methods=['GET'])
-@jwt_required()
+@APIRoute.standard(auth_required_flag=True)
 def get_interactive_content(topic_id):
     """
     Obtiene solo contenido interactivo de un tema (games, simulations, quizzes).
@@ -186,8 +184,7 @@ def get_interactive_content(topic_id):
         )
 
 @content_bp.route('/<content_id>', methods=['PUT'])
-@jwt_required()
-@role_required([ROLES["TEACHER"], ROLES["ADMIN"]])
+@APIRoute.standard(auth_required_flag=True, roles=[ROLES["TEACHER"], ROLES["ADMIN"]])
 def update_content(content_id):
     """
     Actualiza contenido existente.
@@ -211,8 +208,7 @@ def update_content(content_id):
         )
 
 @content_bp.route('/<content_id>', methods=['DELETE'])
-@jwt_required()
-@role_required([ROLES["TEACHER"], ROLES["ADMIN"]])
+@APIRoute.standard(auth_required_flag=True, roles=[ROLES["TEACHER"], ROLES["ADMIN"]])
 def delete_content(content_id):
     """
     Elimina contenido (soft delete).
@@ -238,7 +234,7 @@ def delete_content(content_id):
 # ============================================
 
 @content_bp.route('/personalize', methods=['POST'])
-@jwt_required()
+@APIRoute.standard(auth_required_flag=True)
 def personalize_content():
     """
     Personaliza contenido para un estudiante específico.
@@ -253,7 +249,7 @@ def personalize_content():
     """
     try:
         data = request.json
-        student_id = data.get('student_id', get_jwt_identity())
+        student_id = data.get('student_id', request.user_id)
         
         # Obtener perfil cognitivo si no se proporciona
         cognitive_profile = data.get('cognitive_profile')
@@ -293,7 +289,7 @@ def personalize_content():
         )
 
 @content_bp.route('/interaction', methods=['POST'])
-@jwt_required()
+@APIRoute.standard(auth_required_flag=True)
 def track_interaction():
     """
     Registra interacción con contenido personalizado.
@@ -342,7 +338,7 @@ def track_interaction():
 # ============================================
 
 @content_bp.route('/results', methods=['POST'])
-@jwt_required()
+@APIRoute.standard(auth_required_flag=True)
 def record_result():
     """
     Registra resultado de interacción con contenido (game, simulation, quiz, etc.)
@@ -368,7 +364,7 @@ def record_result():
     """
     try:
         data = request.json
-        data['student_id'] = data.get('student_id', get_jwt_identity())
+        data['student_id'] = data.get('student_id', request.user_id)
         
         success, result = content_result_service.record_result(data)
 
@@ -390,7 +386,7 @@ def record_result():
         )
 
 @content_bp.route('/results/student/<student_id>', methods=['GET'])
-@jwt_required()
+@APIRoute.standard(auth_required_flag=True)
 def get_student_results(student_id):
     """
     Obtiene resultados de un estudiante.
@@ -421,7 +417,7 @@ def get_student_results(student_id):
         )
 
 @content_bp.route('/results/my', methods=['GET'])
-@jwt_required()
+@APIRoute.standard(auth_required_flag=True)
 def get_my_results():
     """
     Obtiene resultados del usuario actual.
@@ -448,8 +444,7 @@ def get_my_results():
 # ============================================
 
 @content_bp.route('/games', methods=['POST'])
-@jwt_required()
-@role_required([ROLES["TEACHER"], ROLES["ADMIN"]])
+@APIRoute.standard(auth_required_flag=True, roles=[ROLES["TEACHER"], ROLES["ADMIN"]])
 def create_game_legacy():
     """
     Endpoint de compatibilidad para crear juegos.
@@ -481,8 +476,7 @@ def create_game_legacy():
         )
 
 @content_bp.route('/simulations', methods=['POST'])
-@jwt_required()
-@role_required([ROLES["TEACHER"], ROLES["ADMIN"]])
+@APIRoute.standard(auth_required_flag=True, roles=[ROLES["TEACHER"], ROLES["ADMIN"]])
 def create_simulation_legacy():
     """
     Endpoint de compatibilidad para crear simulaciones.
@@ -513,8 +507,7 @@ def create_simulation_legacy():
         )
 
 @content_bp.route('/quizzes', methods=['POST'])
-@jwt_required()
-@role_required([ROLES["TEACHER"], ROLES["ADMIN"]])
+@APIRoute.standard(auth_required_flag=True, roles=[ROLES["TEACHER"], ROLES["ADMIN"]])
 def create_quiz_legacy():
     """
     Endpoint de compatibilidad para crear quizzes.
@@ -523,7 +516,7 @@ def create_quiz_legacy():
     try:
         data = request.json
         data['content_type'] = 'quiz'
-        data['creator_id'] = get_jwt_identity()
+        data['creator_id'] = request.user_id
         
         success, result = content_service.create_content(data)
 
@@ -551,8 +544,7 @@ def create_quiz_legacy():
 generation_service = ContentGenerationService()
 
 @content_bp.route('/generate-batch', methods=['POST'])
-@jwt_required()
-@role_required([ROLES["TEACHER"], ROLES["ADMIN"]])
+@APIRoute.standard(auth_required_flag=True, roles=[ROLES["TEACHER"], ROLES["ADMIN"]])
 def generate_content_batch():
     """
     Inicia una tarea de generación de contenido en lote de forma asíncrona.
@@ -567,7 +559,7 @@ def generate_content_batch():
         data = request.json
         topic_id = data.get('topic_id')
         content_types = data.get('content_types')
-        user_id = get_jwt_identity()
+        user_id = request.user_id
 
         if not topic_id or not content_types:
             return APIRoute.error(ErrorCodes.MISSING_FIELDS, "Se requieren topic_id y content_types.")
@@ -588,7 +580,7 @@ def generate_content_batch():
         return APIRoute.error(ErrorCodes.SERVER_ERROR, "Error interno del servidor.")
 
 @content_bp.route('/generation-task/<task_id>', methods=['GET'])
-@jwt_required()
+@APIRoute.standard(auth_required_flag=True)
 def get_generation_task_status(task_id):
     """
     Consulta el estado y progreso de una tarea de generación de contenido.
@@ -598,7 +590,7 @@ def get_generation_task_status(task_id):
 
         if task_status:
             # Verificar que el usuario que consulta es quien creó la tarea (o un admin)
-            user_id = get_jwt_identity()
+            user_id = request.user_id
             # Asumiendo que el rol está disponible en `g` gracias a un decorador
             user_roles = getattr(g, 'user_roles', []) 
             
