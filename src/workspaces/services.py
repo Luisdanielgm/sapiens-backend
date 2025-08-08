@@ -206,39 +206,30 @@ class WorkspaceService:
     
     def create_personal_study_plan(self, workspace_id: str, user_id: str, description: str, 
                                   objectives: List[str] = None, pdf_file = None) -> Tuple[bool, str, Dict[str, Any]]:
-        """Crear plan de estudio personalizado para workspace individual"""
+        """Crear plan de estudio personalizado para workspace individual (unificado)"""
         try:
             # Validar que es un workspace INDIVIDUAL_STUDENT
             workspace = self.get_workspace_by_id(workspace_id, user_id)
             if workspace['workspace_type'] != 'INDIVIDUAL_STUDENT':
                 raise AppException("Solo disponible para workspaces de estudiante individual", AppException.BAD_REQUEST)
             
-            # Procesar archivo PDF si se proporciona
-            pdf_content = None
+            # Procesar archivo PDF si se proporciona (placeholder)
             if pdf_file:
-                # Aquí iría la lógica de procesamiento de PDF
-                pdf_content = self._process_pdf_file(pdf_file)
+                _ = self._process_pdf_file(pdf_file)
             
-            # Crear plan de estudio
-            study_plan_data = {
-                "user_id": ObjectId(user_id),
-                "workspace_id": ObjectId(workspace_id),
-                "description": description,
-                "objectives": objectives or [],
-                "pdf_content": pdf_content,
-                "status": "generating",
-                "created_at": datetime.utcnow()
-            }
-            
-            result = self.db.study_plans.insert_one(study_plan_data)
-            study_plan_id = str(result.inserted_id)
-            
-            # Iniciar generación asíncrona (integrar con sistema existente)
-            self._trigger_study_plan_generation(study_plan_id, description, objectives)
+            # Crear plan en servicio unificado
+            title = f"Plan personal {datetime.utcnow().strftime('%Y-%m-%d %H:%M')}"
+            plan_id = self.study_plan_service.create_personal_study_plan(
+                user_id=user_id,
+                workspace_id=workspace_id,
+                title=title,
+                description=description,
+                objectives=objectives or []
+            )
             
             response_data = {
-                "study_plan_id": study_plan_id,
-                "status": "generating",
+                "study_plan_id": plan_id,
+                "status": "active",
                 "message": "Plan de estudio en generación"
             }
             
@@ -310,17 +301,16 @@ class WorkspaceService:
     def get_individual_student_study_plans(self, workspace_id: str, student_id: str, workspace_info: Dict[str, Any]) -> Dict[str, Any]:
         """Obtener planes de estudio específicos para estudiante en workspace individual"""
         try:
-            # Obtener planes de estudio del estudiante
-            study_plans = list(self.db.study_plans.find({
-                "user_id": ObjectId(student_id),
-                "workspace_id": ObjectId(workspace_id)
-            }))
+            study_plans = self.study_plan_service.list_personal_study_plans_by_workspace(
+                workspace_id=workspace_id,
+                user_id=student_id
+            )
             
-            # Formatear respuesta
             formatted_plans = []
             for plan in study_plans:
                 formatted_plans.append({
-                    "study_plan_id": str(plan["_id"]),
+                    "study_plan_id": plan.get("_id"),
+                    "title": plan.get("name"),
                     "description": plan.get("description"),
                     "objectives": plan.get("objectives", []),
                     "status": plan.get("status"),
@@ -340,22 +330,19 @@ class WorkspaceService:
     def _process_pdf_file(self, pdf_file) -> str:
         """Procesar archivo PDF para extraer contenido"""
         # Placeholder para procesamiento de PDF
-        # Aquí se integraría con el sistema de procesamiento de documentos
         return "PDF content processed"
     
     def _trigger_study_plan_generation(self, study_plan_id: str, description: str, objectives: List[str]):
         """Iniciar generación asíncrona del plan de estudio"""
-        # Placeholder para integración con sistema de generación
-        # Aquí se llamaría al servicio de IA para generar el plan
         pass
     
     def _get_individual_student_progress(self, workspace_id: str, user_id: str) -> Dict[str, Any]:
         """Obtener progreso específico de estudiante individual"""
-        # Obtener planes de estudio y su progreso
-        study_plans = list(self.db.study_plans.find({
-            "user_id": ObjectId(user_id),
-            "workspace_id": ObjectId(workspace_id)
-        }))
+        # Consultar planes personales unificados
+        study_plans = self.study_plan_service.list_personal_study_plans_by_workspace(
+            workspace_id=workspace_id,
+            user_id=user_id
+        )
         
         total_plans = len(study_plans)
         completed_plans = len([p for p in study_plans if p.get("status") == "completed"])
@@ -386,7 +373,6 @@ class WorkspaceService:
     
     def _get_institute_progress(self, workspace_id: str, user_id: str) -> Dict[str, Any]:
         """Obtener progreso para workspace institucional"""
-        # Implementación para workspace institucional
         return {
             "workspace_type": "INSTITUTE",
             "message": "Progreso institucional"
@@ -491,7 +477,7 @@ class WorkspaceService:
             raise AppException(f"Error al actualizar workspace: {str(e)}", AppException.INTERNAL_ERROR)
     
     def create_study_plan_for_workspace(self, workspace_id: str, user_id: str, plan_data: Dict[str, Any]) -> Tuple[bool, str, Dict[str, Any]]:
-        """Crear plan de estudio para workspace individual de estudiante"""
+        """Crear plan de estudio para workspace individual de estudiante (unificado)"""
         try:
             # Validar que el workspace existe y pertenece al usuario
             workspace = self.get_workspace_by_id(workspace_id, user_id)
@@ -499,16 +485,6 @@ class WorkspaceService:
             # Validar que es workspace de estudiante individual
             if workspace["workspace_type"] != "INDIVIDUAL_STUDENT":
                 raise AppException("Solo se pueden crear planes de estudio en workspaces de estudiantes individuales", AppException.BAD_REQUEST)
-            
-            # Validar que no tenga ya un plan activo
-            existing_plan = self.db.study_plans.find_one({
-                "user_id": ObjectId(user_id),
-                "workspace_id": ObjectId(workspace_id),
-                "status": {"$in": ["generating", "ready"]}
-            })
-            
-            if existing_plan:
-                raise AppException("Ya tienes un plan de estudio activo en este workspace", AppException.CONFLICT)
             
             # Validar datos del plan
             required_fields = ["title", "description", "objectives", "content_type", "difficulty_level", "estimated_duration_weeks"]
@@ -525,48 +501,24 @@ class WorkspaceService:
             if plan_data["difficulty_level"] not in ["beginner", "intermediate", "advanced"]:
                 raise AppException("Nivel de dificultad inválido", AppException.BAD_REQUEST)
             
-            # Crear plan de estudio
-            study_plan_data = {
-                "title": plan_data["title"].strip(),
-                "description": plan_data["description"].strip(),
-                "objectives": [obj.strip() for obj in plan_data["objectives"] if obj.strip()],
-                "user_id": ObjectId(user_id),
-                "workspace_id": ObjectId(workspace_id),
-                "institute_id": ObjectId(workspace["institute_id"]),
-                "content_type": plan_data["content_type"],
-                "difficulty_level": plan_data["difficulty_level"],
-                "estimated_duration_weeks": int(plan_data["estimated_duration_weeks"]),
-                "status": "generating",
-                "created_at": datetime.utcnow(),
-                "updated_at": datetime.utcnow()
-            }
-            
-            if plan_data.get("document_url"):
-                study_plan_data["document_url"] = plan_data["document_url"].strip()
-            
-            # Insertar plan
-            result = self.db.study_plans.insert_one(study_plan_data)
-            study_plan_id = str(result.inserted_id)
-            
-            # TODO: Aquí se debería encolar la tarea de generación automática
-            # Por ahora simulamos con un task_id
-            generation_task_id = f"gen_{study_plan_id}_{int(datetime.utcnow().timestamp())}"
-            
-            # Actualizar con task_id
-            self.db.study_plans.update_one(
-                {"_id": result.inserted_id},
-                {"$set": {"generation_task_id": generation_task_id}}
+            # Crear plan de estudio unificado
+            plan_id = self.study_plan_service.create_personal_study_plan(
+                user_id=user_id,
+                workspace_id=workspace_id,
+                title=plan_data["title"].strip(),
+                description=plan_data["description"].strip(),
+                objectives=[obj.strip() for obj in plan_data["objectives"] if obj.strip()]
             )
             
-            # Calcular tiempo estimado de finalización (simulado)
-            estimated_completion = datetime.utcnow()
+            # Simular task id (si se mantiene interfaz)
+            generation_task_id = f"gen_{plan_id}_{int(datetime.utcnow().timestamp())}"
             
             response_data = {
-                "study_plan_id": study_plan_id,
+                "study_plan_id": plan_id,
                 "title": plan_data["title"].strip(),
-                "status": "generating",
+                "status": "active",
                 "generation_task_id": generation_task_id,
-                "estimated_completion": estimated_completion.isoformat(),
+                "estimated_completion": datetime.utcnow().isoformat(),
                 "message": "Plan de estudio iniciado. La generación comenzará en breve."
             }
             
@@ -608,9 +560,9 @@ class WorkspaceService:
                 {"_id": ObjectId(class_id)} if class_id else {}
             ]
         elif workspace_type == "INDIVIDUAL_STUDENT":
-            # Solo contenido propio - filtrar por planes de estudio del usuario
-            user_plans = list(self.db.study_plans.find(
-                {"user_id": ObjectId(user_id)},
+            # Solo contenido propio - filtrar por planes de estudio personales del usuario
+            user_plans = list(self.db.study_plans_per_subject.find(
+                {"author_id": ObjectId(user_id), "is_personal": True},
                 {"_id": 1}
             ))
             plan_ids = [plan["_id"] for plan in user_plans]
@@ -624,20 +576,13 @@ class WorkspaceService:
         return query
 
     def get_personal_study_plans(self, workspace_id: str, user_id: str, workspace_type: str) -> Dict[str, Any]:
-        """Obtener planes de estudio personales del workspace"""
+        """Obtener planes de estudio personales del workspace (unificado)"""
         try:
-            # Buscar planes de estudio del usuario en este workspace
-            study_plans = list(self.db.study_plans.find({
-                "user_id": ObjectId(user_id),
-                "workspace_id": ObjectId(workspace_id)
-            }).sort("created_at", -1))
-            
-            # Convertir ObjectIds a strings
-            for plan in study_plans:
-                plan["_id"] = str(plan["_id"])
-                plan["user_id"] = str(plan["user_id"])
-                plan["workspace_id"] = str(plan["workspace_id"])
-                plan["institute_id"] = str(plan["institute_id"])
+            # Buscar planes de estudio personales del usuario en este workspace
+            study_plans = self.study_plan_service.list_personal_study_plans_by_workspace(
+                workspace_id=workspace_id,
+                user_id=user_id
+            )
             
             return {
                 "study_plans": study_plans,
@@ -650,7 +595,7 @@ class WorkspaceService:
     def create_personal_study_plan_with_title(self, workspace_id: str, user_id: str, title: str, 
                                              description: str = "", objectives: List[str] = None, 
                                              pdf_file = None) -> Tuple[bool, str, Dict[str, Any]]:
-        """Crear un nuevo plan de estudio personal con título"""
+        """Crear un nuevo plan de estudio personal con título (unificado)"""
         try:
             # Validar workspace
             workspace = self.db.institute_members.find_one({
@@ -662,38 +607,25 @@ class WorkspaceService:
                 return False, "Workspace no encontrado", {}
             
             # Procesar archivo PDF si se proporciona
-            document_url = None
             if pdf_file:
-                document_url = self._process_pdf_file(pdf_file)
+                _ = self._process_pdf_file(pdf_file)
             
-            # Crear plan de estudio
-            study_plan_data = {
-                "title": title.strip(),
-                "description": description.strip(),
-                "objectives": objectives or [],
-                "user_id": ObjectId(user_id),
-                "workspace_id": ObjectId(workspace_id),
-                "institute_id": ObjectId(workspace["institute_id"]),
-                "status": "active",
-                "created_at": datetime.utcnow(),
-                "updated_at": datetime.utcnow()
-            }
-            
-            if document_url:
-                study_plan_data["document_url"] = document_url
-            
-            # Insertar plan
-            result = self.db.study_plans.insert_one(study_plan_data)
-            study_plan_id = str(result.inserted_id)
+            plan_id = self.study_plan_service.create_personal_study_plan(
+                user_id=user_id,
+                workspace_id=workspace_id,
+                title=title.strip(),
+                description=description.strip(),
+                objectives=objectives or []
+            )
             
             # Preparar respuesta
             response_data = {
-                "study_plan_id": study_plan_id,
+                "study_plan_id": plan_id,
                 "title": title,
                 "description": description,
                 "objectives": objectives or [],
                 "status": "active",
-                "created_at": study_plan_data["created_at"].isoformat()
+                "created_at": datetime.utcnow().isoformat()
             }
             
             return True, "Plan de estudio personal creado exitosamente", response_data
@@ -801,27 +733,26 @@ class WorkspaceService:
                 update_fields["description"] = update_data["description"].strip()
             if "priority" in update_data and update_data["priority"] in ["low", "medium", "high"]:
                 update_fields["priority"] = update_data["priority"]
-            if "target_date" in update_data:
-                update_fields["target_date"] = update_data["target_date"]
-            if "status" in update_data and update_data["status"] in ["active", "completed", "cancelled"]:
+            if "status" in update_data and update_data["status"] in ["active", "completed", "archived"]:
                 update_fields["status"] = update_data["status"]
+            
+            if not update_fields:
+                return False, "No hay campos válidos para actualizar", {}
             
             update_fields["updated_at"] = datetime.utcnow()
             
-            # Actualizar objetivo
             self.db.study_goals.update_one(
                 {"_id": ObjectId(goal_id)},
                 {"$set": update_fields}
             )
             
-            # Obtener objetivo actualizado
-            updated_goal = self.db.study_goals.find_one({"_id": ObjectId(goal_id)})
-            updated_goal["_id"] = str(updated_goal["_id"])
-            updated_goal["user_id"] = str(updated_goal["user_id"])
-            updated_goal["workspace_id"] = str(updated_goal["workspace_id"])
+            goal.update(update_fields)
+            goal["_id"] = str(goal["_id"])
+            goal["user_id"] = str(goal["user_id"])
+            goal["workspace_id"] = str(goal["workspace_id"])
             
-            return True, "Objetivo de estudio actualizado exitosamente", updated_goal
-            
+            return True, "Objetivo de estudio actualizado exitosamente", goal
+        
         except Exception as e:
             return False, f"Error al actualizar objetivo de estudio: {str(e)}", {}
 
@@ -838,11 +769,8 @@ class WorkspaceService:
             if not goal:
                 return False, "Objetivo no encontrado"
             
-            # Eliminar objetivo
             self.db.study_goals.delete_one({"_id": ObjectId(goal_id)})
-            
             return True, "Objetivo de estudio eliminado exitosamente"
-            
         except Exception as e:
             return False, f"Error al eliminar objetivo de estudio: {str(e)}"
 

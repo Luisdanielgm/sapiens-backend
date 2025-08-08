@@ -87,7 +87,7 @@ class WorkspaceAccessValidator:
             bool: True si tiene acceso, False en caso contrario
         """
         try:
-            plan = self.db.study_plans.find_one({"_id": ObjectId(plan_id)})
+            plan = self.db.study_plans_per_subject.find_one({"_id": ObjectId(plan_id)})
             if not plan:
                 return False
             
@@ -186,96 +186,66 @@ class WorkspaceAccessValidator:
         
         return operation in user_permissions
     
-    def _validate_resource_access(self, resource_data: Dict[str, Any], 
-                                 workspace_info: Dict[str, Any], user_id: str) -> bool:
-        """
-        Método interno para validar acceso a un recurso específico
-        
-        Args:
-            resource_data: Datos del recurso
-            workspace_info: Información del workspace actual
-            user_id: ID del usuario
+    def _validate_resource_access(self, resource: Dict[str, Any], workspace_info: Dict[str, Any], user_id: str) -> bool:
+        """Valida acceso a un recurso según el workspace actual"""
+        try:
+            workspace_type = workspace_info.get('workspace_type')
+            workspace_id = workspace_info.get('workspace_id')
+            institute_id = workspace_info.get('institute_id')
             
-        Returns:
-            bool: True si tiene acceso, False en caso contrario
-        """
-        workspace_type = workspace_info.get('workspace_type')
-        
-        if not workspace_type:
+            if workspace_type == 'INSTITUTE':
+                # En workspaces institucionales, validar por institute_id si existe
+                if resource.get('institute_id') and str(resource.get('institute_id')) != str(institute_id):
+                    return False
+                return True
+            
+            if workspace_type == 'INDIVIDUAL_TEACHER':
+                # En workspaces individuales de profesor, validar por workspace_id si existe
+                if resource.get('workspace_id') and str(resource.get('workspace_id')) != str(workspace_id):
+                    return False
+                # Validar autor cuando aplique
+                if resource.get('author_id') and str(resource.get('author_id')) != str(user_id):
+                    return False
+                return True
+            
+            if workspace_type == 'INDIVIDUAL_STUDENT':
+                # En workspaces individuales de estudiante, solo recursos propios
+                if resource.get('author_id') and str(resource.get('author_id')) != str(user_id):
+                    return False
+                # Si es plan personal, debe coincidir workspace
+                if resource.get('is_personal') and resource.get('workspace_id') and str(resource.get('workspace_id')) != str(workspace_id):
+                    return False
+                return True
+            
             return False
-        
-        # Para workspaces de estudiantes individuales
-        if workspace_type == 'INDIVIDUAL_STUDENT':
-            # Solo puede acceder a sus propios recursos
-            return (
-                str(resource_data.get('user_id')) == user_id or
-                str(resource_data.get('student_id')) == user_id
-            )
-        
-        # Para workspaces de profesores individuales
-        elif workspace_type == 'INDIVIDUAL_TEACHER':
-            # Puede acceder a recursos que creó o de su clase personal
-            workspace_class_id = workspace_info.get('class_id')
-            return (
-                str(resource_data.get('created_by')) == user_id or
-                str(resource_data.get('user_id')) == user_id or
-                (workspace_class_id and str(resource_data.get('class_id')) == workspace_class_id)
-            )
-        
-        # Para workspaces institucionales
-        elif workspace_type == 'INSTITUTE':
-            # Puede acceder a recursos del mismo instituto
-            workspace_institute_id = workspace_info.get('institute_id')
-            return (
-                workspace_institute_id and 
-                str(resource_data.get('institute_id')) == workspace_institute_id
-            )
-        
-        return False
+        except Exception:
+            return False
     
-    def _apply_workspace_filters(self, base_query: Dict[str, Any], 
-                                workspace_info: Dict[str, Any], user_id: str) -> Dict[str, Any]:
+    def _apply_workspace_filters(self, base_query: Dict[str, Any], workspace_info: Dict[str, Any], user_id: str) -> Dict[str, Any]:
         """
-        Aplica filtros de workspace a una consulta de base de datos
-        
-        Args:
-            base_query: Query base de MongoDB
-            workspace_info: Información del workspace actual
-            user_id: ID del usuario
-            
-        Returns:
-            Dict[str, Any]: Query modificado con filtros de workspace
+        Aplica filtros según tipo de workspace para consultas de recursos
         """
+        query = dict(base_query)  # Copia para no mutar el original
         workspace_type = workspace_info.get('workspace_type')
+        workspace_id = workspace_info.get('workspace_id')
+        institute_id = workspace_info.get('institute_id')
         
-        if not workspace_type:
-            return base_query
-        
-        # Para workspaces de estudiantes individuales
-        if workspace_type == 'INDIVIDUAL_STUDENT':
-            # Solo sus propios datos
-            base_query['$or'] = [
-                {'user_id': ObjectId(user_id)},
-                {'student_id': ObjectId(user_id)}
-            ]
-        
-        # Para workspaces de profesores individuales
+        if workspace_type == 'INSTITUTE':
+            if institute_id:
+                query['institute_id'] = ObjectId(institute_id)
         elif workspace_type == 'INDIVIDUAL_TEACHER':
-            # Puede acceder a recursos que creó o de su clase personal
-            workspace_class_id = workspace_info.get('class_id')
-            or_conditions = [
-                {'created_by': ObjectId(user_id)},
-                {'user_id': ObjectId(user_id)}
-            ]
-            if workspace_class_id:
-                or_conditions.append({'class_id': ObjectId(workspace_class_id)})
-            base_query['$or'] = or_conditions
-        
-        # Para workspaces institucionales
-        elif workspace_type == 'INSTITUTE':
-            # Puede acceder a recursos del mismo instituto
-            workspace_institute_id = workspace_info.get('institute_id')
-            if workspace_institute_id:
-                base_query['institute_id'] = ObjectId(workspace_institute_id)
-        
-        return base_query
+            if workspace_id:
+                query['workspace_id'] = ObjectId(workspace_id)
+                query['author_id'] = ObjectId(user_id)
+        elif workspace_type == 'INDIVIDUAL_STUDENT':
+            # Solo recursos de planes personales del usuario
+            personal_plans = list(self.db.study_plans_per_subject.find(
+                {"author_id": ObjectId(user_id), "is_personal": True},
+                {"_id": 1}
+            ))
+            plan_ids = [plan["_id"] for plan in personal_plans]
+            if plan_ids:
+                query['study_plan_id'] = {"$in": plan_ids}
+            else:
+                query['_id'] = {"$in": []}
+        return query
