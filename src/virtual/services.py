@@ -1026,7 +1026,7 @@ class FastVirtualModuleGenerator(VerificationBaseService):
                         virtual_topic_id=virtual_topic_id,
                         cognitive_profile=cognitive_profile,
                         student_id=str(student_id),
-                        preferences=preferences
+                        preferences={}
                     )
                     
                     report["added"].append({"type": "topic", "id": str(topic["_id"]), "virtual_topic_id": virtual_topic_id})
@@ -2138,30 +2138,25 @@ class VirtualContentProgressService(VerificationBaseService):
         Actualiza el tracking del contenido virtual.
         """
         try:
-            update_data = {
+            set_operations = {
                 "interaction_tracking.last_accessed": datetime.now(),
                 "interaction_tracking.completion_percentage": completion_percentage,
                 "interaction_tracking.completion_status": "completed" if completion_percentage >= 100 else "in_progress",
-                "interaction_tracking.sessions": {"$inc": 1} if completion_percentage >= 100 else 0,
                 "updated_at": datetime.now()
             }
             
-            # Agregar datos de sesión si están disponibles
-            if session_data.get("time_spent"):
-                update_data["interaction_tracking.total_time_spent"] = {"$inc": session_data["time_spent"]}
+            inc_operations = {
+                "interaction_tracking.access_count": 1
+            }
             
-            # Actualizar documento
-            operations = {"$set": {k: v for k, v in update_data.items() if not isinstance(v, dict)}}
+            if completion_percentage >= 100:
+                inc_operations["interaction_tracking.sessions"] = 1
             
-            # Agregar operaciones de incremento
-            inc_operations = {}
-            for k, v in update_data.items():
-                if isinstance(v, dict) and "$inc" in v:
-                    inc_operations[k.replace({"$inc": 1}, "")] = v["$inc"]
+            time_spent = session_data.get("time_spent")
+            if isinstance(time_spent, (int, float)) and time_spent > 0:
+                inc_operations["interaction_tracking.total_time_spent"] = time_spent
             
-            if inc_operations:
-                operations["$inc"] = inc_operations
-            operations["$inc"] = {"interaction_tracking.access_count": 1}
+            operations: Dict[str, Dict] = {"$set": set_operations, "$inc": inc_operations}
             
             self.collection.update_one(
                 {"_id": ObjectId(virtual_content_id)},
@@ -4051,80 +4046,7 @@ class ContentChangeDetector:
             return {"has_changes": False, "error": str(e)}
 
 
-# Completar implementaciones de servicios existentes
-
-class VirtualContentProgressService(VerificationBaseService):
-    """
-    Servicio para manejar automáticamente el progreso de contenidos virtuales,
-    incluyendo la creación automática de ContentResults y actualización de progreso.
-    """
-    
-    def __init__(self):
-        super().__init__(collection_name="virtual_topic_contents")
-    
-    def _calculate_auto_score(self, content_type: str, completion_data: Dict) -> float:
-        """
-        Calcula un score automático basado en el tipo de contenido y datos de completación.
-        """
-        base_score = completion_data.get("score", 80.0)
-        completion_percentage = completion_data.get("completion_percentage", 100)
-        time_spent = completion_data.get("session_data", {}).get("completion_time_seconds", 0)
-        
-        # Ajustar score según tipo de contenido
-        if content_type in ["quiz", "exercise"]:
-            # Para contenido evaluativo, usar score directo
-            return min(100, max(0, base_score))
-        elif content_type in ["video", "audio"]:
-            # Para contenido multimedia, basar en tiempo de visualización
-            if completion_percentage >= 80:
-                return min(100, 70 + (completion_percentage - 80) * 1.5)
-            else:
-                return max(0, completion_percentage * 0.7)
-        else:
-            # Para contenido de texto, basar en completación
-            return min(100, max(0, completion_percentage * 0.8 + 20))
-    
-    def _create_automatic_content_result(self, virtual_content: Dict, student_id: str, 
-                                       score: float, session_data: Dict) -> Tuple[bool, str]:
-        """
-        Crea automáticamente un ContentResult para el contenido virtual.
-        """
-        try:
-            content_result_data = {
-                "student_id": ObjectId(student_id),
-                "content_id": virtual_content["content_id"],
-                "virtual_content_id": virtual_content["_id"],
-                "score": score,
-                "completion_percentage": session_data.get("completion_percentage", 100),
-                "session_data": session_data,
-                "learning_metrics": {
-                    "engagement_score": score,
-                    "difficulty_rating": 3,  # Neutral por defecto
-                    "time_efficiency": self._calculate_time_efficiency(session_data)
-                },
-                "created_at": datetime.now(),
-                "updated_at": datetime.now()
-            }
-            
-            result = self.db.content_results.insert_one(content_result_data)
-            return True, str(result.inserted_id)
-            
-        except Exception as e:
-            logging.error(f"Error creando ContentResult automático: {str(e)}")
-            return False, str(e)
-    
-    def _calculate_time_efficiency(self, session_data: Dict) -> float:
-        """
-        Calcula la eficiencia de tiempo basada en los datos de sesión.
-        """
-        time_spent = session_data.get("completion_time_seconds", 0)
-        expected_time = session_data.get("expected_time_seconds", time_spent)
-        
-        if expected_time <= 0:
-            return 1.0
-        
-        efficiency = expected_time / max(time_spent, 1)
-        return min(2.0, max(0.1, efficiency))  # Limitar entre 0.1 y 2.0
+# Completar implementaciones de servicios existentes (REMOVIDA duplicación de clase)
 
 
 class UIPerformanceMetricsService:
