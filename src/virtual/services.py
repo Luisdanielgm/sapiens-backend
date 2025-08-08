@@ -4051,63 +4051,6 @@ class ContentChangeDetector:
             return {"has_changes": False, "error": str(e)}
 
 
-class FastVirtualModuleGenerator:
-    """
-    Generador rápido para sincronización y creación de módulos virtuales.
-    """
-    
-    def __init__(self):
-        self.db = get_db()
-    
-    def _generate_topic_contents_for_sync(self, topic_id: str, virtual_topic_id: str, 
-                                        cognitive_profile: Dict, student_id: str, 
-                                        preferences: Dict = None) -> bool:
-        """
-        Genera contenidos de un tema virtual para sincronización.
-        """
-        try:
-            # Obtener contenidos originales
-            original_contents = list(self.db.topic_contents.find({"topic_id": topic_id}))
-            
-            if not original_contents:
-                return True  # No hay contenidos que sincronizar
-            
-            # Generar contenidos virtuales personalizados
-            for content in original_contents:
-                virtual_content_data = {
-                    "content_id": content["_id"],
-                    "virtual_topic_id": ObjectId(virtual_topic_id),
-                    "student_id": ObjectId(student_id),
-                    "content_type": content.get("content_type", "text"),
-                    "title": content.get("title", ""),
-                    "content": content.get("content", ""),
-                    "personalization_data": {
-                        "cognitive_adaptations": cognitive_profile,
-                        "preferences_applied": preferences or {},
-                        "generated_at": datetime.now().isoformat()
-                    },
-                    "interaction_tracking": {
-                        "total_time_spent": 0,
-                        "completion_status": "not_started",
-                        "completion_percentage": 0.0,
-                        "sessions": 0,
-                        "interactions": []
-                    },
-                    "status": "active",
-                    "created_at": datetime.now(),
-                    "updated_at": datetime.now()
-                }
-                
-                self.db.virtual_topic_contents.insert_one(virtual_content_data)
-            
-            logging.info(f"Generados {len(original_contents)} contenidos para tema virtual {virtual_topic_id}")
-            return True
-            
-        except Exception as e:
-            logging.error(f"Error generando contenidos para sincronización: {str(e)}")
-            return False
-
-
 # Completar implementaciones de servicios existentes
 
 class VirtualContentProgressService(VerificationBaseService):
