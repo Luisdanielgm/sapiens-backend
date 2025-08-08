@@ -1581,16 +1581,17 @@ def trigger_next_generation():
         )
 
 @virtual_bp.route('/trigger-next-topic', methods=['POST'])
-@APIRoute.standard(auth_required_flag=True, required_fields=['current_topic_id', 'student_id', 'progress'])
+@APIRoute.standard(auth_required_flag=True, required_fields=['current_topic_id', 'progress'])
 def trigger_next_topic():
     """
     Disparado cuando el progreso de un tema supera el 80%.
     Genera el siguiente lote de temas disponibles para el estudiante.
     """
     try:
-        data = request.get_json()
+        from flask_jwt_extended import get_jwt_identity
+        data = request.get_json(silent=True) or {}
         current_topic_id = data.get('current_topic_id')
-        student_id = data.get('student_id')
+        student_id = get_jwt_identity()
         progress = data.get('progress', 0)
         
         # 1. Validar progreso mínimo
