@@ -183,6 +183,29 @@ def get_interactive_content(topic_id):
             status_code=500,
         )
 
+@content_bp.route('/<content_id>', methods=['GET'])
+@APIRoute.standard(auth_required_flag=True)
+def get_content_by_id(content_id):
+    """
+    Obtiene un contenido específico por su ID.
+    """
+    try:
+        content = content_service.get_content(content_id)
+        if not content:
+            return APIRoute.error(
+                ErrorCodes.NOT_FOUND,
+                "Contenido no encontrado",
+                status_code=404,
+            )
+        return APIRoute.success(data={"content": content})
+    except Exception as e:
+        logging.error(f"Error obteniendo contenido: {str(e)}")
+        return APIRoute.error(
+            ErrorCodes.SERVER_ERROR,
+            "Error interno del servidor",
+            status_code=500,
+        )
+
 @content_bp.route('/<content_id>', methods=['PUT'])
 @APIRoute.standard(auth_required_flag=True, roles=[ROLES["TEACHER"], ROLES["ADMIN"]])
 def update_content(content_id):

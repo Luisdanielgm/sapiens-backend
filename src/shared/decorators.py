@@ -6,6 +6,7 @@ from bson.objectid import ObjectId
 from src.shared.database import get_db
 from src.shared.constants import ROLES
 from src.shared.exceptions import AppException
+from werkzeug.exceptions import HTTPException
 import logging
 
 def handle_errors(f):
@@ -14,6 +15,13 @@ def handle_errors(f):
     def decorated_function(*args, **kwargs):
         try:
             return f(*args, **kwargs)
+        except HTTPException as e:
+            # Propagar errores HTTP estándar (como 405) con su código y descripción
+            return jsonify({
+                "success": False,
+                "error": e.name.replace(" ", "_").upper(),
+                "message": e.description,
+            }), e.code
         except AppException as e:
             response = {
                 "success": False,
