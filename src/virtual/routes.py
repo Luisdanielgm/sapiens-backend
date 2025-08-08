@@ -1602,10 +1602,9 @@ def trigger_next_topic():
                 status_code=400
             )
         
-        # 2. Llamar al servicio de generación de temas
+        # 2. Llamar al servicio de generación de temas (sin student_id)
         success, result = virtual_topic_service.trigger_next_topic_generation(
-            student_id=student_id,
-            current_topic_id=current_topic_id,
+            topic_id=current_topic_id,
             progress=progress
         )
         
