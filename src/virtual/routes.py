@@ -2028,7 +2028,7 @@ def auto_complete_content(virtual_content_id):
         from .services import VirtualContentProgressService
         
         student_id = get_jwt_identity()
-        data = request.get_json() or {}
+        data = request.get_json(silent=True) or {}
         
         # Datos de completación opcionales
         completion_data = {
@@ -2087,7 +2087,7 @@ def auto_complete_reading_content(virtual_content_id):
         from .services import VirtualContentProgressService
         
         student_id = get_jwt_identity()
-        data = request.get_json() or {}
+        data = request.get_json(silent=True) or {}
         
         # Datos específicos de lectura
         reading_data = {
