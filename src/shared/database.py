@@ -135,6 +135,10 @@ def setup_database_indexes():
         
         # Índices de planes de estudio
         db.study_plans_per_subject.create_index([("subject_id", ASCENDING)])
+        # Nuevos índices para unificación de planes personales
+        db.study_plans_per_subject.create_index([("workspace_id", ASCENDING)])
+        db.study_plans_per_subject.create_index([("author_id", ASCENDING)])
+        db.study_plans_per_subject.create_index([("is_personal", ASCENDING), ("workspace_id", ASCENDING)])
         
         # Índices de planes de estudio
         # Eliminar índice antiguo de modules si existe para evitar conflictos y warnings
@@ -219,66 +223,14 @@ def setup_database_indexes():
             partialFilterExpression={"token": {"$type": "string"}}
         )
         
-        # Índices de contenido individual de estudiantes
-        db.student_individual_content.create_index([("student_id", ASCENDING), ("class_id", ASCENDING)])
-        
-        # Índices para recursos por tema
-        db.topic_resources.create_index([("topic_id", ASCENDING), ("status", ASCENDING)], background=True)
-        db.topic_resources.create_index([("resource_id", ASCENDING), ("status", ASCENDING)], background=True)
-        db.topic_resources.create_index([("recommended_for", ASCENDING)], background=True)
-        db.topic_resources.create_index([("usage_context", ASCENDING)], background=True)
-        db.topic_resources.create_index([("content_types", ASCENDING)], background=True)
-        
-        # Índices de recursos
-        db.resources.create_index([("created_by", ASCENDING)])
-        db.resources.create_index([("folder_id", ASCENDING)])
-        db.resources.create_index([("type", ASCENDING)])
-        db.resources.create_index([("name", TEXT), ("description", TEXT), ("tags", TEXT)])
-        
-        # Índices de carpetas de recursos
-        db.resource_folders.create_index([("created_by", ASCENDING)])
-        db.resource_folders.create_index([("parent_id", ASCENDING)])
-        db.resource_folders.create_index([("name", TEXT)])
-        
-        # Índices para sistema de monitoreo de IA
-        
-        # Índices de llamadas a APIs de IA
-        db.ai_api_calls.create_index([("call_id", ASCENDING)], unique=True, background=True)
-        db.ai_api_calls.create_index([("timestamp", DESCENDING)], background=True)
-        db.ai_api_calls.create_index([("provider", ASCENDING)], background=True)
-        db.ai_api_calls.create_index([("model_name", ASCENDING)], background=True)
-        db.ai_api_calls.create_index([("user_id", ASCENDING)], background=True)
-        db.ai_api_calls.create_index([("success", ASCENDING)], background=True)
-        db.ai_api_calls.create_index([("feature", ASCENDING)], background=True)
-        db.ai_api_calls.create_index([("user_type", ASCENDING)], background=True)
-        # Índice compuesto para consultas frecuentes
-        db.ai_api_calls.create_index([("timestamp", DESCENDING), ("success", ASCENDING), ("provider", ASCENDING)], background=True)
-        
-        # Índices de alertas de monitoreo
-        db.ai_monitoring_alerts.create_index([("alert_id", ASCENDING)], unique=True, background=True)
-        db.ai_monitoring_alerts.create_index([("triggered", ASCENDING), ("dismissed", ASCENDING)], background=True)
-        db.ai_monitoring_alerts.create_index([("type", ASCENDING)], background=True)
-        db.ai_monitoring_alerts.create_index([("created_at", DESCENDING)], background=True)
-        db.ai_monitoring_alerts.create_index([("provider", ASCENDING)], background=True)
-        db.ai_monitoring_alerts.create_index([("user_id", ASCENDING)], background=True)
-        
-        # Índices para la base de datos de lenguas indígenas
-        
-        # Índices para traducciones
-        indigenous_db.translations.create_index([("language_pair", ASCENDING)], background=True)
-        indigenous_db.translations.create_index([("type_data", ASCENDING)], background=True)
-        indigenous_db.translations.create_index([("created_at", DESCENDING)], background=True)
-        indigenous_db.translations.create_index([("español", TEXT), ("traduccion", TEXT)], 
-                                              background=True, default_language="spanish")
-        
-        # Índices para verificaciones
-        indigenous_db.verificaciones.create_index([("translation_id", ASCENDING)], background=True)
-        indigenous_db.verificaciones.create_index([("verificador_id", ASCENDING)], background=True)
-        
-        # Configuración exitosa
+        # Índices para base de lenguas indígenas
+        indigenous_db.languages.create_index([("name", TEXT)])
+        indigenous_db.languages.create_index([("region", ASCENDING)])
+        indigenous_db.content.create_index([("language_id", ASCENDING)])
+
         logger.info("Índices de base de datos configurados correctamente")
         return True
-        
+
     except Exception as e:
-        logger.error(f"Error al configurar índices de la base de datos: {str(e)}")
+        logger.error(f"Error configurando índices de base de datos: {str(e)}")
         return False
