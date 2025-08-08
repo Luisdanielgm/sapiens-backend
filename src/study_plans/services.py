@@ -71,6 +71,179 @@ class StudyPlanService(VerificationBaseService):
         except Exception as e:
             raise AppException(f"Error al crear plan de estudios: {str(e)}", AppException.BAD_REQUEST)
 
+    def create_personal_study_plan(self, user_id: str, workspace_id: str, 
+                                   title: str, description: str = "", 
+                                   objectives: Optional[List[str]] = None) -> str:
+        """
+        Crea un plan de estudio personal en la colección unificada.
+        """
+        try:
+            plan_data = {
+                "version": "1.0",
+                "name": title,
+                "description": description,
+                "author_id": str(user_id),
+                "workspace_id": str(workspace_id),
+                "workspace_type": "INDIVIDUAL_STUDENT",
+                "is_personal": True,
+                "objectives": objectives or [],
+                "institute_id": None,
+                "subject_id": None,
+                "status": "active",
+                "created_at": datetime.utcnow(),
+                "updated_at": datetime.utcnow()
+            }
+            study_plan = StudyPlanPerSubject(**plan_data)
+            result = self.collection.insert_one(study_plan.to_dict())
+            return str(result.inserted_id)
+        except Exception as e:
+            raise AppException(f"Error al crear plan personal: {str(e)}", AppException.BAD_REQUEST)
+
+    def list_personal_study_plans_by_workspace(self, workspace_id: str, user_id: Optional[str] = None) -> List[Dict]:
+        """Lista planes personales de un workspace (opcionalmente filtrados por autor)."""
+        try:
+            query: Dict[str, Any] = {
+                "is_personal": True,
+                "workspace_id": ObjectId(workspace_id)
+            }
+            if user_id:
+                query["author_id"] = ObjectId(user_id)
+            plans = list(self.collection.find(query).sort("created_at", -1))
+            for plan in plans:
+                plan["_id"] = str(plan["_id"])
+                # serializar ids
+                if isinstance(plan.get("author_id"), ObjectId):
+                    plan["author_id"] = str(plan["author_id"])
+                if isinstance(plan.get("workspace_id"), ObjectId):
+                    plan["workspace_id"] = str(plan["workspace_id"])
+            return plans
+        except Exception as e:
+            logging.error(f"Error al listar planes personales: {str(e)}")
+            return []
+
+    def list_study_plans(
+        self,
+        email: Optional[str] = None,
+        institute_id: Optional[str] = None,
+        workspace_info: Dict = None
+    ) -> List[Dict]:
+        """Devuelve los planes de estudio filtrados por autor, instituto y workspace."""
+        try:
+            query = {}
+
+            if email:
+                user = get_db().users.find_one({"email": email})
+                if user:
+                    query["author_id"] = ObjectId(user["_id"])
+
+            if institute_id:
+                try:
+                    query["institute_id"] = ObjectId(institute_id)
+                except Exception:
+                    logging.error(
+                        "institute_id inválido en list_study_plans: %s", institute_id
+                    )
+            
+            # Aplicar filtrado por workspace si se proporciona
+            if workspace_info:
+                workspace_type = workspace_info.get('workspace_type')
+                workspace_id = workspace_info.get('workspace_id')
+                
+                if workspace_type == 'INDIVIDUAL_TEACHER':
+                    # En workspaces individuales de profesor, filtrar por workspace_id
+                    query["workspace_id"] = ObjectId(workspace_id)
+                elif workspace_type == 'INSTITUTE':
+                    # En workspaces institucionales, filtrar por institute_id
+                    institute_id = workspace_info.get('institute_id')
+                    if institute_id:
+                        query["institute_id"] = ObjectId(institute_id)
+                elif workspace_type == 'INDIVIDUAL_STUDENT':
+                    # En workspace individual de estudiante: planes personales del usuario
+                    query["workspace_id"] = ObjectId(workspace_id)
+                    query["is_personal"] = True
+
+            plans = list(self.collection.find(query))
+
+            for plan in plans:
+                plan["_id"] = str(plan["_id"])
+                if "author_id" in plan and isinstance(plan["author_id"], ObjectId):
+                    plan["author_id"] = str(plan["author_id"])
+                if "institute_id" in plan and isinstance(plan["institute_id"], ObjectId):
+                    plan["institute_id"] = str(plan["institute_id"])
+                if "workspace_id" in plan and isinstance(plan["workspace_id"], ObjectId):
+                    plan["workspace_id"] = str(plan["workspace_id"])
+
+            return plans
+        except Exception as e:
+            logging.error(f"Error al listar planes: {str(e)}")
+            return []
+
+    def get_study_plan(self, plan_id: str, workspace_info: Dict = None) -> Optional[Dict]:
+        try:
+            plan = self.collection.find_one({"_id": ObjectId(plan_id)})
+            if not plan:
+                return None
+
+            # Convertir _id a string para que sea JSON serializable
+            plan["_id"] = str(plan["_id"])
+            if isinstance(plan.get("author_id"), ObjectId):
+                plan["author_id"] = str(plan["author_id"])
+            if isinstance(plan.get("workspace_id"), ObjectId):
+                plan["workspace_id"] = str(plan["workspace_id"])
+            if isinstance(plan.get("institute_id"), ObjectId):
+                plan["institute_id"] = str(plan["institute_id"])
+            
+            # Obtener módulos asociados
+            modules = list(get_db().modules.find({"study_plan_id": ObjectId(plan_id)}))
+            
+            # Para cada módulo, obtener sus temas y evaluaciones
+            for module in modules:
+                # Convertir ObjectId a string
+                module["_id"] = str(module["_id"])
+                module["study_plan_id"] = str(module["study_plan_id"])
+                
+                # Rellenar date_start y date_end si faltan (para registros antiguos)
+                if 'date_start' not in module or module.get('date_start') is None:
+                    module['date_start'] = module.get('created_at')
+                if 'date_end' not in module or module.get('date_end') is None:
+                    module['date_end'] = module.get('created_at')
+                
+                # Obtener temas relacionados
+                topics = list(get_db().topics.find({"module_id": ObjectId(module["_id"])}))
+                for topic in topics:
+                    topic["_id"] = str(topic["_id"])
+                    topic["module_id"] = str(topic["module_id"])
+                    
+                    # Rellenar date_start y date_end si faltan en el topic
+                    if 'date_start' not in topic or topic.get('date_start') is None:
+                        topic['date_start'] = topic.get('created_at')
+                    if 'date_end' not in topic or topic.get('date_end') is None:
+                        topic['date_end'] = topic.get('created_at')
+                
+                module["topics"] = topics
+                
+                # Obtener evaluaciones y convertir sus ObjectId
+                evaluations = list(get_db().evaluations.find({"module_id": ObjectId(module["_id"])}))
+                for evaluation in evaluations:
+                    evaluation["_id"] = str(evaluation["_id"])
+                    evaluation["module_id"] = str(evaluation["module_id"])
+                
+                module["evaluations"] = evaluations
+
+            plan["modules"] = modules
+            
+            # Agregar información del workspace si está disponible
+            if workspace_info:
+                plan["workspace_context"] = {
+                    "workspace_type": workspace_info.get('workspace_type'),
+                    "workspace_name": workspace_info.get('workspace_name')
+                }
+            
+            return plan
+        except Exception as e:
+            logging.error(f"Error al obtener plan de estudio: {str(e)}")
+            return None
+
     def update_study_plan(self, plan_id: str, update_data: dict) -> None:
         """
         Actualiza un plan de estudios existente.
@@ -161,117 +334,6 @@ class StudyPlanService(VerificationBaseService):
             raise
         except Exception as e:
             raise AppException(f"Error al eliminar plan de estudios: {str(e)}", AppException.BAD_REQUEST)
-
-    def list_study_plans(
-        self,
-        email: Optional[str] = None,
-        institute_id: Optional[str] = None,
-        workspace_info: Dict = None
-    ) -> List[Dict]:
-        """Devuelve los planes de estudio filtrados por autor, instituto y workspace."""
-        try:
-            query = {}
-
-            if email:
-                user = get_db().users.find_one({"email": email})
-                if user:
-                    query["author_id"] = ObjectId(user["_id"])
-
-            if institute_id:
-                try:
-                    query["institute_id"] = ObjectId(institute_id)
-                except Exception:
-                    logging.error(
-                        "institute_id inválido en list_study_plans: %s", institute_id
-                    )
-            
-            # Aplicar filtrado por workspace si se proporciona
-            if workspace_info:
-                workspace_type = workspace_info.get('workspace_type')
-                workspace_id = workspace_info.get('workspace_id')
-                
-                if workspace_type == 'INDIVIDUAL_TEACHER':
-                    # En workspaces individuales de profesor, filtrar por workspace_id
-                    query["workspace_id"] = ObjectId(workspace_id)
-                elif workspace_type == 'INSTITUTE':
-                    # En workspaces institucionales, filtrar por institute_id
-                    institute_id = workspace_info.get('institute_id')
-                    if institute_id:
-                        query["institute_id"] = ObjectId(institute_id)
-
-            plans = list(self.collection.find(query))
-
-            for plan in plans:
-                plan["_id"] = str(plan["_id"])
-                if "author_id" in plan and isinstance(plan["author_id"], ObjectId):
-                    plan["author_id"] = str(plan["author_id"])
-                if "institute_id" in plan and isinstance(plan["institute_id"], ObjectId):
-                    plan["institute_id"] = str(plan["institute_id"])
-
-            return plans
-        except Exception as e:
-            logging.error(f"Error al listar planes: {str(e)}")
-            return []
-
-    def get_study_plan(self, plan_id: str, workspace_info: Dict = None) -> Optional[Dict]:
-        try:
-            plan = self.collection.find_one({"_id": ObjectId(plan_id)})
-            if not plan:
-                return None
-
-            # Convertir _id a string para que sea JSON serializable
-            plan["_id"] = str(plan["_id"])
-            
-            # Obtener módulos asociados
-            modules = list(get_db().modules.find({"study_plan_id": ObjectId(plan_id)}))
-            
-            # Para cada módulo, obtener sus temas y evaluaciones
-            for module in modules:
-                # Convertir ObjectId a string
-                module["_id"] = str(module["_id"])
-                module["study_plan_id"] = str(module["study_plan_id"])
-                
-                # Rellenar date_start y date_end si faltan (para registros antiguos)
-                if 'date_start' not in module or module.get('date_start') is None:
-                    module['date_start'] = module.get('created_at')
-                if 'date_end' not in module or module.get('date_end') is None:
-                    module['date_end'] = module.get('created_at')
-                
-                # Obtener temas relacionados
-                topics = list(get_db().topics.find({"module_id": ObjectId(module["_id"])}))
-                for topic in topics:
-                    topic["_id"] = str(topic["_id"])
-                    topic["module_id"] = str(topic["module_id"])
-                    
-                    # Rellenar date_start y date_end si faltan en el topic
-                    if 'date_start' not in topic or topic.get('date_start') is None:
-                        topic['date_start'] = topic.get('created_at')
-                    if 'date_end' not in topic or topic.get('date_end') is None:
-                        topic['date_end'] = topic.get('created_at')
-                
-                module["topics"] = topics
-                
-                # Obtener evaluaciones y convertir sus ObjectId
-                evaluations = list(get_db().evaluations.find({"module_id": ObjectId(module["_id"])}))
-                for evaluation in evaluations:
-                    evaluation["_id"] = str(evaluation["_id"])
-                    evaluation["module_id"] = str(evaluation["module_id"])
-                
-                module["evaluations"] = evaluations
-
-            plan["modules"] = modules
-            
-            # Agregar información del workspace si está disponible
-            if workspace_info:
-                plan["workspace_context"] = {
-                    "workspace_type": workspace_info.get('workspace_type'),
-                    "workspace_name": workspace_info.get('workspace_name')
-                }
-            
-            return plan
-        except Exception as e:
-            logging.error(f"Error al obtener plan de estudio: {str(e)}")
-            return None
 
 class StudyPlanAssignmentService(VerificationBaseService):
     def __init__(self):

@@ -11,15 +11,30 @@ class StudyPlanPerSubject:
                  description: Optional[str] = None,
                  status: str = "draft",
                  subject_id: Optional[str] = None,
-                 approval_date: Optional[datetime] = None):
+                 approval_date: Optional[datetime] = None,
+                 # Nuevos campos opcionales para unificación
+                 institute_id: Optional[str] = None,
+                 workspace_id: Optional[str] = None,
+                 workspace_type: Optional[str] = None,
+                 is_personal: bool = False,
+                 objectives: Optional[List[str]] = None,
+                 created_at: Optional[datetime] = None,
+                 updated_at: Optional[datetime] = None):
         self.version = version
-        self.author_id = ObjectId(author_id)
+        self.author_id = ObjectId(author_id) if isinstance(author_id, str) else author_id
         self.name = name
         self.description = description
         self.status = status
         self.subject_id = ObjectId(subject_id) if subject_id else None
         self.approval_date = approval_date
-        self.created_at = datetime.now()
+        # Nuevos campos
+        self.institute_id = ObjectId(institute_id) if institute_id else None
+        self.workspace_id = ObjectId(workspace_id) if workspace_id else None
+        self.workspace_type = workspace_type
+        self.is_personal = is_personal
+        self.objectives = objectives or []
+        self.created_at = created_at or datetime.now()
+        self.updated_at = updated_at or datetime.now()
 
     def to_dict(self) -> dict:
         return {
@@ -30,7 +45,14 @@ class StudyPlanPerSubject:
             "status": self.status,
             "subject_id": self.subject_id,
             "approval_date": self.approval_date,
-            "created_at": self.created_at
+            # Nuevos campos
+            "institute_id": self.institute_id,
+            "workspace_id": self.workspace_id,
+            "workspace_type": self.workspace_type,
+            "is_personal": self.is_personal,
+            "objectives": self.objectives,
+            "created_at": self.created_at,
+            "updated_at": self.updated_at
         }
 
 class StudyPlanAssignment:

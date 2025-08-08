@@ -16,10 +16,12 @@ from src.members.services import MembershipService
 from src.workspaces.services import WorkspaceService
 from src.shared.database import get_db
 from src.shared.constants import normalize_role
+from src.study_plans.services import StudyPlanService
 
 workspaces_bp = APIBlueprint('workspaces', __name__)
 membership_service = MembershipService()
 workspace_service = WorkspaceService()
+study_plan_service = StudyPlanService()
 
 @workspaces_bp.route('/', methods=['GET'])
 @APIRoute.standard(auth_required_flag=True)
@@ -383,7 +385,7 @@ def personal_study_plans(workspace_id):
         workspace_type = jwt_claims.get('workspace_type')
         
         if request.method == 'GET':
-            # Obtener planes de estudio personales
+            # Obtener planes de estudio personales (unificados)
             study_plans = workspace_service.get_personal_study_plans(
                 workspace_id=workspace_id,
                 user_id=user_id,
@@ -418,6 +420,41 @@ def personal_study_plans(workspace_id):
     except Exception as e:
         log_error(f"Error in personal study plans: {str(e)}", e, "workspaces.routes")
         return APIRoute.error(ErrorCodes.SERVER_ERROR, "No se pudo procesar la solicitud")
+
+# Endpoints unificados para acceder a planes del workspace
+@workspaces_bp.route('/<string:workspace_id>/study-plans', methods=['GET'])
+@auth_required
+@workspace_access_required
+def list_workspace_study_plans(workspace_id):
+    """Lista planes personales del workspace desde la colección unificada"""
+    try:
+        user_id = get_jwt_identity()
+        plans = study_plan_service.list_personal_study_plans_by_workspace(workspace_id, user_id)
+        return APIRoute.success(data={"study_plans": plans, "total_count": len(plans)})
+    except Exception as e:
+        log_error(f"Error listing workspace study plans: {str(e)}", e, "workspaces.routes")
+        return APIRoute.error(ErrorCodes.SERVER_ERROR, "No se pudieron listar los planes del workspace")
+
+@workspaces_bp.route('/<string:workspace_id>/study-plans/<string:study_plan_id>', methods=['GET'])
+@auth_required
+@workspace_access_required
+def get_workspace_study_plan(workspace_id, study_plan_id):
+    """
+    Obtiene un plan de estudio específico del workspace unificado
+    """
+    try:
+        plan = study_plan_service.get_study_plan(study_plan_id)
+        if not plan:
+            return APIRoute.error(ErrorCodes.NOT_FOUND, "Plan de estudio no encontrado")
+        
+        # Verificar que pertenece al workspace (solo para planes personales)
+        if plan.get("is_personal") and str(plan.get("workspace_id")) != str(workspace_id):
+            return APIRoute.error(ErrorCodes.FORBIDDEN, "Plan no pertenece a este workspace")
+        
+        return APIRoute.success(data=plan)
+    except Exception as e:
+        log_error(f"Error getting workspace study plan: {str(e)}", e, "workspaces.routes")
+        return APIRoute.error(ErrorCodes.SERVER_ERROR, "No se pudo obtener el plan de estudio")
 
 @workspaces_bp.route('/<string:workspace_id>/study-goals', methods=['GET','POST','PUT','DELETE','OPTIONS'])
 @auth_required
@@ -501,7 +538,7 @@ def study_goals(workspace_id):
             return APIRoute.success(data={}, message="OK")
             
     except Exception as e:
-        log_error(f"Error in study goals: {str(e)}", e, "workspaces.routes")
+        log_error(f"Error in personal study plans: {str(e)}", e, "workspaces.routes")
         return APIRoute.error(ErrorCodes.SERVER_ERROR, "No se pudo procesar la solicitud")
 
 @workspaces_bp.route('/<string:workspace_id>/personal-resources', methods=['GET','POST','PUT','DELETE','OPTIONS'])
