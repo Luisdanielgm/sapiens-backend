@@ -2016,6 +2016,7 @@ def get_student_content_results(student_id):
 # ===== ENDPOINTS PARA CONTENTRESULT AUTOMÁTICO =====
 
 @virtual_bp.route('/content/<virtual_content_id>/complete-auto', methods=['POST'])
+@virtual_bp.route('/contents/<virtual_content_id>/auto-complete', methods=['POST'])
 @APIRoute.standard(auth_required_flag=True, roles=[ROLES["STUDENT"]])
 def auto_complete_content(virtual_content_id):
     """
@@ -2074,6 +2075,7 @@ def auto_complete_content(virtual_content_id):
         )
 
 @virtual_bp.route('/content/<virtual_content_id>/complete-reading', methods=['POST'])
+@virtual_bp.route('/contents/<virtual_content_id>/auto-complete-reading', methods=['POST'])
 @APIRoute.standard(auth_required_flag=True, roles=[ROLES["STUDENT"]])
 def auto_complete_reading_content(virtual_content_id):
     """
