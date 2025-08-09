@@ -81,6 +81,12 @@ class TopicContent:
                  ai_credits: bool = True,
                  personalization_markers: Dict = None,
                  slide_template: Optional[Dict] = None,  # Plantilla de fondo para diapositivas
+                 # Nuevos campos para sistema de plantillas
+                 render_engine: str = "legacy",  # legacy | html_template
+                 instance_id: Optional[str] = None,  # Referencia a TemplateInstance
+                 template_id: Optional[str] = None,  # Referencia directa a Template
+                 template_version: Optional[str] = None,  # Versión de plantilla usada
+                 learning_mix: Optional[Dict] = None,  # Mix VARK para este contenido
                  status: str = "draft",
                  _id: Optional[ObjectId] = None,
                  created_at: Optional[datetime] = None,
@@ -99,6 +105,12 @@ class TopicContent:
         self.ai_credits = ai_credits
         self.personalization_markers = personalization_markers or {}
         self.slide_template = slide_template or {}
+        # Nuevos campos de plantillas
+        self.render_engine = render_engine
+        self.instance_id = ObjectId(instance_id) if instance_id else None
+        self.template_id = ObjectId(template_id) if template_id else None
+        self.template_version = template_version
+        self.learning_mix = learning_mix or {}
         self.status = status
         self.created_at = created_at or datetime.now()
         self.updated_at = updated_at or datetime.now()
@@ -107,7 +119,7 @@ class TopicContent:
             logging.warning(f"TopicContent received unexpected arguments, which were ignored: {list(kwargs.keys())}")
         
     def to_dict(self) -> dict:
-        return {
+        data = {
             "_id": self._id,
             "topic_id": self.topic_id,
             "content": self.content,
@@ -121,10 +133,20 @@ class TopicContent:
             "ai_credits": self.ai_credits,
             "personalization_markers": self.personalization_markers,
             "slide_template": self.slide_template,
+            "render_engine": self.render_engine,
+            "learning_mix": self.learning_mix,
             "status": self.status,
             "created_at": self.created_at,
             "updated_at": self.updated_at
         }
+        # Campos opcionales de plantillas
+        if self.instance_id:
+            data["instance_id"] = self.instance_id
+        if self.template_id:
+            data["template_id"] = self.template_id
+        if self.template_version:
+            data["template_version"] = self.template_version
+        return data
 
 class VirtualTopicContent:
     """
