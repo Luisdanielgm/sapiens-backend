@@ -318,8 +318,25 @@ class UserService(VerificationBaseService):
             return False
 
 class CognitiveProfileService(VerificationBaseService):
+    """
+    OBSOLETO - Este servicio está marcado para eliminación.
+    
+    La funcionalidad de perfiles cognitivos se ha centralizado en:
+    src/profiles/services.py -> ProfileService
+    
+    Usar únicamente los endpoints en /api/profiles/cognitive/
+    
+    TODO: Eliminar en la siguiente iteración una vez confirmado que no hay dependencias.
+    """
     def __init__(self):
         super().__init__(collection_name="cognitive_profiles")
+        import warnings
+        warnings.warn(
+            "CognitiveProfileService en users/services.py está obsoleto. "
+            "Usar ProfileService de src/profiles/services.py",
+            DeprecationWarning,
+            stacklevel=2
+        )
 
     def update_cognitive_profile(self, email: str, profile_data: str) -> bool:
         """

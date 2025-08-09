@@ -482,16 +482,35 @@ class ContentResultService(VerificationBaseService):
             Tuple[bool, str]: (éxito, mensaje/ID)
         """
         try:
+            # Asegurar que virtual_content_id esté presente
+            if not result_data.get("virtual_content_id"):
+                # Si no hay virtual_content_id, intentar encontrarlo basado en content_id y student_id
+                student_id = result_data.get("student_id")
+                content_id = result_data.get("content_id")
+                
+                if student_id and content_id:
+                    virtual_content = get_db().virtual_topic_contents.find_one({
+                        "student_id": ObjectId(student_id),
+                        "content_id": ObjectId(content_id)
+                    })
+                    if virtual_content:
+                        result_data["virtual_content_id"] = str(virtual_content["_id"])
+                    else:
+                        logging.warning(f"No se encontró virtual_content_id para content_id: {content_id}, student_id: {student_id}")
+            
             content_result = ContentResult(**result_data)
             result = self.collection.insert_one(content_result.to_dict())
             
             # Actualizar tracking solo si es un resultado de contenido virtual
             if result_data.get("virtual_content_id"):
-                virtual_content_service = VirtualContentService()
-                virtual_content_service.track_interaction(
-                    result_data["virtual_content_id"],
-                    result_data.get("session_data", {})
-                )
+                try:
+                    virtual_content_service = VirtualContentService()
+                    virtual_content_service.track_interaction(
+                        result_data["virtual_content_id"],
+                        result_data.get("session_data", {})
+                    )
+                except Exception as track_error:
+                    logging.warning(f"Error actualizando tracking de contenido virtual: {track_error}")
             
             return True, str(result.inserted_id)
             
@@ -499,41 +518,50 @@ class ContentResultService(VerificationBaseService):
             logging.error(f"Error registrando resultado: {str(e)}")
             return False, f"Error interno: {str(e)}"
 
-    def get_student_results(self, student_id: str, content_type: str = None, evaluation_id: str = None) -> List[Dict]:
+    def get_student_results(self, student_id: str, virtual_content_id: str = None, content_type: str = None, evaluation_id: str = None) -> List[Dict]:
         """
-        Obtiene resultados de un estudiante, opcionalmente filtrados.
+        Obtiene resultados de un estudiante, filtrados por virtual_content_id como clave principal.
+        
+        Args:
+            student_id: ID del estudiante
+            virtual_content_id: ID del contenido virtual (clave principal)
+            content_type: Tipo de contenido (opcional, para compatibilidad)
+            evaluation_id: ID de evaluación (opcional)
         """
         try:
-            # Si se especifica tipo de contenido, primero buscar contenidos virtuales de ese tipo
             query = {"student_id": ObjectId(student_id)}
+            
+            # Usar virtual_content_id como filtro principal si se proporciona
+            if virtual_content_id:
+                query["virtual_content_id"] = ObjectId(virtual_content_id)
+            elif content_type:
+                # Fallback: buscar por tipo de contenido si no hay virtual_content_id
+                # Buscar contenidos virtuales del tipo especificado
+                virtual_contents = list(get_db().virtual_topic_contents.find({
+                    "student_id": ObjectId(student_id),
+                    "content_type": content_type
+                }))
+                
+                if virtual_contents:
+                    virtual_content_ids = [vc["_id"] for vc in virtual_contents]
+                    query["virtual_content_id"] = {"$in": virtual_content_ids}
+                else:
+                    return []  # No hay contenidos virtuales de este tipo
             
             if evaluation_id:
                 query["evaluation_id"] = ObjectId(evaluation_id)
-
-            if content_type:
-                # Buscar contenidos virtuales del tipo especificado
-                virtual_contents = list(get_db().virtual_topic_contents.find({
-                    "student_id": ObjectId(student_id)
-                }))
-                
-                # Filtrar por tipo de contenido
-                content_ids = []
-                for vc in virtual_contents:
-                    content = get_db().topic_contents.find_one({
-                        "_id": vc["content_id"],
-                        "content_type": content_type
-                    })
-                    if content:
-                        content_ids.append(vc["_id"])
-                
-                query["virtual_content_id"] = {"$in": content_ids}
             
-            results = list(self.collection.find(query).sort("created_at", -1))
+            results = list(self.collection.find(query).sort("recorded_at", -1))
             
+            # Convertir ObjectIds a strings para JSON
             for result in results:
                 result["_id"] = str(result["_id"])
-                result["virtual_content_id"] = str(result["virtual_content_id"])
                 result["student_id"] = str(result["student_id"])
+                result["content_id"] = str(result["content_id"])
+                if result.get("virtual_content_id"):
+                    result["virtual_content_id"] = str(result["virtual_content_id"])
+                if result.get("evaluation_id"):
+                    result["evaluation_id"] = str(result["evaluation_id"])
                 
             return results
             

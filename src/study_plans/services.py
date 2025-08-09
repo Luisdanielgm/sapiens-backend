@@ -3001,13 +3001,43 @@ class EvaluationResourceService(VerificationBaseService):
 
 
 class AutomaticGradingService:
-    """Servicio para corrección automática de entregas."""
+    """
+    IMPLEMENTACIÓN SIMPLIFICADA - Servicio para corrección automática de entregas.
+    
+    NOTA: Esta es una implementación básica que utiliza algoritmos simplificados
+    de evaluación automática. Es funcional pero limitada en comparación con 
+    sistemas de IA avanzados de corrección automática.
+    
+    LIMITACIONES ACTUALES:
+    - Análisis de texto básico sin procesamiento de lenguaje natural avanzado
+    - Evaluación basada en criterios simples (longitud, keywords, formato)
+    - No incluye análisis semántico profundo
+    - Sin machine learning para mejora continua
+    
+    TODO FUTURO: Considerar integración con:
+    - Modelos de IA especializados en evaluación de texto
+    - Análisis semántico avanzado
+    - Sistema de retroalimentación inteligente
+    - Mejora continua basada en feedback humano
+    
+    EXPECTATIVA DEL CLIENTE: El cliente está informado de que este es un sistema
+    de corrección automática simplificado, no una solución de IA avanzada.
+    """
 
     def __init__(self):
         self.db = get_db()
+        # Logging para indicar uso de implementación simplificada
+        logging.info("Iniciando AutomaticGradingService - implementación simplificada de corrección automática")
 
     def grade_submission(self, resource_id: str, evaluation_id: str) -> Dict:
-        """Califica automáticamente una entrega basada en el recurso y evaluación."""
+        """
+        SIMPLIFICADO - Califica automáticamente una entrega basada en criterios básicos.
+        
+        Utiliza algoritmos simplificados de evaluación. No incluye IA avanzada
+        ni procesamiento de lenguaje natural sofisticado.
+        """
+        logging.debug(f"Iniciando corrección automática simplificada para resource: {resource_id}")
+        
         try:
             # Obtener información del recurso (archivo entregado)
             resource = self.db.resources.find_one({"_id": ObjectId(resource_id)})
@@ -3162,6 +3192,12 @@ class TopicReadinessService(VerificationBaseService):
                 message = "Falta un contenido kinestésico/interactivo. Se requiere un 'game' o 'simulation'."
                 missing_requirements.append(message)
 
+            # 4. Requisito de Pensamiento Crítico
+            has_critical_thinking = "guided_questions" in content_types_present
+            if not has_critical_thinking:
+                message = "Falta un contenido de pensamiento crítico. Se requiere 'guided_questions' para promover análisis y reflexión."
+                missing_requirements.append(message)
+
             # --- Construir Respuesta ---
             is_ready = not missing_requirements
             
@@ -3175,6 +3211,7 @@ class TopicReadinessService(VerificationBaseService):
                     "has_diagram": "diagram" in content_types_present,
                     "has_video": "video" in content_types_present,
                     "has_kinesthetic": has_kinesthetic,
+                    "has_critical_thinking": has_critical_thinking,
                     "found_content_types": list(content_types_present)
                 },
                 "missing_requirements": missing_requirements

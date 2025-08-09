@@ -848,16 +848,37 @@ def create_cognitive_profile():
 @APIRoute.standard(auth_required_flag=True)
 def get_cognitive_profile(user_id_or_email):
     """
-    Obtiene el perfil cognitivo para un estudiante específico.
+    Obtiene el perfil cognitivo completo para un estudiante específico.
     
     Args:
         user_id_or_email: ID o email del usuario estudiante
+        
+    Returns:
+        JSON con perfil cognitivo completo incluyendo learning_style y profile data
     """
     try:
         profile = profile_service.get_cognitive_profile(user_id_or_email)
         
         if profile:
-            return APIRoute.success(data={"profile": profile})
+            # Asegurar que se incluyen todos los campos esperados
+            complete_profile = {
+                "id": profile.get("_id"),
+                "user_id": profile.get("user_id"),
+                "learning_style": profile.get("learning_style", ""),
+                "diagnosis": profile.get("diagnosis", ""),
+                "cognitive_strengths": profile.get("cognitive_strengths", []),
+                "cognitive_difficulties": profile.get("cognitive_difficulties", []),
+                "personal_context": profile.get("personal_context", ""),
+                "recommended_strategies": profile.get("recommended_strategies", []),
+                "profile_data": profile.get("profile_data", {}),
+                "raw_profile": profile.get("profile", ""),  # Campo JSON original
+                "user": profile.get("user", {}),
+                "created_at": profile.get("created_at"),
+                "updated_at": profile.get("updated_at")
+            }
+            
+            return APIRoute.success(data={"profile": complete_profile})
+        
         return APIRoute.error(
             ErrorCodes.RESOURCE_NOT_FOUND,
             "Perfil cognitivo no encontrado",

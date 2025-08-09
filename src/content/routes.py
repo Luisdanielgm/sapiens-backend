@@ -413,7 +413,9 @@ def record_result():
 def get_student_results(student_id):
     """
     Obtiene resultados de un estudiante.
-    Query params: content_type (para filtrar por tipo específico)
+    Query params: 
+        - virtual_content_id (filtrar por contenido virtual específico - clave principal)
+        - content_type (filtrar por tipo de contenido - para compatibilidad)
     """
     try:
         # Verificar permisos: solo el mismo estudiante o profesores/admin
@@ -425,9 +427,14 @@ def get_student_results(student_id):
                 status_code=403,
             )
         
+        virtual_content_id = request.args.get('virtual_content_id')
         content_type = request.args.get('content_type')
         
-        results = content_result_service.get_student_results(student_id, content_type)
+        results = content_result_service.get_student_results(
+            student_id, 
+            virtual_content_id=virtual_content_id,
+            content_type=content_type
+        )
 
         return APIRoute.success(data={"results": results})
         
@@ -470,10 +477,20 @@ def get_my_results():
 @APIRoute.standard(auth_required_flag=True, roles=[ROLES["TEACHER"], ROLES["ADMIN"]])
 def create_game_legacy():
     """
-    Endpoint de compatibilidad para crear juegos.
+    DEPRECATED - Endpoint de compatibilidad para crear juegos.
+    
+    Este endpoint será eliminado en la próxima versión.
+    Usar: POST /api/content/ con content_type="game"
+    
     Redirige al endpoint unificado con content_type="game"
     """
-    # TODO: evaluar eliminar este endpoint legacy tras refactor del frontend
+    import warnings
+    warnings.warn(
+        "El endpoint /api/content/games está obsoleto. Usar /api/content/ con content_type='game'",
+        DeprecationWarning,
+        stacklevel=2
+    )
+    
     try:
         data = request.json
         data['content_type'] = 'game'
@@ -502,9 +519,18 @@ def create_game_legacy():
 @APIRoute.standard(auth_required_flag=True, roles=[ROLES["TEACHER"], ROLES["ADMIN"]])
 def create_simulation_legacy():
     """
-    Endpoint de compatibilidad para crear simulaciones.
+    DEPRECATED - Endpoint de compatibilidad para crear simulaciones.
+    
+    Este endpoint será eliminado en la próxima versión.
+    Usar: POST /api/content/ con content_type="simulation"
     """
-    # TODO: revisar si este endpoint legacy sigue siendo necesario
+    import warnings
+    warnings.warn(
+        "El endpoint /api/content/simulations está obsoleto. Usar /api/content/ con content_type='simulation'",
+        DeprecationWarning,
+        stacklevel=2
+    )
+    
     try:
         data = request.json
         data['content_type'] = 'simulation'
@@ -533,9 +559,18 @@ def create_simulation_legacy():
 @APIRoute.standard(auth_required_flag=True, roles=[ROLES["TEACHER"], ROLES["ADMIN"]])
 def create_quiz_legacy():
     """
-    Endpoint de compatibilidad para crear quizzes.
+    DEPRECATED - Endpoint de compatibilidad para crear quizzes.
+    
+    Este endpoint será eliminado en la próxima versión.
+    Usar: POST /api/content/ con content_type="quiz"
     """
-    # TODO: este endpoint es redundante con la ruta unificada
+    import warnings
+    warnings.warn(
+        "El endpoint /api/content/quizzes está obsoleto. Usar /api/content/ con content_type='quiz'",
+        DeprecationWarning,
+        stacklevel=2
+    )
+    
     try:
         data = request.json
         data['content_type'] = 'quiz'

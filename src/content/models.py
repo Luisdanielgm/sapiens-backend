@@ -172,6 +172,7 @@ class ContentResult:
                  content_id: str,
                  student_id: str,
                  score: float,
+                 virtual_content_id: Optional[str] = None,
                  feedback: Optional[str] = None,
                  metrics: Optional[Dict] = None,
                  session_type: str = "content_interaction",
@@ -180,6 +181,7 @@ class ContentResult:
         self._id = _id or ObjectId()
         self.content_id = ObjectId(content_id)
         self.student_id = ObjectId(student_id)
+        self.virtual_content_id = ObjectId(virtual_content_id) if virtual_content_id else None
         self.score = score
         self.feedback = feedback
         self.metrics = metrics or {} # e.g., time_spent, attempts, etc.
@@ -187,7 +189,7 @@ class ContentResult:
         self.recorded_at = recorded_at or datetime.now()
 
     def to_dict(self) -> dict:
-        return {
+        data = {
             "_id": self._id,
             "content_id": self.content_id,
             "student_id": self.student_id,
@@ -197,6 +199,9 @@ class ContentResult:
             "session_type": self.session_type,
             "recorded_at": self.recorded_at,
         }
+        if self.virtual_content_id:
+            data["virtual_content_id"] = self.virtual_content_id
+        return data
 
 
 class ContentGenerationTask(BaseModel):
