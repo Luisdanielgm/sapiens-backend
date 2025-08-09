@@ -46,6 +46,8 @@ from src.content.routes import content_bp  # Sistema de contenido unificado
 from src.ai_monitoring.routes import ai_monitoring_bp  # Sistema de monitoreo de IA
 from src.correction.routes import correction_bp
 from src.workspaces.routes import workspaces_bp
+# Sistema de plantillas
+from src.content.template_routes import template_bp, instance_bp, preview_bp
 
 def create_app(config_object=active_config):
     """
@@ -223,6 +225,11 @@ def create_app(config_object=active_config):
     app.register_blueprint(ai_monitoring_bp, url_prefix='/api/ai-monitoring')
     app.register_blueprint(correction_bp, url_prefix='/api/correction')
     app.register_blueprint(workspaces_bp, url_prefix='/api/workspaces')
+    
+    # Sistema de plantillas
+    app.register_blueprint(template_bp)  # Ya incluye url_prefix='/api/templates'
+    app.register_blueprint(instance_bp)  # Ya incluye url_prefix='/api/template-instances'  
+    app.register_blueprint(preview_bp)   # Ya incluye url_prefix='/preview'
 
     # Alias para rutas de módulos (virtualización) bajo /api/modules para compatibilidad con frontend
     from src.study_plans.routes import get_virtualization_readiness
