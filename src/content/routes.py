@@ -13,6 +13,7 @@ from src.content.services import (
     ContentResultService,
     ContentGenerationService,
 )
+from src.content.template_integration_service import TemplateIntegrationService
 from src.shared.constants import ROLES
 
 content_bp = Blueprint('content', __name__, url_prefix='/api/content')
@@ -22,6 +23,7 @@ content_service = ContentService()
 content_type_service = ContentTypeService()
 virtual_content_service = VirtualContentService()
 content_result_service = ContentResultService()
+template_integration_service = TemplateIntegrationService()
 
 # ============================================
 # ENDPOINTS DE TIPOS DE CONTENIDO
@@ -662,3 +664,202 @@ def get_generation_task_status(task_id):
     except Exception as e:
         logging.error(f"Error en endpoint get_generation_task_status: {str(e)}")
         return APIRoute.error(ErrorCodes.SERVER_ERROR, "Error interno del servidor.")
+
+# ============================================
+# ENDPOINTS DE INTEGRACIÓN CON PLANTILLAS
+# ============================================
+
+@content_bp.route('/from-template', methods=['POST'])
+@APIRoute.standard(auth_required_flag=True)
+@role_required([ROLES["TEACHER"], ROLES["ADMIN"]])
+def create_content_from_template():
+    """
+    Crea contenido basado en una plantilla.
+    
+    Body:
+    {
+        "template_id": "template_id",
+        "topic_id": "topic_id", 
+        "props": {"param1": "value1"},
+        "assets": [{"id": "asset1", "name": "imagen.jpg", "url": "...", "type": "image"}],
+        "learning_mix": {"V": 70, "A": 10, "K": 15, "R": 5},
+        "content_type": "diagram" // opcional
+    }
+    """
+    try:
+        data = request.get_json()
+        
+        if not data:
+            return APIRoute.error(ErrorCodes.VALIDATION_ERROR, "Datos requeridos")
+        
+        # Validar campos requeridos
+        required_fields = ["template_id", "topic_id"]
+        for field in required_fields:
+            if field not in data:
+                return APIRoute.error(ErrorCodes.VALIDATION_ERROR, f"Campo requerido: {field}")
+        
+        # Crear contenido desde plantilla
+        success, result = template_integration_service.create_content_from_template(
+            template_id=data["template_id"],
+            topic_id=data["topic_id"],
+            props=data.get("props"),
+            assets=data.get("assets"),
+            learning_mix=data.get("learning_mix"),
+            content_type=data.get("content_type")
+        )
+        
+        if success:
+            return APIRoute.success(
+                data={"content_id": result},
+                message="Contenido creado desde plantilla exitosamente"
+            )
+        else:
+            return APIRoute.error(ErrorCodes.BUSINESS_LOGIC_ERROR, result)
+            
+    except Exception as e:
+        logging.error(f"Error creando contenido desde plantilla: {str(e)}")
+        return APIRoute.error(
+            ErrorCodes.SERVER_ERROR,
+            "Error interno del servidor",
+            status_code=500,
+        )
+
+@content_bp.route('/<content_id>/template-data', methods=['GET'])
+@APIRoute.standard(auth_required_flag=True)
+def get_template_content_data(content_id):
+    """
+    Obtiene datos enriquecidos de contenido basado en plantilla.
+    """
+    try:
+        content = template_integration_service.get_template_content(content_id)
+        
+        if not content:
+            return APIRoute.error(ErrorCodes.NOT_FOUND, "Contenido no encontrado", status_code=404)
+        
+        return APIRoute.success(data={"content": content})
+        
+    except Exception as e:
+        logging.error(f"Error obteniendo datos de plantilla: {str(e)}")
+        return APIRoute.error(
+            ErrorCodes.SERVER_ERROR,
+            "Error interno del servidor",
+            status_code=500,
+        )
+
+@content_bp.route('/<content_id>/template-update', methods=['PUT'])
+@APIRoute.standard(auth_required_flag=True)
+@role_required([ROLES["TEACHER"], ROLES["ADMIN"]])
+def update_template_content(content_id):
+    """
+    Actualiza contenido basado en plantilla.
+    
+    Body:
+    {
+        "props": {"param1": "new_value"},
+        "assets": [...],
+        "learning_mix": {...},
+        "status": "active"
+    }
+    """
+    try:
+        data = request.get_json()
+        
+        if not data:
+            return APIRoute.error(ErrorCodes.VALIDATION_ERROR, "Datos requeridos")
+        
+        success, message = template_integration_service.update_template_content(content_id, data)
+        
+        if success:
+            return APIRoute.success(message=message)
+        else:
+            return APIRoute.error(ErrorCodes.BUSINESS_LOGIC_ERROR, message)
+            
+    except Exception as e:
+        logging.error(f"Error actualizando contenido de plantilla: {str(e)}")
+        return APIRoute.error(
+            ErrorCodes.SERVER_ERROR,
+            "Error interno del servidor",
+            status_code=500,
+        )
+
+@content_bp.route('/<content_id>/template-publish', methods=['POST'])
+@APIRoute.standard(auth_required_flag=True)
+@role_required([ROLES["TEACHER"], ROLES["ADMIN"]])
+def publish_template_content(content_id):
+    """
+    Publica contenido basado en plantilla.
+    """
+    try:
+        success, message = template_integration_service.publish_template_content(content_id)
+        
+        if success:
+            return APIRoute.success(message=message)
+        else:
+            return APIRoute.error(ErrorCodes.BUSINESS_LOGIC_ERROR, message)
+            
+    except Exception as e:
+        logging.error(f"Error publicando contenido de plantilla: {str(e)}")
+        return APIRoute.error(
+            ErrorCodes.SERVER_ERROR,
+            "Error interno del servidor",
+            status_code=500,
+        )
+
+@content_bp.route('/templates/available/<topic_id>', methods=['GET'])
+@APIRoute.standard(auth_required_flag=True)
+def get_available_templates_for_topic(topic_id):
+    """
+    Obtiene plantillas disponibles para usar en un tema.
+    """
+    try:
+        user_id = get_jwt_identity()
+        
+        templates = template_integration_service.get_available_templates_for_topic(topic_id, user_id)
+        
+        return APIRoute.success(data={
+            "templates": templates,
+            "total": len(templates)
+        })
+        
+    except Exception as e:
+        logging.error(f"Error obteniendo plantillas disponibles: {str(e)}")
+        return APIRoute.error(
+            ErrorCodes.SERVER_ERROR,
+            "Error interno del servidor",
+            status_code=500,
+        )
+
+@content_bp.route('/<content_id>/migrate-to-template', methods=['POST'])
+@APIRoute.standard(auth_required_flag=True)
+@role_required([ROLES["TEACHER"], ROLES["ADMIN"]])
+def migrate_content_to_template(content_id):
+    """
+    Migra contenido legacy existente para usar una plantilla.
+    
+    Body:
+    {
+        "template_id": "template_id"
+    }
+    """
+    try:
+        data = request.get_json()
+        
+        if not data or "template_id" not in data:
+            return APIRoute.error(ErrorCodes.VALIDATION_ERROR, "template_id requerido")
+        
+        success, message = template_integration_service.migrate_content_to_template(
+            content_id, data["template_id"]
+        )
+        
+        if success:
+            return APIRoute.success(message=message)
+        else:
+            return APIRoute.error(ErrorCodes.BUSINESS_LOGIC_ERROR, message)
+            
+    except Exception as e:
+        logging.error(f"Error migrando contenido a plantilla: {str(e)}")
+        return APIRoute.error(
+            ErrorCodes.SERVER_ERROR,
+            "Error interno del servidor",
+            status_code=500,
+        )

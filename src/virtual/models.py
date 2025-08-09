@@ -275,6 +275,9 @@ class VirtualTopicContent:
                  content: str,
                  content_id: Optional[str] = None,
                  personalization_data: Optional[Dict] = None,
+                 # Nuevos campos para plantillas
+                 instance_id: Optional[str] = None,  # Referencia a TemplateInstance
+                 render_engine: str = "legacy",  # legacy | html_template
                  status: str = "active",
                  interaction_tracking: Optional[Dict] = None):
         self.virtual_topic_id = ObjectId(virtual_topic_id)
@@ -283,6 +286,9 @@ class VirtualTopicContent:
         self.content = content
         self.content_id = ObjectId(content_id) if content_id else None
         self.personalization_data = personalization_data or {}
+        # Nuevos campos de plantillas
+        self.instance_id = ObjectId(instance_id) if instance_id else None
+        self.render_engine = render_engine
         self.status = status
         self.interaction_tracking = interaction_tracking or {
             "completion_status": "not_started",
@@ -298,6 +304,7 @@ class VirtualTopicContent:
             "content_type": self.content_type,
             "content": self.content,
             "personalization_data": self.personalization_data,
+            "render_engine": self.render_engine,
             "status": self.status,
             "interaction_tracking": self.interaction_tracking,
             "created_at": self.created_at,
@@ -305,4 +312,6 @@ class VirtualTopicContent:
         }
         if self.content_id:
             data["content_id"] = self.content_id
+        if self.instance_id:
+            data["instance_id"] = self.instance_id
         return data
