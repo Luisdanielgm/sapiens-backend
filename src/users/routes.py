@@ -6,7 +6,7 @@ import logging
 from typing import Dict, List
 from datetime import datetime
 
-from .services import UserService, CognitiveProfileService
+from .services import UserService
 from src.shared.standardization import APIBlueprint, APIRoute, ErrorCodes
 from src.shared.utils import ensure_json_serializable
 from src.shared.constants import ROLES, normalize_role
@@ -18,7 +18,6 @@ from src.members.services import MembershipService
 
 users_bp = APIBlueprint('users', __name__)
 user_service = UserService()
-cognitive_profile_service = CognitiveProfileService()
 profile_service = ProfileService()
 membership_service = MembershipService()
 

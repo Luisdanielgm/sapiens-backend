@@ -1485,15 +1485,38 @@ def trigger_next_generation():
         student_id = data.get('student_id')
         progress = data.get('progress', 0)
         
-        # 1. Validar progreso mínimo
-        if progress < 80:
+        # 1. Validar que progress sea un número válido
+        if not isinstance(progress, (int, float)):
             return APIRoute.error(
                 ErrorCodes.BAD_REQUEST,
-                "El progreso debe ser mayor al 80% para activar siguiente generación",
+                "El progreso debe ser un número",
                 status_code=400
             )
         
-        # 2. Obtener información del módulo actual
+        # 2. Detectar si el frontend está enviando valores 0-1 en lugar de 0-100
+        if 0 <= progress <= 1:
+            logging.warning(f"Frontend enviando progreso en rango 0-1 ({progress}). Convirtiendo a 0-100.")
+            progress = progress * 100
+        
+        # 3. Validar rango 0-100
+        if progress < 0 or progress > 100:
+            return APIRoute.error(
+                ErrorCodes.BAD_REQUEST,
+                f"El progreso debe estar entre 0 y 100. Recibido: {progress}",
+                status_code=400
+            )
+        
+        # 4. Validar progreso mínimo para trigger
+        if progress < 80:
+            return APIRoute.error(
+                ErrorCodes.BAD_REQUEST,
+                f"El progreso debe ser mayor al 80% para activar siguiente generación. Progreso actual: {progress}%",
+                status_code=400
+            )
+        
+        logging.info(f"Triggering next module generation for module {current_module_id} with progress {progress}%")
+        
+        # 5. Obtener información del módulo actual
         current_module = get_db().modules.find_one({"_id": ObjectId(current_module_id)})
         if not current_module:
             return APIRoute.error(
@@ -1504,7 +1527,7 @@ def trigger_next_generation():
         
         plan_id = current_module["study_plan_id"]
         
-        # 3. Buscar siguiente módulo con temas publicados no generado
+        # 6. Buscar siguiente módulo con temas publicados no generado
         all_plan_modules = list(get_db().modules.find({"study_plan_id": plan_id}).sort("created_at", 1))
         all_enabled_modules = []
         for m in all_plan_modules:
@@ -1535,7 +1558,7 @@ def trigger_next_generation():
                 message="Generación progresiva completada"
             )
         
-        # 4. Encolar el siguiente módulo
+        # 7. Encolar el siguiente módulo
         next_module_id = str(next_module["_id"])
         success, task_id = queue_service.enqueue_generation_task(
             student_id=student_id,
@@ -1556,7 +1579,7 @@ def trigger_next_generation():
                 status_code=500
             )
         
-        # 5. Obtener estado actualizado de la cola
+        # 8. Obtener estado actualizado de la cola
         queue_status = queue_service.get_student_queue_status(student_id)
         
         return APIRoute.success(
@@ -1594,15 +1617,38 @@ def trigger_next_topic():
         student_id = get_jwt_identity()
         progress = data.get('progress', 0)
         
-        # 1. Validar progreso mínimo
-        if progress < 80:
+        # 1. Validar que progress sea un número válido
+        if not isinstance(progress, (int, float)):
             return APIRoute.error(
                 ErrorCodes.BAD_REQUEST,
-                "El progreso debe ser mayor al 80% para activar siguiente generación de temas",
+                "El progreso debe ser un número",
                 status_code=400
             )
         
-        # 2. Llamar al servicio de generación de temas (sin student_id)
+        # 2. Detectar si el frontend está enviando valores 0-1 en lugar de 0-100
+        if 0 <= progress <= 1:
+            logging.warning(f"Frontend enviando progreso en rango 0-1 ({progress}). Convirtiendo a 0-100.")
+            progress = progress * 100
+        
+        # 3. Validar rango 0-100
+        if progress < 0 or progress > 100:
+            return APIRoute.error(
+                ErrorCodes.BAD_REQUEST,
+                f"El progreso debe estar entre 0 y 100. Recibido: {progress}",
+                status_code=400
+            )
+        
+        # 4. Validar progreso mínimo para trigger
+        if progress < 80:
+            return APIRoute.error(
+                ErrorCodes.BAD_REQUEST,
+                f"El progreso debe ser mayor al 80% para activar siguiente generación de temas. Progreso actual: {progress}%",
+                status_code=400
+            )
+        
+        logging.info(f"Triggering next topic generation for topic {current_topic_id} with progress {progress}%")
+        
+        # 5. Llamar al servicio de generación de temas
         success, result = virtual_topic_service.trigger_next_topic_generation(
             topic_id=current_topic_id,
             progress=progress
@@ -2778,13 +2824,28 @@ def trigger_progress(virtual_topic_id):
         
         progress_percentage = data["progress_percentage"]
         
+        # Validar que sea un número
+        if not isinstance(progress_percentage, (int, float)):
+            return APIRoute.error(
+                ErrorCodes.BAD_REQUEST,
+                "progress_percentage debe ser un número",
+                status_code=400
+            )
+        
+        # Detectar si el frontend está enviando valores 0-1 en lugar de 0-100
+        if 0 <= progress_percentage <= 1:
+            logging.warning(f"Frontend enviando progreso en rango 0-1 ({progress_percentage}). Convirtiendo a 0-100.")
+            progress_percentage = progress_percentage * 100
+        
         # Validar progreso
         if not (0 <= progress_percentage <= 100):
             return APIRoute.error(
                 ErrorCodes.BAD_REQUEST,
-                "progress_percentage debe estar entre 0 y 100",
+                f"progress_percentage debe estar entre 0 y 100. Recibido: {progress_percentage}",
                 status_code=400
             )
+        
+        logging.info(f"Triggering progress for virtual topic {virtual_topic_id} with progress {progress_percentage}%")
         
         # Obtener información de workspace
         jwt_claims = get_jwt()
@@ -3244,5 +3305,75 @@ def trigger_topic_progress(topic_id):
         return APIRoute.error(
             ErrorCodes.SERVER_ERROR,
             str(e),
+            status_code=500
+        )
+
+@virtual_bp.route('/module/<virtual_module_id>/progress', methods=['GET'])
+@APIRoute.standard(auth_required_flag=True)
+def get_module_progress(virtual_module_id):
+    """
+    Obtiene el progreso actual de un módulo virtual.
+    
+    Args:
+        virtual_module_id: ID del módulo virtual
+        
+    Returns:
+        JSON con información detallada del progreso del módulo
+    """
+    try:
+        from flask_jwt_extended import get_jwt_identity, get_jwt
+        from src.shared.middleware import get_current_workspace_info
+        
+        current_user_id = get_jwt_identity()
+        jwt_claims = get_jwt()
+        user_role = jwt_claims.get('role')
+        workspace_info = get_current_workspace_info()
+        
+        # Verificar permisos: estudiantes solo pueden ver su propio progreso,
+        # profesores y admins pueden ver el progreso de cualquier módulo
+        if user_role not in [ROLES["TEACHER"], ROLES["ADMIN"], ROLES["INSTITUTE_ADMIN"]]:
+            # Verificar que el módulo pertenece al estudiante actual
+            virtual_module = get_db().virtual_modules.find_one({
+                "_id": ObjectId(virtual_module_id),
+                "student_id": ObjectId(current_user_id)
+            })
+            if not virtual_module:
+                return APIRoute.error(
+                    ErrorCodes.PERMISSION_DENIED,
+                    "No tienes permisos para ver el progreso de este módulo",
+                    status_code=403
+                )
+        
+        # Obtener progreso del módulo
+        result = virtual_module_service.get_module_progress(virtual_module_id)
+        
+        if not result.get("success", False):
+            return APIRoute.error(
+                ErrorCodes.NOT_FOUND,
+                result.get("error", "Error desconocido"),
+                status_code=404 if "no encontrado" in result.get("error", "").lower() else 500
+            )
+        
+        # Verificar si debe disparar generación del siguiente módulo
+        should_trigger = result.get("should_trigger_next_module", False)
+        progress_percentage = result.get("progress_percentage", 0)
+        
+        if should_trigger and progress_percentage >= 80:
+            logging.info(f"Módulo {virtual_module_id} ha alcanzado {progress_percentage}% - elegible para trigger de siguiente módulo")
+            
+            # Aquí se podría agregar la lógica para disparar automáticamente
+            # la generación del siguiente módulo si se desea
+            # Por ahora solo lo registramos en los logs
+        
+        return APIRoute.success(
+            data=result,
+            message=f"Progreso del módulo obtenido: {progress_percentage}%"
+        )
+        
+    except Exception as e:
+        logging.error(f"Error obteniendo progreso del módulo {virtual_module_id}: {str(e)}")
+        return APIRoute.error(
+            ErrorCodes.SERVER_ERROR,
+            "Error interno del servidor",
             status_code=500
         )

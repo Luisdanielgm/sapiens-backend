@@ -1,4 +1,4 @@
-from typing import Tuple, List, Dict, Optional
+from typing import Tuple, List, Dict, Optional, Any
 from bson import ObjectId
 from datetime import datetime, timedelta
 import logging
@@ -143,6 +143,203 @@ class VirtualModuleService(VerificationBaseService):
         except Exception as e:
             logging.error(f"Error al listar módulos virtuales: {str(e)}")
             return []
+
+    def get_module_progress(self, virtual_module_id: str) -> Dict[str, Any]:
+        """
+        Calcula y retorna el progreso actual de un módulo virtual.
+        
+        Args:
+            virtual_module_id: ID del módulo virtual
+            
+        Returns:
+            Dict con información de progreso del módulo
+        """
+        try:
+            # Obtener el módulo virtual
+            virtual_module = self.collection.find_one({"_id": ObjectId(virtual_module_id)})
+            if not virtual_module:
+                return {
+                    "success": False,
+                    "error": "Módulo virtual no encontrado"
+                }
+            
+            # Obtener todos los temas del módulo
+            all_topics = list(self.db.virtual_topics.find({
+                "virtual_module_id": ObjectId(virtual_module_id)
+            }))
+            
+            if not all_topics:
+                return {
+                    "success": True,
+                    "virtual_module_id": virtual_module_id,
+                    "progress_percentage": 0.0,
+                    "completion_status": "not_started",
+                    "total_topics": 0,
+                    "completed_topics": 0,
+                    "topics_breakdown": [],
+                    "should_trigger_next_module": False
+                }
+            
+            # Calcular métricas de progreso
+            total_progress = sum(topic.get("progress", 0) for topic in all_topics)
+            average_progress = round(total_progress / len(all_topics), 2)
+            
+            # Contar temas completados
+            completed_topics = len([t for t in all_topics if t.get("completion_status") == "completed"])
+            
+            # Determinar estado del módulo
+            if completed_topics == len(all_topics):
+                module_status = "completed"
+            elif completed_topics > 0:
+                module_status = "in_progress"
+            else:
+                module_status = "not_started"
+            
+            # Verificar si debe disparar generación del siguiente módulo (80% threshold)
+            should_trigger_next_module = average_progress >= 80.0
+            
+            # Preparar breakdown de temas
+            topics_breakdown = []
+            for topic in all_topics:
+                topics_breakdown.append({
+                    "topic_id": str(topic["_id"]),
+                    "original_topic_id": str(topic.get("topic_id", "")),
+                    "progress": topic.get("progress", 0),
+                    "completion_status": topic.get("completion_status", "not_started"),
+                    "locked": topic.get("locked", True)
+                })
+            
+            # Actualizar el progreso en la base de datos si ha cambiado
+            current_db_progress = virtual_module.get("progress", 0)
+            if abs(current_db_progress - average_progress) > 0.01:  # Solo actualizar si hay diferencia significativa
+                self.collection.update_one(
+                    {"_id": ObjectId(virtual_module_id)},
+                    {"$set": {
+                        "progress": average_progress,
+                        "completion_status": module_status,
+                        "updated_at": datetime.now()
+                    }}
+                )
+            
+            return {
+                "success": True,
+                "virtual_module_id": virtual_module_id,
+                "progress_percentage": average_progress,
+                "completion_status": module_status,
+                "total_topics": len(all_topics),
+                "completed_topics": completed_topics,
+                "topics_breakdown": topics_breakdown,
+                "should_trigger_next_module": should_trigger_next_module,
+                "last_updated": datetime.now().isoformat()
+            }
+            
+        except Exception as e:
+            logging.error(f"Error calculando progreso del módulo {virtual_module_id}: {str(e)}")
+            return {
+                "success": False,
+                "error": f"Error interno: {str(e)}"
+            }
+
+    def _update_module_progress_from_topic(self, virtual_topic: Dict):
+        """
+        Actualiza el progreso del módulo virtual cuando se completa un tema.
+        Dispara automáticamente la generación del siguiente módulo al alcanzar 80%.
+        """
+        try:
+            virtual_module_id = virtual_topic["virtual_module_id"]
+            
+            # Obtener todos los temas del módulo
+            all_topics = list(self.db.virtual_topics.find({
+                "virtual_module_id": virtual_module_id
+            }))
+            
+            if not all_topics:
+                return
+            
+            # Calcular progreso total del módulo
+            total_progress = sum(topic.get("progress", 0) for topic in all_topics)
+            average_progress = total_progress / len(all_topics)
+            
+            # Determinar estado del módulo
+            completed_topics = len([t for t in all_topics if t.get("completion_status") == "completed"])
+            
+            if completed_topics == len(all_topics):
+                module_status = "completed"
+            elif completed_topics > 0:
+                module_status = "in_progress"
+            else:
+                module_status = "not_started"
+            
+            # Actualizar módulo virtual
+            self.db.virtual_modules.update_one(
+                {"_id": virtual_module_id},
+                {"$set": {
+                    "progress": round(average_progress, 2),
+                    "completion_status": module_status,
+                    "updated_at": datetime.now()
+                }}
+            )
+            
+            logging.info(f"Progreso del módulo {virtual_module_id} actualizado: {average_progress}%")
+            
+            # Verificar si debe disparar generación del siguiente módulo (80% threshold)
+            if average_progress >= 80.0:
+                try:
+                    # Obtener información del módulo virtual
+                    virtual_module = self.db.virtual_modules.find_one({"_id": virtual_module_id})
+                    if virtual_module:
+                        student_id = str(virtual_module["student_id"])
+                        module_id = str(virtual_module["module_id"])
+                        
+                        logging.info(f"Triggering next module generation: progress {average_progress}% >= 80% for module {module_id}")
+                        
+                        # Importar y usar FastVirtualModuleGenerator para generar siguiente módulo
+                        from src.virtual.services import FastVirtualModuleGenerator
+                        fast_generator = FastVirtualModuleGenerator()
+                        
+                        # Obtener el plan de estudios
+                        original_module = self.db.modules.find_one({"_id": ObjectId(module_id)})
+                        if original_module:
+                            study_plan_id = original_module.get("study_plan_id")
+                            
+                            # Buscar siguiente módulo disponible
+                            all_plan_modules = list(self.db.modules.find({
+                                "study_plan_id": study_plan_id
+                            }).sort("created_at", 1))
+                            
+                            # Encontrar el módulo actual y el siguiente
+                            current_index = -1
+                            for i, mod in enumerate(all_plan_modules):
+                                if str(mod["_id"]) == module_id:
+                                    current_index = i
+                                    break
+                            
+                            if current_index != -1 and current_index + 1 < len(all_plan_modules):
+                                next_module = all_plan_modules[current_index + 1]
+                                
+                                # Verificar si el siguiente módulo ya fue generado
+                                existing_vm = self.db.virtual_modules.find_one({
+                                    "student_id": ObjectId(student_id),
+                                    "module_id": next_module["_id"]
+                                })
+                                
+                                if not existing_vm:
+                                    # Generar siguiente módulo en cola
+                                    fast_generator.generate_single_module(
+                                        student_id=student_id,
+                                        module=next_module
+                                    )
+                                    logging.info(f"Siguiente módulo {next_module['_id']} encolado para generación automática")
+                                else:
+                                    logging.info(f"Siguiente módulo {next_module['_id']} ya existe para estudiante {student_id}")
+                            else:
+                                logging.info("No hay más módulos disponibles en el plan de estudios")
+                        
+                except Exception as trigger_error:
+                    logging.error(f"Error disparando generación automática del siguiente módulo: {trigger_error}")
+            
+        except Exception as e:
+            logging.error(f"Error actualizando progreso del módulo: {str(e)}")
 
 class VirtualTopicService(VerificationBaseService):
     """
@@ -3790,16 +3987,46 @@ class ParallelContentGenerationService:
         }
 
 class AdaptiveLearningService:
-    """Actualiza el perfil cognitivo basándose en resultados de contenido."""
+    """
+    IMPLEMENTACIÓN TEMPORAL - FASE 1 RL (Reinforcement Learning)
+    
+    Este servicio implementa una versión simplificada de aprendizaje adaptativo
+    basado en análisis estadístico de resultados. Es una solución temporal hasta
+    la implementación completa de RL en la Fase 2B.
+    
+    LIMITACIONES ACTUALES:
+    - No utiliza algoritmos de RL avanzados
+    - Análisis basado en métricas estadísticas simples
+    - No considera contexto temporal profundo ni predicciones complejas
+    
+    TODO FASE 2B: Reemplazar con implementación completa de RL que incluya:
+    - Algoritmos Q-Learning o Policy Gradient
+    - Análisis de secuencias temporales
+    - Predicción de rendimiento futuro
+    - Optimización de rutas de aprendizaje personalizadas
+    
+    Actualiza el perfil cognitivo basándose en resultados de contenido.
+    """
 
     def __init__(self):
         self.db = get_db()
+        # Logging para indicar uso de implementación temporal
+        logging.info("Iniciando AdaptiveLearningService - FASE 1 RL (implementación temporal)")
 
     def update_profile_from_results(self, student_id: str) -> bool:
         """
-        Versión mejorada para Fase 2B - análisis más sofisticado de resultados.
-        Incluye análisis de tiempo, dificultad, y patrones de interacción.
+        TEMPORAL - Versión simplificada para Fase 1.
+        
+        Análisis estadístico básico de resultados para actualizar perfil cognitivo.
+        No utiliza algoritmos de RL avanzados.
+        
+        FASE 2B implementará:
+        - Análisis más sofisticado de resultados
+        - Análisis de tiempo, dificultad, y patrones de interacción
+        - Algoritmos de aprendizaje por refuerzo
         """
+        logging.debug(f"Actualizando perfil adaptativo (FASE 1 RL) para estudiante: {student_id}")
+        
         try:
             # Obtener resultados recientes (últimos 30 días para mejor relevancia)
             from datetime import timedelta
