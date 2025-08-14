@@ -9,6 +9,7 @@ from .template_services import TemplateService, TemplateInstanceService, Templat
 from .template_models import Template, TemplateInstance
 from src.shared.decorators import auth_required, role_required
 from src.shared.constants import ROLES
+from src.shared.utils import ensure_json_serializable
 
 template_bp = Blueprint('templates', __name__, url_prefix='/api/templates')
 
@@ -47,7 +48,7 @@ def create_template():
         
         return jsonify({
             "message": "Plantilla creada exitosamente",
-            "template": template.to_dict()
+            "template": ensure_json_serializable(template.to_dict())
         }), 201
         
     except ValueError as e:
@@ -95,7 +96,7 @@ def list_templates():
             templates = [t for t in templates if any(tag in t.subject_tags for tag in subject_tags)]
         
         # Convertir a dict para respuesta
-        templates_data = [template.to_dict() for template in templates]
+        templates_data = ensure_json_serializable([template.to_dict() for template in templates])
         
         return jsonify({
             "templates": templates_data,
@@ -118,7 +119,7 @@ def get_template(template_id):
         if not template:
             return jsonify({"error": "Plantilla no encontrada"}), 404
         
-        return jsonify({"template": template.to_dict()}), 200
+        return jsonify({"template": ensure_json_serializable(template.to_dict())}), 200
         
     except Exception as e:
         logging.error(f"Error getting template {template_id}: {str(e)}")
@@ -145,7 +146,7 @@ def update_template(template_id):
         
         return jsonify({
             "message": "Plantilla actualizada exitosamente",
-            "template": template.to_dict()
+            "template": ensure_json_serializable(template.to_dict())
         }), 200
         
     except ValueError as e:
@@ -179,7 +180,7 @@ def fork_template(template_id):
         
         return jsonify({
             "message": "Fork creado exitosamente",
-            "template": fork.to_dict()
+            "template": ensure_json_serializable(fork.to_dict())
         }), 201
         
     except ValueError as e:
@@ -228,7 +229,7 @@ def extract_markers(template_id):
         return jsonify({
             "message": "Marcadores extraídos exitosamente",
             "extraction_result": extraction_result,
-            "template": updated_template.to_dict()
+            "template": ensure_json_serializable(updated_template.to_dict())
         }), 200
         
     except Exception as e:
@@ -297,7 +298,7 @@ def create_instance():
         
         return jsonify({
             "message": "Instancia creada exitosamente",
-            "instance": instance.to_dict()
+            "instance": ensure_json_serializable(instance.to_dict())
         }), 201
         
     except ValueError as e:
@@ -318,7 +319,7 @@ def get_instance(instance_id):
         if not instance:
             return jsonify({"error": "Instancia no encontrada"}), 404
         
-        return jsonify({"instance": instance.to_dict()}), 200
+        return jsonify({"instance": ensure_json_serializable(instance.to_dict())}), 200
         
     except Exception as e:
         logging.error(f"Error getting template instance {instance_id}: {str(e)}")
@@ -333,7 +334,7 @@ def get_instances_by_topic(topic_id):
     try:
         instances = instance_service.get_instances_by_topic(topic_id)
         
-        instances_data = [instance.to_dict() for instance in instances]
+        instances_data = ensure_json_serializable([instance.to_dict() for instance in instances])
         
         return jsonify({
             "instances": instances_data,
@@ -364,7 +365,7 @@ def update_instance(instance_id):
         
         return jsonify({
             "message": "Instancia actualizada exitosamente",
-            "instance": instance.to_dict()
+            "instance": ensure_json_serializable(instance.to_dict())
         }), 200
         
     except ValueError as e:
@@ -385,7 +386,7 @@ def publish_instance(instance_id):
         
         return jsonify({
             "message": "Instancia publicada exitosamente",
-            "instance": instance.to_dict()
+            "instance": ensure_json_serializable(instance.to_dict())
         }), 200
         
     except ValueError as e:
