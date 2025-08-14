@@ -1117,7 +1117,8 @@ def generate_personalized_content(topic_id: str, virtual_topic_id: str, cognitiv
                 # Generar datos de personalización avanzados
                 personalization_data = fast_generator._generate_content_personalization(content, cognitive_profile)
                 
-                get_db().virtual_topic_contents.insert_one({
+                # Construir payload base del contenido virtual
+                virtual_content_payload = {
                     "virtual_topic_id": ObjectId(virtual_topic_id),
                     "content_id": content["_id"],
                     "student_id": ObjectId(student_id),
@@ -1138,7 +1139,15 @@ def generate_personalized_content(topic_id: str, virtual_topic_id: str, cognitiv
                     "status": "active",
                     "created_at": datetime.now(),
                     "updated_at": datetime.now()
-                })
+                }
+
+                # Propagar datos de plantilla si el contenido base es una plantilla HTML
+                if content.get("render_engine") == "html_template":
+                    virtual_content_payload["render_engine"] = "html_template"
+                    if content.get("instance_id"):
+                        virtual_content_payload["instance_id"] = content["instance_id"]
+
+                get_db().virtual_topic_contents.insert_one(virtual_content_payload)
                 
                 logging.debug(f"Contenido virtual creado: {content.get('content_type')} con personalización: {list(personalization_data.keys())}")
                 

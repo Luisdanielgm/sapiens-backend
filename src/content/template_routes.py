@@ -1,13 +1,14 @@
 import logging
 from flask import Blueprint, request, jsonify, current_app
-from flask_jwt_extended import jwt_required, get_jwt_identity, get_jwt
+from flask_jwt_extended import get_jwt_identity, get_jwt
 from bson import ObjectId
 from typing import Dict, Any
 import traceback
 
 from .template_services import TemplateService, TemplateInstanceService, TemplateMarkupExtractor
 from .template_models import Template, TemplateInstance
-from src.shared.decorators import workspace_type_required
+from src.shared.decorators import auth_required, role_required
+from src.shared.constants import ROLES
 
 template_bp = Blueprint('templates', __name__, url_prefix='/api/templates')
 
@@ -16,8 +17,8 @@ template_service = TemplateService()
 instance_service = TemplateInstanceService()
 
 @template_bp.route('', methods=['POST'])
-@jwt_required()
-@workspace_type_required(['TEACHER', 'INDIVIDUAL_TEACHER', 'ADMIN'])
+@auth_required
+@role_required([ROLES["TEACHER"], ROLES["ADMIN"]])
 def create_template():
     """
     Crear una nueva plantilla.
@@ -56,7 +57,7 @@ def create_template():
         return jsonify({"error": "Error interno del servidor"}), 500
 
 @template_bp.route('', methods=['GET'])
-@jwt_required()
+@auth_required
 def list_templates():
     """
     Listar plantillas con filtros.
@@ -106,7 +107,7 @@ def list_templates():
         return jsonify({"error": "Error interno del servidor"}), 500
 
 @template_bp.route('/<template_id>', methods=['GET'])
-@jwt_required()
+@auth_required
 def get_template(template_id):
     """
     Obtener una plantilla específica.
@@ -124,8 +125,8 @@ def get_template(template_id):
         return jsonify({"error": "Error interno del servidor"}), 500
 
 @template_bp.route('/<template_id>', methods=['PUT'])
-@jwt_required()
-@workspace_type_required(['TEACHER', 'INDIVIDUAL_TEACHER', 'ADMIN'])
+@auth_required
+@role_required([ROLES["TEACHER"], ROLES["ADMIN"]])
 def update_template(template_id):
     """
     Actualizar una plantilla existente.
@@ -156,8 +157,8 @@ def update_template(template_id):
         return jsonify({"error": "Error interno del servidor"}), 500
 
 @template_bp.route('/<template_id>/fork', methods=['POST'])
-@jwt_required()
-@workspace_type_required(['TEACHER', 'INDIVIDUAL_TEACHER', 'ADMIN'])
+@auth_required
+@role_required([ROLES["TEACHER"], ROLES["ADMIN"]])
 def fork_template(template_id):
     """
     Crear un fork (copia) de una plantilla.
@@ -190,8 +191,8 @@ def fork_template(template_id):
         return jsonify({"error": "Error interno del servidor"}), 500
 
 @template_bp.route('/<template_id>/extract', methods=['POST'])
-@jwt_required()
-@workspace_type_required(['TEACHER', 'INDIVIDUAL_TEACHER', 'ADMIN'])
+@auth_required
+@role_required([ROLES["TEACHER"], ROLES["ADMIN"]])
 def extract_markers(template_id):
     """
     Extraer marcadores de personalización del HTML de una plantilla.
@@ -235,8 +236,8 @@ def extract_markers(template_id):
         return jsonify({"error": "Error interno del servidor"}), 500
 
 @template_bp.route('/<template_id>', methods=['DELETE'])
-@jwt_required()
-@workspace_type_required(['TEACHER', 'INDIVIDUAL_TEACHER', 'ADMIN'])
+@auth_required
+@role_required([ROLES["TEACHER"], ROLES["ADMIN"]])
 def delete_template(template_id):
     """
     Eliminar una plantilla.
@@ -264,8 +265,8 @@ def delete_template(template_id):
 instance_bp = Blueprint('template_instances', __name__, url_prefix='/api/template-instances')
 
 @instance_bp.route('', methods=['POST'])
-@jwt_required()
-@workspace_type_required(['TEACHER', 'INDIVIDUAL_TEACHER', 'ADMIN'])
+@auth_required
+@role_required([ROLES["TEACHER"], ROLES["ADMIN"]])
 def create_instance():
     """
     Crear una nueva instancia de plantilla.
@@ -306,7 +307,7 @@ def create_instance():
         return jsonify({"error": "Error interno del servidor"}), 500
 
 @instance_bp.route('/<instance_id>', methods=['GET'])
-@jwt_required()
+@auth_required
 def get_instance(instance_id):
     """
     Obtener una instancia específica.
@@ -324,7 +325,7 @@ def get_instance(instance_id):
         return jsonify({"error": "Error interno del servidor"}), 500
 
 @instance_bp.route('/topic/<topic_id>', methods=['GET'])
-@jwt_required()
+@auth_required
 def get_instances_by_topic(topic_id):
     """
     Obtener todas las instancias de un tema.
@@ -344,8 +345,8 @@ def get_instances_by_topic(topic_id):
         return jsonify({"error": "Error interno del servidor"}), 500
 
 @instance_bp.route('/<instance_id>', methods=['PUT'])
-@jwt_required()
-@workspace_type_required(['TEACHER', 'INDIVIDUAL_TEACHER', 'ADMIN'])
+@auth_required
+@role_required([ROLES["TEACHER"], ROLES["ADMIN"]])
 def update_instance(instance_id):
     """
     Actualizar una instancia de plantilla.
@@ -373,8 +374,8 @@ def update_instance(instance_id):
         return jsonify({"error": "Error interno del servidor"}), 500
 
 @instance_bp.route('/<instance_id>/publish', methods=['POST'])
-@jwt_required()
-@workspace_type_required(['TEACHER', 'INDIVIDUAL_TEACHER', 'ADMIN'])
+@auth_required
+@role_required([ROLES["TEACHER"], ROLES["ADMIN"]])
 def publish_instance(instance_id):
     """
     Marcar una instancia como publicada/activa.
@@ -394,8 +395,8 @@ def publish_instance(instance_id):
         return jsonify({"error": "Error interno del servidor"}), 500
 
 @instance_bp.route('/<instance_id>', methods=['DELETE'])
-@jwt_required()
-@workspace_type_required(['TEACHER', 'INDIVIDUAL_TEACHER', 'ADMIN'])
+@auth_required
+@role_required([ROLES["TEACHER"], ROLES["ADMIN"]])
 def delete_instance(instance_id):
     """
     Eliminar una instancia de plantilla.

@@ -11,11 +11,8 @@ from .services import (
 )
 from src.shared.standardization import APIBlueprint, APIRoute, ErrorCodes
 from src.shared.decorators import (
-    auth_required, 
-    role_required, 
-    handle_errors, 
-    workspace_type_required,
-    workspace_access_required
+    auth_required,
+    role_required
 )
 from src.shared.constants import ROLES
 from src.shared.utils import ensure_json_serializable
@@ -185,14 +182,18 @@ def get_institute_dashboard(institute_id):
 # Nuevos endpoints específicos para workspaces individuales
 
 @dashboards_bp.route('/individual/student', methods=['GET'])
-@auth_required
-@role_required([ROLES["STUDENT"]])
-@workspace_type_required(['INDIVIDUAL_STUDENT'])
+@APIRoute.standard(auth_required_flag=True, roles=[ROLES["STUDENT"]])
 @apply_workspace_filter('classes')
 def get_individual_student_dashboard():
     """Obtiene el dashboard personalizado para un estudiante en workspace individual"""
     try:
         workspace_info = get_current_workspace_info()
+        if workspace_info.get('workspace_type') != 'INDIVIDUAL_STUDENT':
+            return APIRoute.error(
+                ErrorCodes.FORBIDDEN,
+                "Esta ruta solo aplica a workspace individual de estudiante",
+                status_code=403
+            )
         student_id = request.user_id
         period_id = request.args.get('period_id')
         
@@ -217,14 +218,18 @@ def get_individual_student_dashboard():
         )
 
 @dashboards_bp.route('/individual/teacher', methods=['GET'])
-@auth_required
-@role_required([ROLES["TEACHER"]])
-@workspace_type_required(['INDIVIDUAL_TEACHER'])
+@APIRoute.standard(auth_required_flag=True, roles=[ROLES["TEACHER"]])
 @apply_workspace_filter('classes')
 def get_individual_teacher_dashboard():
     """Obtiene el dashboard personalizado para un profesor en workspace individual"""
     try:
         workspace_info = get_current_workspace_info()
+        if workspace_info.get('workspace_type') != 'INDIVIDUAL_TEACHER':
+            return APIRoute.error(
+                ErrorCodes.FORBIDDEN,
+                "Esta ruta solo aplica a workspace individual de profesor",
+                status_code=403
+            )
         teacher_id = request.user_id
         
         dashboard = teacher_dashboard_service.generate_individual_teacher_dashboard(

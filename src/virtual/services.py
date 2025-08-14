@@ -1283,6 +1283,12 @@ class FastVirtualModuleGenerator(VerificationBaseService):
                             "updated_at": datetime.now()
                         }
                         
+                        # Propagar render_engine e instance_id si el contenido original es una plantilla HTML
+                        if content.get("render_engine") == "html_template":
+                            virtual_content_data["render_engine"] = "html_template"
+                            if content.get("instance_id"):
+                                virtual_content_data["instance_id"] = content["instance_id"]
+
                         # Insertar contenido virtual
                         result = self.db.virtual_topic_contents.insert_one(virtual_content_data)
                         virtual_content_id = str(result.inserted_id)
@@ -1532,6 +1538,12 @@ class FastVirtualModuleGenerator(VerificationBaseService):
                 "created_at": datetime.now(),
                 "updated_at": datetime.now()
             }
+
+            # Propagar render_engine e instance_id si el contenido original es una plantilla HTML
+            if content.get("render_engine") == "html_template":
+                virtual_content_data["render_engine"] = "html_template"
+                if content.get("instance_id"):
+                    virtual_content_data["instance_id"] = content["instance_id"]
             
             # Insertar contenido virtual
             result = self.db.virtual_topic_contents.insert_one(virtual_content_data)

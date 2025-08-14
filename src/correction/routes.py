@@ -1,11 +1,11 @@
 from flask import request, g
-from flask_jwt_extended import jwt_required, get_jwt_identity
+from flask_jwt_extended import get_jwt_identity
 from bson import ObjectId
 import logging
 from datetime import datetime
 
 from src.shared.standardization import APIBlueprint, APIRoute, ErrorCodes
-from src.shared.decorators import role_required
+from src.shared.decorators import auth_required, role_required
 from src.shared.constants import ROLES
 from .services import CorrectionService
 
@@ -13,7 +13,7 @@ correction_bp = APIBlueprint('correction', __name__)
 correction_service = CorrectionService()
 
 @correction_bp.route('/start', methods=['POST'])
-@jwt_required()
+@auth_required
 @role_required(ROLES["TEACHER"])
 def start_correction():
     """
@@ -55,7 +55,7 @@ def start_correction():
         return APIRoute.error(ErrorCodes.SERVER_ERROR, "Error interno del servidor.")
 
 @correction_bp.route('/task/<task_id>', methods=['GET'])
-@jwt_required()
+@auth_required
 def get_correction_task_status(task_id):
     """
     Consulta el estado y resultado de una tarea de corrección.
@@ -80,7 +80,7 @@ def get_correction_task_status(task_id):
         return APIRoute.error(ErrorCodes.SERVER_ERROR, "Error interno del servidor.")
 
 @correction_bp.route('/task/<task_id>', methods=['PUT'])
-@jwt_required()
+@auth_required
 def update_correction_task(task_id):
     """
     Permite al frontend (o a un worker) actualizar el estado y los datos de una tarea.
@@ -120,7 +120,7 @@ def update_correction_task(task_id):
         return APIRoute.error(ErrorCodes.SERVER_ERROR, "Error interno del servidor.")
 
 @correction_bp.route('/process-next', methods=['POST'])
-@jwt_required()
+@auth_required
 @role_required(ROLES["ADMIN"])  # Solo administradores pueden llamar a este endpoint
 def process_next_correction_task():
     """
