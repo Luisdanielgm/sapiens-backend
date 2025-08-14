@@ -325,7 +325,12 @@ def workspace_access_required(f):
             }), 401
         
         user_id = request.user_id
-        workspace_id = kwargs.get('workspace_id')
+        # Permitir obtener workspace_id desde múltiples fuentes para rutas que no lo llevan en la URL
+        workspace_id = (
+            kwargs.get('workspace_id')
+            or getattr(request, 'workspace_id', None)
+            or request.args.get('workspace_id')
+        )
         
         if not workspace_id:
             return jsonify({
