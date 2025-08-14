@@ -74,6 +74,10 @@ def auth_required(f):
             request.workspace_id = claims.get("workspace_id")
             request.institute_id = claims.get("institute_id")
             request.workspace_role = claims.get("role")  # Rol específico del workspace
+            # Propagar también tipo y class_id del workspace para estandarización
+            request.workspace_type = claims.get("workspace_type")
+            if "class_id" in claims:
+                request.class_id = claims.get("class_id")
             
             user_main_role = user.get("role")
             request.user_roles = [user_main_role] if user_main_role else []

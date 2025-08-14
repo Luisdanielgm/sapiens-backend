@@ -1,7 +1,7 @@
 from typing import Optional, Dict, List
 from bson import ObjectId
 from datetime import datetime
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ConfigDict
 
 class AIApiCall:
     """
@@ -224,8 +224,8 @@ class AICall(BaseModel):
     origin: Optional[str] = Field(None, description="The specific origin of the call (e.g., 'CognitiveProfileEnrichment')")
     user_type: Optional[str] = Field(None, description="Type of user (e.g., 'student', 'teacher', 'admin')")
     
-    class Config:
-        schema_extra = {
+    model_config = ConfigDict(
+        json_schema_extra={
             "example": {
                 "call_id": "1234567890",
                 "timestamp": "2024-04-15T12:00:00",
@@ -248,6 +248,7 @@ class AICall(BaseModel):
                 "user_type": "student"
             }
         }
+    )
 
 class AICallUpdate(BaseModel):
     completion_tokens: Optional[int] = None
@@ -259,8 +260,8 @@ class AICallUpdate(BaseModel):
     success: Optional[bool] = None
     error_message: Optional[str] = None
     
-    class Config:
-        schema_extra = {
+    model_config = ConfigDict(
+        json_schema_extra={
             "example": {
                 "completion_tokens": 50,
                 "total_tokens": 150,
@@ -269,6 +270,7 @@ class AICallUpdate(BaseModel):
                 "error_message": None
             }
         }
+    )
 
 class AICallCreate(BaseModel):
     call_id: str
@@ -283,8 +285,8 @@ class AICallCreate(BaseModel):
     endpoint: Optional[str] = None
     success: Optional[bool] = None
 
-    class Config:
-        schema_extra = {
+    model_config = ConfigDict(
+        json_schema_extra={
             "example": {
                 "call_id": "1234567890",
                 "provider": "gemini",
@@ -296,6 +298,7 @@ class AICallCreate(BaseModel):
                 "user_type": "student"
             }
         }
+    )
 
 class AIStat(BaseModel):
     total_calls: int
@@ -326,8 +329,8 @@ class AIConfig(BaseModel):
     admins: List[str]
     default_provider: str
     
-    class Config:
-        schema_extra = {
+    model_config = ConfigDict(
+        json_schema_extra={
             "example": {
                 "daily_budget": 50.0,
                 "weekly_budget": 300.0,
@@ -338,4 +341,5 @@ class AIConfig(BaseModel):
                 "admins": ["admin@sapiens.com"],
                 "default_provider": "gemini"
             }
-        } 
+        }
+    )

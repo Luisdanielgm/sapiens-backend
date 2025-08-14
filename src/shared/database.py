@@ -109,10 +109,12 @@ def setup_database_indexes():
         
         # Índices de miembros del instituto
         # Primero eliminar el índice existente si existe
-        try:
-            db.institute_members.drop_index("institute_id_1_user_id_1")
-        except Exception as e:
-            logger.warning(f"No se pudo eliminar el índice existente: {str(e)}")
+        existing_indexes = db.institute_members.index_information()
+        if "institute_id_1_user_id_1" in existing_indexes:
+            try:
+                db.institute_members.drop_index("institute_id_1_user_id_1")
+            except Exception as e:
+                logger.warning(f"No se pudo eliminar el índice existente: {str(e)}")
             
         # Crear el nuevo índice con unique=True incluyendo workspace_type
         db.institute_members.create_index([
