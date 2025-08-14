@@ -141,7 +141,7 @@ def update_template(template_id):
         if not data:
             return jsonify({"error": "No data provided"}), 400
         
-        # Actualizar plantilla
+        # Si llega 'html' se creará una nueva versión automáticamente en el servicio
         template = template_service.update_template(template_id, data, user_id)
         
         return jsonify({
@@ -211,7 +211,7 @@ def extract_markers(template_id):
             return jsonify({"error": "No tienes permisos para editar esta plantilla"}), 403
         
         # Extraer marcadores
-        extraction_result = TemplateMarkupExtractor.extract_markers(template.html)
+        extraction_result = TemplateMarkupExtractor.extract_markers(template.get_latest_html())
         
         # Actualizar plantilla con el schema extraído
         update_data = {
@@ -433,7 +433,7 @@ def preview_template(template_id):
         # TODO: Aplicar Content Security Policy para sandbox
         # TODO: Envolver en iframe seguro si es necesario
         
-        return template.html, 200, {
+        return template.get_latest_html(), 200, {
             'Content-Type': 'text/html',
             'Content-Security-Policy': "sandbox allow-scripts allow-same-origin",
             'X-Frame-Options': 'SAMEORIGIN'
@@ -461,7 +461,7 @@ def preview_instance(instance_id):
             return "<html><body><h1>Plantilla base no encontrada</h1></body></html>", 404
         
         # Aplicar props a la plantilla
-        processed_html = _apply_props_to_template(template.html, instance.props)
+        processed_html = _apply_props_to_template(template.get_latest_html(), instance.props)
         
         return processed_html, 200, {
             'Content-Type': 'text/html',

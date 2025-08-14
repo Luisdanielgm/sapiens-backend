@@ -18,7 +18,7 @@ class Template:
                  scope: str = "private",  # private, org, public
                  status: str = "draft",   # draft, usable, certified
                  fork_of: Optional[str] = None,
-                 props_schema: Optional[Dict] = None,
+                  props_schema: Optional[Dict] = None,
                  defaults: Optional[Dict] = None,
                  baseline_mix: Optional[Dict] = None,  # Mix VARK base: {V:60,A:10,K:20,R:10}
                  capabilities: Optional[Dict] = None,  # {audio: bool, microphone: bool, camera: bool, etc.}
@@ -28,12 +28,13 @@ class Template:
                  _id: Optional[ObjectId] = None,
                  created_at: Optional[datetime] = None,
                  updated_at: Optional[datetime] = None,
-                 **kwargs):
+                  versions: Optional[List[Dict]] = None,
+                  **kwargs):
         self._id = _id or ObjectId()
         self.name = name
         self.owner_id = ObjectId(owner_id)
-        self.html = html
         self.engine = engine
+        # version principal refleja la última versión disponible
         self.version = version
         self.scope = scope
         self.status = status
@@ -55,6 +56,37 @@ class Template:
             "extraction_version": None
         }
         
+        # Manejo de versiones: lista de {version_number:int, html:str, status:str, created_at:datetime}
+        # Compatibilidad: si no vienen versiones pero viene html, crear la v1
+        if versions and isinstance(versions, list) and len(versions) > 0:
+            # Normalizar posibles ObjectId/fechas en versiones si vinieran como dicts crudos
+            self.versions = []
+            for v in versions:
+                self.versions.append({
+                    "version_number": v.get("version_number") or v.get("version") or v.get("number") or 1,
+                    "html": v.get("html", ""),
+                    "status": v.get("status", "draft"),
+                    "created_at": v.get("created_at") or datetime.now()
+                })
+        else:
+            initial_html = html or ""
+            self.versions = [{
+                "version_number": 1,
+                "html": initial_html,
+                "status": "draft" if self.status == "draft" else "approved",
+                "created_at": self.created_at
+            }]
+        
+        # Para compatibilidad, exponer self.html como la última versión
+        self.html = self.get_latest_html()
+        # Ajustar version principal al último número si no se pasó explícitamente
+        try:
+            last_number = self.versions[-1]["version_number"]
+            # Si el campo version es tipo str, actualizarlo a str(last_number)
+            self.version = str(last_number)
+        except Exception:
+            pass
+
         if kwargs:
             logging.warning(f"Template received unexpected arguments, which were ignored: {list(kwargs.keys())}")
 
@@ -63,7 +95,8 @@ class Template:
             "_id": self._id,
             "name": self.name,
             "owner_id": self.owner_id,
-            "html": self.html,
+            # Compatibilidad: mantener html plano como la última versión
+            "html": self.get_latest_html(),
             "engine": self.engine,
             "version": self.version,
             "scope": self.scope,
@@ -77,11 +110,25 @@ class Template:
             "description": self.description,
             "created_at": self.created_at,
             "updated_at": self.updated_at,
-            "personalization": self.personalization
+            "personalization": self.personalization,
+            # Nueva estructura
+            "versions": self.versions
         }
         if self.fork_of:
             data["fork_of"] = self.fork_of
         return data
+
+    def get_latest_html(self) -> str:
+        try:
+            return self.versions[-1]["html"] if self.versions else ""
+        except Exception:
+            return ""
+
+    def get_latest_version_number(self) -> int:
+        try:
+            return int(self.versions[-1]["version_number"]) if self.versions else 1
+        except Exception:
+            return 1
 
     def update_extraction_info(self):
         """Actualiza la información de extracción de marcadores"""

@@ -29,11 +29,12 @@ class TemplateService:
             if not template_data.get("name"):
                 raise ValueError("El nombre de la plantilla es requerido")
             
-            # Crear plantilla con datos por defecto
+            # Crear plantilla con datos por defecto (soporte de versiones)
             template = Template(
                 name=template_data["name"],
                 owner_id=user_id,
                 html=template_data.get("html", ""),
+                versions=template_data.get("versions"),
                 description=template_data.get("description", ""),
                 scope=template_data.get("scope", "private"),
                 style_tags=template_data.get("style_tags", []),
@@ -132,22 +133,51 @@ class TemplateService:
             if str(template.owner_id) != user_id:
                 raise PermissionError("No tienes permisos para editar esta plantilla")
             
-            # Campos actualizables
-            allowed_fields = [
-                "name", "html", "description", "scope", "status", 
-                "style_tags", "subject_tags", "baseline_mix", "capabilities",
-                "props_schema", "defaults", "personalization"
-            ]
-            
+            # Si viene html, crear una nueva versión y actualizar campos derivados
             update_dict = {"updated_at": datetime.now()}
-            for field in allowed_fields:
-                if field in update_data:
-                    update_dict[field] = update_data[field]
+            if "html" in update_data and isinstance(update_data["html"], str):
+                # agregar nueva versión al array versions
+                latest_version_number = template.get_latest_version_number()
+                new_version_number = latest_version_number + 1
+                new_version = {
+                    "version_number": new_version_number,
+                    "html": update_data["html"],
+                    "status": update_data.get("version_status", template.status),
+                    "created_at": datetime.now()
+                }
+                update_dict.setdefault("$push", {})
+                update_dict["$push"]["versions"] = new_version
+                # sincronizar ‘html’ plano y ‘version’ principal para compatibilidad
+                update_dict.setdefault("$set", {})
+                update_dict["$set"].update({
+                    "html": update_data["html"],
+                    "version": str(new_version_number)
+                })
+                # permitir actualizar status/description/etc. en el mismo request
+                scalar_fields = [
+                    "name", "description", "scope", "status",
+                    "style_tags", "subject_tags", "baseline_mix", "capabilities",
+                    "props_schema", "defaults", "personalization"
+                ]
+                for field in scalar_fields:
+                    if field in update_data:
+                        update_dict["$set"][field] = update_data[field]
+            else:
+                # actualización normal de campos (sin nueva versión)
+                scalar_fields = [
+                    "name", "description", "scope", "status",
+                    "style_tags", "subject_tags", "baseline_mix", "capabilities",
+                    "props_schema", "defaults", "personalization"
+                ]
+                update_dict = {"$set": {"updated_at": datetime.now()}}
+                for field in scalar_fields:
+                    if field in update_data:
+                        update_dict["$set"][field] = update_data[field]
             
             # Actualizar en base de datos
             result = self.templates_collection.update_one(
                 {"_id": ObjectId(template_id)},
-                {"$set": update_dict}
+                update_dict
             )
             
             if result.modified_count == 0:
@@ -180,7 +210,8 @@ class TemplateService:
             fork_template = Template(
                 name=fork_name,
                 owner_id=user_id,
-                html=original.html,
+                html=original.get_latest_html(),
+                versions=original.versions,
                 description=f"Fork de: {original.name}",
                 fork_of=str(original._id),
                 props_schema=original.props_schema.copy(),
