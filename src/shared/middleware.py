@@ -90,7 +90,7 @@ def apply_workspace_filter(collection_name, custom_filter=None):
     Decorador para aplicar automáticamente filtros de workspace a consultas de base de datos
     
     Args:
-        collection_name: Nombre de la colección (ej: 'classes', 'content', 'study_plans')
+        collection_name: Nombre de la colección (ej: 'classes', 'content', 'study_plans_per_subject')
         custom_filter: Filtro personalizado adicional (opcional)
     """
     def decorator(f):
@@ -133,7 +133,7 @@ def get_workspace_filter(collection_name='default'):
     filter_mapping = {
         'classes': 'class_filter',
         'content': 'content_filter',
-        'study_plans': 'study_plan_filter',
+        'study_plans_per_subject': 'study_plan_filter',
         'analytics': 'analytics_filter',
         'progress': 'progress_filter',
         'personal': 'personal_filter'

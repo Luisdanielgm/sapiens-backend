@@ -430,7 +430,7 @@ def list_workspace_study_plans(workspace_id):
     try:
         user_id = get_jwt_identity()
         plans = study_plan_service.list_personal_study_plans_by_workspace(workspace_id, user_id)
-        return APIRoute.success(data={"study_plans": plans, "total_count": len(plans)})
+        return APIRoute.success(data={"study_plans_per_subject": plans, "total_count": len(plans)})
     except Exception as e:
         log_error(f"Error listing workspace study plans: {str(e)}", e, "workspaces.routes")
         return APIRoute.error(ErrorCodes.SERVER_ERROR, "No se pudieron listar los planes del workspace")

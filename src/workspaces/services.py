@@ -319,7 +319,7 @@ class WorkspaceService:
                 })
             
             return {
-                "study_plans": formatted_plans,
+                "study_plans_per_subject": formatted_plans,
                 "total_count": len(formatted_plans),
                 "workspace_type": "INDIVIDUAL_STUDENT"
             }
@@ -585,7 +585,7 @@ class WorkspaceService:
             )
             
             return {
-                "study_plans": study_plans,
+                "study_plans_per_subject": study_plans,
                 "total_count": len(study_plans)
             }
             

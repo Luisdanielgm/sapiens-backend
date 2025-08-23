@@ -73,7 +73,7 @@ def create_study_plan():
 
 @study_plan_bp.route('/', methods=['GET'])
 @auth_required
-@apply_workspace_filter('study_plans')
+@apply_workspace_filter('study_plans_per_subject')
 def list_study_plans():
     """
     Lista todos los planes de estudio, con filtros opcionales por workspace.
@@ -91,7 +91,12 @@ def list_study_plans():
         # En workspaces individuales, restringir acceso a planes propios
         if workspace_type in ['INDIVIDUAL_TEACHER', 'INDIVIDUAL_STUDENT']:
             # Solo permitir ver planes del usuario actual
-            email = request.user_email
+            # Obtener email del usuario desde la base de datos usando user_id
+            from bson import ObjectId
+            from src.shared.database import get_db
+            db = get_db()
+            user = db.users.find_one({'_id': ObjectId(request.user_id)})
+            email = user['email'] if user else None
         
         study_plans = study_plan_service.list_study_plans(
             email=email, 
@@ -109,7 +114,7 @@ def list_study_plans():
 
 @study_plan_bp.route('/<plan_id>', methods=['GET'])
 @auth_required
-@apply_workspace_filter('study_plans')
+@apply_workspace_filter('study_plans_per_subject')
 def get_study_plan(plan_id):
     """Obtiene un plan de estudios con sus módulos, temas y evaluaciones"""
     workspace_info = get_current_workspace_info()
