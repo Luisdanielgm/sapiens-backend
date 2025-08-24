@@ -144,23 +144,27 @@ class StudyPlanService(VerificationBaseService):
                         "institute_id inválido en list_study_plans: %s", institute_id
                     )
             
-            # Aplicar filtrado por workspace si se proporciona
+            # Aplicar filtrado por workspace solo si workspace_id no es None
             if workspace_info:
                 workspace_type = workspace_info.get('workspace_type')
                 workspace_id = workspace_info.get('workspace_id')
                 
-                if workspace_type == 'INDIVIDUAL_TEACHER':
-                    # En workspaces individuales de profesor, filtrar por workspace_id
-                    query["workspace_id"] = ObjectId(workspace_id)
-                elif workspace_type == 'INSTITUTE':
-                    # En workspaces institucionales, filtrar por institute_id
-                    institute_id = workspace_info.get('institute_id')
-                    if institute_id:
-                        query["institute_id"] = ObjectId(institute_id)
-                elif workspace_type == 'INDIVIDUAL_STUDENT':
-                    # En workspace individual de estudiante: planes personales del usuario
-                    query["workspace_id"] = ObjectId(workspace_id)
-                    query["is_personal"] = True
+                # Solo aplicar filtros de workspace si workspace_id es válido
+                if workspace_id:  # CORRECCIÓN: Verificar que workspace_id no sea None
+                    if workspace_type == 'INDIVIDUAL_TEACHER':
+                        # En workspaces individuales de profesor, filtrar por workspace_id
+                        query["workspace_id"] = ObjectId(workspace_id)
+                    elif workspace_type == 'INSTITUTE':
+                        # En workspaces institucionales, filtrar por institute_id
+                        institute_id = workspace_info.get('institute_id')
+                        if institute_id:
+                            query["institute_id"] = ObjectId(institute_id)
+                    elif workspace_type == 'INDIVIDUAL_STUDENT':
+                        # En workspace individual de estudiante: planes personales del usuario
+                        query["workspace_id"] = ObjectId(workspace_id)
+                        query["is_personal"] = True
+                # Si workspace_id es None, no aplicar filtros de workspace
+                # Esto permite que usuarios sin workspace asignado vean sus planes
 
             plans = list(self.collection.find(query))
 
