@@ -152,6 +152,58 @@ def login():
 # --- (El resto de los endpoints del archivo, que ya están correctos) ---
 # ... (get_user_profile, check, search, etc.) ...
 
+@users_bp.route('/check', methods=['POST'])
+@APIRoute.standard(required_fields=['email'])
+def check_user():
+    """Checks if a user with the provided email exists."""
+    try:
+        data = request.get_json() or {}
+        exists = user_service.verify_user_exists(data['email'])
+        return APIRoute.success(data={"exists": exists})
+    except Exception as e:
+        log_error(f"Error verificando usuario: {str(e)}", e, "users.routes")
+        return APIRoute.error(ErrorCodes.SERVER_ERROR, "Error interno al verificar el usuario")
+
+
+@users_bp.route('/profile/cognitive', methods=['GET'])
+@APIRoute.standard(auth_required_flag=True)
+def get_my_cognitive_profile():
+    """Returns the cognitive profile for the current user."""
+    try:
+        user_id = request.args.get('user_id') or get_jwt_identity()
+        profile = profile_service.get_cognitive_profile(user_id)
+        if profile:
+            return APIRoute.success(data={"profile": profile})
+        return APIRoute.error(
+            ErrorCodes.RESOURCE_NOT_FOUND,
+            "Cognitive profile not found",
+            status_code=404,
+        )
+    except Exception as e:
+        log_error(f"Error obteniendo perfil cognitivo: {str(e)}", e, "users.routes")
+        return APIRoute.error(ErrorCodes.SERVER_ERROR, "Error interno al obtener el perfil cognitivo")
+
+
+@users_bp.route('/profile/cognitive', methods=['PUT'])
+@APIRoute.standard(auth_required_flag=True, required_fields=['profile_data'])
+def update_my_cognitive_profile():
+    """Updates the cognitive profile for the current user."""
+    try:
+        data = request.get_json() or {}
+        user_id = get_jwt_identity()
+        profile_data = data.get('profile_data', {})
+        success = profile_service.update_cognitive_profile(user_id, profile_data)
+        if success:
+            return APIRoute.success(message="Cognitive profile updated")
+        return APIRoute.error(
+            ErrorCodes.UPDATE_ERROR,
+            "Unable to update cognitive profile",
+            status_code=400,
+        )
+    except Exception as e:
+        log_error(f"Error actualizando perfil cognitivo: {str(e)}", e, "users.routes")
+        return APIRoute.error(ErrorCodes.SERVER_ERROR, "Error interno al actualizar el perfil cognitivo")
+
 @users_bp.route('/my-institutes', methods=['GET'])
 @APIRoute.standard(auth_required_flag=True)
 def get_my_institutes():
