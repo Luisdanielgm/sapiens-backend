@@ -62,12 +62,52 @@ class TemplateService:
             template_data = self.templates_collection.find_one({"_id": ObjectId(template_id)})
             if not template_data:
                 return None
-            
-            return Template(**template_data)
-            
+
+            # Limpiar datos para evitar problemas de compatibilidad
+            cleaned_data = self._clean_template_data(template_data)
+            return Template(**cleaned_data)
+
         except Exception as e:
             logging.error(f"Error getting template {template_id}: {str(e)}")
             raise e
+
+    def _clean_template_data(self, template_data: Dict) -> Dict:
+        """
+        Limpia y valida los datos de la plantilla para evitar errores de construcción.
+        """
+        try:
+            cleaned = {}
+
+            # Campos requeridos
+            cleaned['name'] = template_data.get('name', 'Sin nombre')
+            cleaned['owner_id'] = str(template_data.get('owner_id', ''))
+
+            # Campos opcionales con valores por defecto
+            cleaned['html'] = template_data.get('html', '')
+            cleaned['engine'] = template_data.get('engine', 'html')
+            cleaned['version'] = template_data.get('version', '1.0.0')
+            cleaned['scope'] = template_data.get('scope', 'private')
+            cleaned['status'] = template_data.get('status', 'draft')
+            cleaned['description'] = template_data.get('description', '')
+            cleaned['fork_of'] = template_data.get('fork_of')
+            cleaned['props_schema'] = template_data.get('props_schema', {})
+            cleaned['defaults'] = template_data.get('defaults', {})
+            cleaned['baseline_mix'] = template_data.get('baseline_mix', {"V": 25, "A": 25, "K": 25, "R": 25})
+            cleaned['capabilities'] = template_data.get('capabilities', {})
+            cleaned['style_tags'] = template_data.get('style_tags', [])
+            cleaned['subject_tags'] = template_data.get('subject_tags', [])
+            cleaned['versions'] = template_data.get('versions', [])
+
+            # Campos de fecha
+            cleaned['_id'] = template_data.get('_id')
+            cleaned['created_at'] = template_data.get('created_at')
+            cleaned['updated_at'] = template_data.get('updated_at')
+
+            return cleaned
+
+        except Exception as e:
+            logging.error(f"Error limpiando datos de plantilla: {str(e)}")
+            raise ValueError(f"Error procesando datos de plantilla: {str(e)}")
     
     def list_templates(self, 
                       owner_filter: str = "all", 
@@ -129,9 +169,26 @@ class TemplateService:
             template = self.get_template(template_id)
             if not template:
                 raise ValueError("Plantilla no encontrada")
-            
+
             if str(template.owner_id) != user_id:
                 raise PermissionError("No tienes permisos para editar esta plantilla")
+
+            # Validar y sanitizar datos de entrada
+            if "html" in update_data:
+                html_content = update_data["html"]
+                if not isinstance(html_content, str):
+                    raise ValueError("El campo 'html' debe ser una cadena de texto")
+
+                # Verificar que el HTML tenga contenido significativo
+                if len(html_content.strip()) < 10:
+                    raise ValueError("El contenido HTML debe tener al menos 10 caracteres de contenido significativo")
+
+                # Limitar tamaño del HTML (máximo 1MB)
+                if len(html_content) > 1024 * 1024:
+                    raise ValueError("El contenido HTML es demasiado grande (máximo 1MB)")
+
+                # Actualizar el dato sanitizado
+                update_data["html"] = html_content
             
             # Si viene html, crear una nueva versión y actualizar campos derivados
             update_dict = {"updated_at": datetime.now()}
@@ -153,7 +210,7 @@ class TemplateService:
                     "html": update_data["html"],
                     "version": str(new_version_number)
                 })
-                # permitir actualizar status/description/etc. en el mismo request
+                    # permitir actualizar status/description/etc. en el mismo request
                 scalar_fields = [
                     "name", "description", "scope", "status",
                     "style_tags", "subject_tags", "baseline_mix", "capabilities",
@@ -161,6 +218,23 @@ class TemplateService:
                 ]
                 for field in scalar_fields:
                     if field in update_data:
+                        # Validar campos específicos
+                        if field == "name" and update_data[field]:
+                            if not isinstance(update_data[field], str) or len(update_data[field].strip()) == 0:
+                                raise ValueError("El nombre de la plantilla no puede estar vacío")
+                            if len(update_data[field]) > 200:
+                                raise ValueError("El nombre de la plantilla no puede tener más de 200 caracteres")
+
+                        if field == "scope" and update_data[field]:
+                            valid_scopes = ["private", "org", "public"]
+                            if update_data[field] not in valid_scopes:
+                                raise ValueError(f"El scope debe ser uno de: {valid_scopes}")
+
+                        if field == "status" and update_data[field]:
+                            valid_statuses = ["draft", "usable", "certified"]
+                            if update_data[field] not in valid_statuses:
+                                raise ValueError(f"El status debe ser uno de: {valid_statuses}")
+
                         update_dict["$set"][field] = update_data[field]
             else:
                 # actualización normal de campos (sin nueva versión)
@@ -172,6 +246,23 @@ class TemplateService:
                 update_dict = {"$set": {"updated_at": datetime.now()}}
                 for field in scalar_fields:
                     if field in update_data:
+                        # Validar campos específicos
+                        if field == "name" and update_data[field]:
+                            if not isinstance(update_data[field], str) or len(update_data[field].strip()) == 0:
+                                raise ValueError("El nombre de la plantilla no puede estar vacío")
+                            if len(update_data[field]) > 200:
+                                raise ValueError("El nombre de la plantilla no puede tener más de 200 caracteres")
+
+                        if field == "scope" and update_data[field]:
+                            valid_scopes = ["private", "org", "public"]
+                            if update_data[field] not in valid_scopes:
+                                raise ValueError(f"El scope debe ser uno de: {valid_scopes}")
+
+                        if field == "status" and update_data[field]:
+                            valid_statuses = ["draft", "usable", "certified"]
+                            if update_data[field] not in valid_statuses:
+                                raise ValueError(f"El status debe ser uno de: {valid_statuses}")
+
                         update_dict["$set"][field] = update_data[field]
             
             # Actualizar en base de datos

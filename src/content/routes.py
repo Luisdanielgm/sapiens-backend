@@ -2,6 +2,7 @@ from flask import Blueprint, request, g
 from flask_jwt_extended import jwt_required, get_jwt_identity
 from bson import ObjectId
 import logging
+import datetime
 
 from src.shared.decorators import role_required
 from src.shared.database import get_db
@@ -858,6 +859,86 @@ def migrate_content_to_template(content_id):
             
     except Exception as e:
         logging.error(f"Error migrando contenido a plantilla: {str(e)}")
+        return APIRoute.error(
+            ErrorCodes.SERVER_ERROR,
+            "Error interno del servidor",
+            status_code=500,
+        )
+
+@content_bp.route('/<virtual_content_id>/complete-auto', methods=['POST'])
+@APIRoute.standard(auth_required_flag=True)
+def mark_content_complete_auto(virtual_content_id):
+    """
+    Marca automáticamente un contenido virtual como completado al 100%.
+    Se usa para contenidos de solo lectura que no requieren interacción del usuario.
+
+    Path params:
+        virtual_content_id: ID del contenido virtual a marcar como completado
+    """
+    try:
+        user_id = get_jwt_identity()
+
+        # Validar que el virtual_content_id sea válido
+        if not ObjectId.is_valid(virtual_content_id):
+            return APIRoute.error(ErrorCodes.VALIDATION_ERROR, "ID de contenido virtual inválido")
+
+        # Buscar el contenido virtual
+        db = get_db()
+        virtual_content = db.virtual_topic_contents.find_one({
+            "_id": ObjectId(virtual_content_id),
+            "student_id": ObjectId(user_id)
+        })
+
+        if not virtual_content:
+            return APIRoute.error(
+                ErrorCodes.NOT_FOUND,
+                "Contenido virtual no encontrado o no pertenece al usuario"
+            )
+
+        # Verificar que no esté ya completado
+        interaction_tracking = virtual_content.get("interaction_tracking", {}) or {}
+        if interaction_tracking.get("completion_status") == "completed":
+            return APIRoute.success(
+                message="El contenido ya estaba marcado como completado",
+                data={"already_completed": True}
+            )
+
+        # Actualizar el estado de completitud
+        update_data = {
+            "interaction_tracking": {
+                **interaction_tracking,
+                "completion_status": "completed",
+                "completion_percentage": 100.0,
+                "completed_at": datetime.now()
+            },
+            "updated_at": datetime.now()
+        }
+
+        # Actualizar en la base de datos
+        result = db.virtual_topic_contents.update_one(
+            {"_id": ObjectId(virtual_content_id)},
+            {"$set": update_data}
+        )
+
+        if result.modified_count == 0:
+            return APIRoute.error(
+                ErrorCodes.SERVER_ERROR,
+                "No se pudo actualizar el estado del contenido"
+            )
+
+        logging.info(f"Contenido virtual {virtual_content_id} marcado como completado automáticamente")
+
+        return APIRoute.success(
+            message="Contenido marcado como completado exitosamente",
+            data={
+                "virtual_content_id": virtual_content_id,
+                "completion_percentage": 100.0,
+                "completion_status": "completed"
+            }
+        )
+
+    except Exception as e:
+        logging.error(f"Error marcando contenido como completado: {str(e)}")
         return APIRoute.error(
             ErrorCodes.SERVER_ERROR,
             "Error interno del servidor",

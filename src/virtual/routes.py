@@ -1390,7 +1390,83 @@ def initialize_progressive_generation():
                 "No hay módulos con temas publicados en este plan",
                 status_code=400
             )
-        
+
+        # 3.5. VALIDACIONES PREVIAS REQUERIDAS
+        validation_errors = []
+
+        # A. Verificar evaluaciones previas obligatorias
+        required_evaluations = get_db().evaluations.find({
+            "study_plan_id": ObjectId(plan_id),
+            "required_for_virtualization": True,
+            "status": "active"
+        })
+
+        for evaluation in required_evaluations:
+            # Buscar si el estudiante completó esta evaluación
+            completed_evaluation = get_db().evaluation_results.find_one({
+                "evaluation_id": evaluation["_id"],
+                "student_id": ObjectId(student_id),
+                "status": "completed",
+                "score": {"$gte": evaluation.get("minimum_score", 0)}
+            })
+
+            if not completed_evaluation:
+                validation_errors.append({
+                    "type": "evaluation_required",
+                    "evaluation_id": str(evaluation["_id"]),
+                    "evaluation_name": evaluation.get("name", "Evaluación sin nombre"),
+                    "message": f"Debe completar la evaluación '{evaluation.get('name', 'Evaluación sin nombre')}' antes de generar módulos virtuales"
+                })
+
+        # B. Verificar plantillas de pensamiento crítico
+        critical_thinking_templates = get_db().templates.count_documents({
+            "subject_tags": {"$in": ["pensamiento_critico", "critical_thinking"]},
+            "scope": {"$in": ["public", "org"]},
+            "status": "usable"
+        })
+
+        if critical_thinking_templates == 0:
+            validation_errors.append({
+                "type": "missing_critical_thinking_templates",
+                "message": "No hay plantillas de pensamiento crítico disponibles. Se requieren para la generación de módulos virtuales."
+            })
+
+        # C. Verificar contenidos interactivos disponibles
+        interactive_content_count = get_db().topics.count_documents({
+            "study_plan_id": ObjectId(plan_id),
+            "content_type": {"$in": ["game", "simulation", "interactive_exercise", "quiz"]},
+            "published": True
+        })
+
+        if interactive_content_count < 3:
+            validation_errors.append({
+                "type": "insufficient_interactive_content",
+                "current_count": interactive_content_count,
+                "required_minimum": 3,
+                "message": f"Se requieren al menos 3 contenidos interactivos publicados. Actualmente hay {interactive_content_count}."
+            })
+
+        # D. Verificar que el estudiante tenga un perfil cognitivo válido
+        cognitive_profile = get_db().cognitive_profiles.find_one({
+            "user_id": ObjectId(student_id),
+            "status": "completed"
+        })
+
+        if not cognitive_profile:
+            validation_errors.append({
+                "type": "missing_cognitive_profile",
+                "message": "El estudiante debe tener un perfil cognitivo completo antes de generar módulos virtuales."
+            })
+
+        # Si hay errores de validación, retornar todos los errores
+        if validation_errors:
+            return APIRoute.error(
+                ErrorCodes.VALIDATION_ERROR,
+                "No se pueden generar módulos virtuales debido a validaciones pendientes",
+                details={"validation_errors": validation_errors},
+                status_code=400
+            )
+
         # 4. Filtrar módulos que no han sido generados
         already_generated = list(get_db().virtual_modules.find({
             "student_id": ObjectId(student_id),
