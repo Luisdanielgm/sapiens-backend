@@ -482,36 +482,54 @@ class ContentResultService(VerificationBaseService):
             Tuple[bool, str]: (éxito, mensaje/ID)
         """
         try:
-            # Asegurar que virtual_content_id esté presente
+            # Derivar score y métricas desde session_data/learning_metrics
+            session_data = result_data.pop("session_data", {}) or {}
+            learning_metrics = result_data.pop("learning_metrics", {}) or {}
+
+            if "score" not in result_data:
+                score = session_data.get("score")
+                if score is None:
+                    completion = session_data.get("completion_percentage")
+                    if completion is not None:
+                        score = completion / 100.0
+                result_data["score"] = score if score is not None else 0.0
+
+            metrics = result_data.get("metrics", {})
+            metrics.update(session_data)
+            metrics.update(learning_metrics)
+            result_data["metrics"] = metrics
+
+            # Asegurar que virtual_content_id esté presente si existe información suficiente
             if not result_data.get("virtual_content_id"):
-                # Si no hay virtual_content_id, intentar encontrarlo basado en content_id y student_id
                 student_id = result_data.get("student_id")
                 content_id = result_data.get("content_id")
-                
                 if student_id and content_id:
                     virtual_content = get_db().virtual_topic_contents.find_one({
                         "student_id": ObjectId(student_id),
-                        "content_id": ObjectId(content_id)
+                        "original_content_id": ObjectId(content_id)
                     })
                     if virtual_content:
                         result_data["virtual_content_id"] = str(virtual_content["_id"])
                     else:
-                        logging.warning(f"No se encontró virtual_content_id para content_id: {content_id}, student_id: {student_id}")
-            
+                        logging.warning(
+                            f"No se encontró virtual_content_id para content_id: {content_id}, student_id: {student_id}"
+                        )
+
             content_result = ContentResult(**result_data)
             result = self.collection.insert_one(content_result.to_dict())
-            
-            # Actualizar tracking solo si es un resultado de contenido virtual
+
             if result_data.get("virtual_content_id"):
                 try:
                     virtual_content_service = VirtualContentService()
                     virtual_content_service.track_interaction(
                         result_data["virtual_content_id"],
-                        result_data.get("session_data", {})
+                        session_data,
                     )
                 except Exception as track_error:
-                    logging.warning(f"Error actualizando tracking de contenido virtual: {track_error}")
-            
+                    logging.warning(
+                        f"Error actualizando tracking de contenido virtual: {track_error}"
+                    )
+
             return True, str(result.inserted_id)
             
         except Exception as e:
@@ -557,7 +575,8 @@ class ContentResultService(VerificationBaseService):
             for result in results:
                 result["_id"] = str(result["_id"])
                 result["student_id"] = str(result["student_id"])
-                result["content_id"] = str(result["content_id"])
+                if result.get("content_id"):
+                    result["content_id"] = str(result["content_id"])
                 if result.get("virtual_content_id"):
                     result["virtual_content_id"] = str(result["virtual_content_id"])
                 if result.get("evaluation_id"):

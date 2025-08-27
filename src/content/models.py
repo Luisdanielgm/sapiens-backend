@@ -186,34 +186,36 @@ class VirtualTopicContent:
         }
 
 class ContentResult:
-    """
-    Almacena el resultado de la interacción de un estudiante con una pieza de contenido.
-    Unifica los resultados de quizzes, juegos, simulaciones, etc.
-    """
-    def __init__(self,
-                 content_id: str,
-                 student_id: str,
-                 score: float,
-                 virtual_content_id: Optional[str] = None,
-                 feedback: Optional[str] = None,
-                 metrics: Optional[Dict] = None,
-                 session_type: str = "content_interaction",
-                 _id: Optional[ObjectId] = None,
-                 recorded_at: Optional[datetime] = None):
+    """Stores the outcome of a student's interaction with content."""
+
+    def __init__(
+        self,
+        student_id: str,
+        score: float,
+        content_id: Optional[str] = None,
+        virtual_content_id: Optional[str] = None,
+        feedback: Optional[str] = None,
+        metrics: Optional[Dict] = None,
+        session_type: str = "content_interaction",
+        _id: Optional[ObjectId] = None,
+        recorded_at: Optional[datetime] = None,
+    ):
+        if not content_id and not virtual_content_id:
+            raise ValueError("content_id or virtual_content_id is required")
+
         self._id = _id or ObjectId()
-        self.content_id = ObjectId(content_id)
-        self.student_id = ObjectId(student_id)
+        self.content_id = ObjectId(content_id) if content_id else None
         self.virtual_content_id = ObjectId(virtual_content_id) if virtual_content_id else None
+        self.student_id = ObjectId(student_id)
         self.score = score
         self.feedback = feedback
-        self.metrics = metrics or {} # e.g., time_spent, attempts, etc.
+        self.metrics = metrics or {}
         self.session_type = session_type
         self.recorded_at = recorded_at or datetime.now()
 
     def to_dict(self) -> dict:
         data = {
             "_id": self._id,
-            "content_id": self.content_id,
             "student_id": self.student_id,
             "score": self.score,
             "feedback": self.feedback,
@@ -221,6 +223,8 @@ class ContentResult:
             "session_type": self.session_type,
             "recorded_at": self.recorded_at,
         }
+        if self.content_id:
+            data["content_id"] = self.content_id
         if self.virtual_content_id:
             data["virtual_content_id"] = self.virtual_content_id
         return data

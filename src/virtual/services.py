@@ -2311,19 +2311,19 @@ class VirtualContentProgressService(VerificationBaseService):
             
             # Preparar datos para ContentResult
             content_result_data = {
-                "content_id": str(virtual_content.get("content_id", virtual_content["_id"])),
+                "virtual_content_id": str(virtual_content["_id"]),
+                "content_id": str(virtual_content.get("original_content_id")) if virtual_content.get("original_content_id") else None,
                 "student_id": student_id,
                 "score": score,
                 "feedback": "Contenido completado automáticamente",
                 "metrics": {
                     "content_type": virtual_content.get("content_type", "unknown"),
-                    "virtual_content_id": str(virtual_content["_id"]),
                     "auto_completed": True,
                     "completion_time": session_data.get("time_spent", 0),
                     "interaction_count": session_data.get("interactions", 1),
                     "personalization_applied": bool(virtual_content.get("personalization_data"))
                 },
-                "session_type": "auto_completion"
+                "session_type": "auto_completion",
             }
             
             # Crear ContentResult
