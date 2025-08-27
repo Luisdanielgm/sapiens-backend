@@ -506,7 +506,7 @@ class ContentResultService(VerificationBaseService):
                 if student_id and content_id:
                     virtual_content = get_db().virtual_topic_contents.find_one({
                         "student_id": ObjectId(student_id),
-                        "original_content_id": ObjectId(content_id)
+                        "content_id": ObjectId(content_id)
                     })
                     if virtual_content:
                         result_data["virtual_content_id"] = str(virtual_content["_id"])
