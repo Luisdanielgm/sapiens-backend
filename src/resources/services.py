@@ -486,16 +486,16 @@ class ResourceService(VerificationBaseService):
             
     def get_teacher_by_email(self, email: str) -> Optional[str]:
         """
-        Obtiene el ID de un profesor por su email
+        Obtiene el ID de un usuario por su email
         
         Args:
-            email: Email del profesor
+            email: Email del usuario
             
         Returns:
-            Optional[str]: ID del profesor o None si no existe
+            Optional[str]: ID del usuario o None si no existe
         """
         try:
-            user = get_db().users.find_one({"email": email, "role": ROLES["TEACHER"]})
+            user = get_db().users.find_one({"email": email})
             if user:
                 return str(user["_id"])
             return None
@@ -1100,4 +1100,4 @@ class ResourceFolderService(VerificationBaseService):
                     
         except Exception as e:
             log_error(f"Excepción en get_or_create_subfolder (padre={parent_folder_id}, nombre={subfolder_name}): {str(e)}")
-            return None 
+            return None
