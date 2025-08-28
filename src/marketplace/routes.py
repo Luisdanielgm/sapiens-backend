@@ -46,7 +46,7 @@ def create_checkout_session(plan_id):
                 'plan_id': plan_id
             }
         )
-        return jsonify(id=session.id)
+        return APIRoute.success(data={"id": session.id})
     except Exception as e:
         return APIRoute.error(message=str(e), status_code=500)
 
