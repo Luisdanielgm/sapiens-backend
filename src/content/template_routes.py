@@ -40,22 +40,37 @@ def create_template():
         user_id = get_jwt_identity()
         data = request.get_json()
         
-        if not data:
-            return jsonify({"error": "No data provided"}), 400
+        if not data or 'html' not in data:
+            return jsonify({
+                "success": False,
+                "error": "VALIDATION_ERROR",
+                "message": "HTML content is required"
+            }), 400
         
         # Crear plantilla
         template = template_service.create_template(data, user_id)
         
         return jsonify({
-            "message": "Plantilla creada exitosamente",
-            "template": ensure_json_serializable(template.to_dict())
+            "success": True,
+            "data": {
+                "message": "Plantilla creada exitosamente",
+                "template": ensure_json_serializable(template.to_dict())
+            }
         }), 201
         
     except ValueError as e:
-        return jsonify({"error": str(e)}), 400
+        return jsonify({
+            "success": False,
+            "error": "VALIDATION_ERROR",
+            "message": str(e)
+        }), 400
     except Exception as e:
         logging.error(f"Error creating template: {str(e)}")
-        return jsonify({"error": "Error interno del servidor"}), 500
+        return jsonify({
+            "success": False,
+            "error": "INTERNAL_ERROR",
+            "message": "Error interno del servidor"
+        }), 500
 
 @template_bp.route('', methods=['GET'])
 @auth_required
@@ -99,13 +114,20 @@ def list_templates():
         templates_data = ensure_json_serializable([template.to_dict() for template in templates])
         
         return jsonify({
-            "templates": templates_data,
-            "total": len(templates_data)
+            "success": True,
+            "data": {
+                "templates": templates_data,
+                "total": len(templates_data)
+            }
         }), 200
         
     except Exception as e:
         logging.error(f"Error listing templates: {str(e)}")
-        return jsonify({"error": "Error interno del servidor"}), 500
+        return jsonify({
+            "success": False,
+            "error": "INTERNAL_ERROR",
+            "message": "Error interno del servidor"
+        }), 500
 
 @template_bp.route('/<template_id>', methods=['GET'])
 @auth_required
@@ -117,13 +139,26 @@ def get_template(template_id):
         template = template_service.get_template(template_id)
         
         if not template:
-            return jsonify({"error": "Plantilla no encontrada"}), 404
+            return jsonify({
+                "success": False,
+                "error": "NOT_FOUND",
+                "message": "Plantilla no encontrada"
+            }), 404
         
-        return jsonify({"template": ensure_json_serializable(template.to_dict())}), 200
+        return jsonify({
+            "success": True,
+            "data": {
+                "template": ensure_json_serializable(template.to_dict())
+            }
+        }), 200
         
     except Exception as e:
         logging.error(f"Error getting template {template_id}: {str(e)}")
-        return jsonify({"error": "Error interno del servidor"}), 500
+        return jsonify({
+            "success": False,
+            "error": "INTERNAL_ERROR",
+            "message": "Error interno del servidor"
+        }), 500
 
 @template_bp.route('/<template_id>', methods=['PUT'])
 @auth_required
@@ -139,23 +174,42 @@ def update_template(template_id):
         data = request.get_json()
         
         if not data:
-            return jsonify({"error": "No data provided"}), 400
+            return jsonify({
+                "success": False,
+                "error": "VALIDATION_ERROR",
+                "message": "No data provided"
+            }), 400
         
         # Si llega 'html' se creará una nueva versión automáticamente en el servicio
         template = template_service.update_template(template_id, data, user_id)
         
         return jsonify({
-            "message": "Plantilla actualizada exitosamente",
-            "template": ensure_json_serializable(template.to_dict())
+            "success": True,
+            "data": {
+                "message": "Plantilla actualizada exitosamente",
+                "template": ensure_json_serializable(template.to_dict())
+            }
         }), 200
         
     except ValueError as e:
-        return jsonify({"error": str(e)}), 400
+        return jsonify({
+            "success": False,
+            "error": "VALIDATION_ERROR",
+            "message": str(e)
+        }), 400
     except PermissionError as e:
-        return jsonify({"error": str(e)}), 403
+        return jsonify({
+            "success": False,
+            "error": "PERMISSION_DENIED",
+            "message": str(e)
+        }), 403
     except Exception as e:
         logging.error(f"Error updating template {template_id}: {str(e)}")
-        return jsonify({"error": "Error interno del servidor"}), 500
+        return jsonify({
+            "success": False,
+            "error": "INTERNAL_ERROR",
+            "message": "Error interno del servidor"
+        }), 500
 
 @template_bp.route('/<template_id>/fork', methods=['POST'])
 @auth_required
@@ -179,17 +233,32 @@ def fork_template(template_id):
         fork = template_service.fork_template(template_id, user_id, new_name)
         
         return jsonify({
-            "message": "Fork creado exitosamente",
-            "template": ensure_json_serializable(fork.to_dict())
+            "success": True,
+            "data": {
+                "message": "Fork creado exitosamente",
+                "template": ensure_json_serializable(fork.to_dict())
+            }
         }), 201
         
     except ValueError as e:
-        return jsonify({"error": str(e)}), 400
+        return jsonify({
+            "success": False,
+            "error": "VALIDATION_ERROR",
+            "message": str(e)
+        }), 400
     except PermissionError as e:
-        return jsonify({"error": str(e)}), 403
+        return jsonify({
+            "success": False,
+            "error": "PERMISSION_DENIED",
+            "message": str(e)
+        }), 403
     except Exception as e:
         logging.error(f"Error forking template {template_id}: {str(e)}")
-        return jsonify({"error": "Error interno del servidor"}), 500
+        return jsonify({
+            "success": False,
+            "error": "INTERNAL_ERROR",
+            "message": "Error interno del servidor"
+        }), 500
 
 @template_bp.route('/<template_id>/extract', methods=['POST'])
 @auth_required
@@ -204,11 +273,19 @@ def extract_markers(template_id):
         # Obtener plantilla
         template = template_service.get_template(template_id)
         if not template:
-            return jsonify({"error": "Plantilla no encontrada"}), 404
+            return jsonify({
+                "success": False,
+                "error": "NOT_FOUND",
+                "message": "Plantilla no encontrada"
+            }), 404
         
         # Verificar permisos
         if str(template.owner_id) != user_id:
-            return jsonify({"error": "No tienes permisos para editar esta plantilla"}), 403
+            return jsonify({
+                "success": False,
+                "error": "PERMISSION_DENIED",
+                "message": "No tienes permisos para editar esta plantilla"
+            }), 403
         
         # Extraer marcadores
         extraction_result = TemplateMarkupExtractor.extract_markers(template.get_latest_html())
@@ -227,14 +304,21 @@ def extract_markers(template_id):
         updated_template = template_service.update_template(template_id, update_data, user_id)
         
         return jsonify({
-            "message": "Marcadores extraídos exitosamente",
-            "extraction_result": extraction_result,
-            "template": ensure_json_serializable(updated_template.to_dict())
+            "success": True,
+            "data": {
+                "message": "Marcadores extraídos exitosamente",
+                "extraction_result": extraction_result,
+                "template": ensure_json_serializable(updated_template.to_dict())
+            }
         }), 200
         
     except Exception as e:
         logging.error(f"Error extracting markers from template {template_id}: {str(e)}")
-        return jsonify({"error": "Error interno del servidor"}), 500
+        return jsonify({
+            "success": False,
+            "error": "INTERNAL_ERROR",
+            "message": "Error interno del servidor"
+        }), 500
 
 @template_bp.route('/<template_id>', methods=['DELETE'])
 @auth_required
@@ -249,17 +333,38 @@ def delete_template(template_id):
         success = template_service.delete_template(template_id, user_id)
         
         if not success:
-            return jsonify({"error": "No se pudo eliminar la plantilla"}), 400
+            return jsonify({
+                "success": False,
+                "error": "OPERATION_FAILED",
+                "message": "No se pudo eliminar la plantilla"
+            }), 400
         
-        return jsonify({"message": "Plantilla eliminada exitosamente"}), 200
+        return jsonify({
+            "success": True,
+            "data": {
+                "message": "Plantilla eliminada exitosamente"
+            }
+        }), 200
         
     except ValueError as e:
-        return jsonify({"error": str(e)}), 400
+        return jsonify({
+            "success": False,
+            "error": "VALIDATION_ERROR",
+            "message": str(e)
+        }), 400
     except PermissionError as e:
-        return jsonify({"error": str(e)}), 403
+        return jsonify({
+            "success": False,
+            "error": "PERMISSION_DENIED",
+            "message": str(e)
+        }), 403
     except Exception as e:
         logging.error(f"Error deleting template {template_id}: {str(e)}")
-        return jsonify({"error": "Error interno del servidor"}), 500
+        return jsonify({
+            "success": False,
+            "error": "INTERNAL_ERROR",
+            "message": "Error interno del servidor"
+        }), 500
 
 # === TEMPLATE INSTANCES ENDPOINTS ===
 
@@ -285,7 +390,11 @@ def create_instance():
         data = request.get_json()
         
         if not data:
-            return jsonify({"error": "No data provided"}), 400
+            return jsonify({
+                "success": False,
+                "error": "VALIDATION_ERROR",
+                "message": "No data provided"
+            }), 400
         
         # Validar campos requeridos
         required_fields = ["template_id", "topic_id"]
@@ -297,15 +406,26 @@ def create_instance():
         instance = instance_service.create_instance(data)
         
         return jsonify({
-            "message": "Instancia creada exitosamente",
-            "instance": ensure_json_serializable(instance.to_dict())
+            "success": True,
+            "data": {
+                "message": "Instancia de plantilla creada exitosamente",
+                "instance": ensure_json_serializable(instance.to_dict())
+            }
         }), 201
         
     except ValueError as e:
-        return jsonify({"error": str(e)}), 400
+        return jsonify({
+            "success": False,
+            "error": "VALIDATION_ERROR",
+            "message": str(e)
+        }), 400
     except Exception as e:
         logging.error(f"Error creating template instance: {str(e)}")
-        return jsonify({"error": "Error interno del servidor"}), 500
+        return jsonify({
+            "success": False,
+            "error": "INTERNAL_ERROR",
+            "message": "Error interno del servidor"
+        }), 500
 
 @instance_bp.route('/<instance_id>', methods=['GET'])
 @auth_required
@@ -317,13 +437,26 @@ def get_instance(instance_id):
         instance = instance_service.get_instance(instance_id)
         
         if not instance:
-            return jsonify({"error": "Instancia no encontrada"}), 404
+            return jsonify({
+                "success": False,
+                "error": "NOT_FOUND",
+                "message": "Instancia no encontrada"
+            }), 404
         
-        return jsonify({"instance": ensure_json_serializable(instance.to_dict())}), 200
+        return jsonify({
+            "success": True,
+            "data": {
+                "instance": ensure_json_serializable(instance.to_dict())
+            }
+        }), 200
         
     except Exception as e:
         logging.error(f"Error getting template instance {instance_id}: {str(e)}")
-        return jsonify({"error": "Error interno del servidor"}), 500
+        return jsonify({
+            "success": False,
+            "error": "INTERNAL_ERROR",
+            "message": "Error interno del servidor"
+        }), 500
 
 @instance_bp.route('/topic/<topic_id>', methods=['GET'])
 @auth_required
@@ -337,13 +470,20 @@ def get_instances_by_topic(topic_id):
         instances_data = ensure_json_serializable([instance.to_dict() for instance in instances])
         
         return jsonify({
-            "instances": instances_data,
-            "total": len(instances_data)
+            "success": True,
+            "data": {
+                "instances": instances_data,
+                "total": len(instances_data)
+            }
         }), 200
         
     except Exception as e:
         logging.error(f"Error getting instances for topic {topic_id}: {str(e)}")
-        return jsonify({"error": "Error interno del servidor"}), 500
+        return jsonify({
+            "success": False,
+            "error": "INTERNAL_ERROR",
+            "message": "Error interno del servidor"
+        }), 500
 
 @instance_bp.route('/<instance_id>', methods=['PUT'])
 @auth_required
@@ -358,21 +498,36 @@ def update_instance(instance_id):
         data = request.get_json()
         
         if not data:
-            return jsonify({"error": "No data provided"}), 400
+            return jsonify({
+                "success": False,
+                "error": "VALIDATION_ERROR",
+                "message": "No data provided"
+            }), 400
         
         # Actualizar instancia
         instance = instance_service.update_instance(instance_id, data)
         
         return jsonify({
-            "message": "Instancia actualizada exitosamente",
-            "instance": ensure_json_serializable(instance.to_dict())
+            "success": True,
+            "data": {
+                "message": "Instancia actualizada exitosamente",
+                "instance": ensure_json_serializable(instance.to_dict())
+            }
         }), 200
         
     except ValueError as e:
-        return jsonify({"error": str(e)}), 400
+        return jsonify({
+            "success": False,
+            "error": "VALIDATION_ERROR",
+            "message": str(e)
+        }), 400
     except Exception as e:
         logging.error(f"Error updating template instance {instance_id}: {str(e)}")
-        return jsonify({"error": "Error interno del servidor"}), 500
+        return jsonify({
+            "success": False,
+            "error": "INTERNAL_ERROR",
+            "message": "Error interno del servidor"
+        }), 500
 
 @instance_bp.route('/<instance_id>/publish', methods=['POST'])
 @auth_required
@@ -385,15 +540,32 @@ def publish_instance(instance_id):
         instance = instance_service.publish_instance(instance_id)
         
         return jsonify({
-            "message": "Instancia publicada exitosamente",
-            "instance": ensure_json_serializable(instance.to_dict())
+            "success": True,
+            "data": {
+                "message": "Instancia publicada exitosamente",
+                "instance": ensure_json_serializable(instance.to_dict())
+            }
         }), 200
         
     except ValueError as e:
-        return jsonify({"error": str(e)}), 400
+        return jsonify({
+            "success": False,
+            "error": "VALIDATION_ERROR",
+            "message": str(e)
+        }), 400
+    except PermissionError as e:
+        return jsonify({
+            "success": False,
+            "error": "PERMISSION_DENIED",
+            "message": str(e)
+        }), 403
     except Exception as e:
         logging.error(f"Error publishing template instance {instance_id}: {str(e)}")
-        return jsonify({"error": "Error interno del servidor"}), 500
+        return jsonify({
+            "success": False,
+            "error": "INTERNAL_ERROR",
+            "message": "Error interno del servidor"
+        }), 500
 
 @instance_bp.route('/<instance_id>', methods=['DELETE'])
 @auth_required
@@ -406,13 +578,38 @@ def delete_instance(instance_id):
         success = instance_service.delete_instance(instance_id)
         
         if not success:
-            return jsonify({"error": "No se pudo eliminar la instancia"}), 400
+            return jsonify({
+                "success": False,
+                "error": "OPERATION_FAILED",
+                "message": "No se pudo eliminar la instancia"
+            }), 400
         
-        return jsonify({"message": "Instancia eliminada exitosamente"}), 200
+        return jsonify({
+            "success": True,
+            "data": {
+                "message": "Instancia eliminada exitosamente"
+            }
+        }), 200
         
+    except ValueError as e:
+        return jsonify({
+            "success": False,
+            "error": "VALIDATION_ERROR",
+            "message": str(e)
+        }), 400
+    except PermissionError as e:
+        return jsonify({
+            "success": False,
+            "error": "PERMISSION_DENIED",
+            "message": str(e)
+        }), 403
     except Exception as e:
         logging.error(f"Error deleting template instance {instance_id}: {str(e)}")
-        return jsonify({"error": "Error interno del servidor"}), 500
+        return jsonify({
+            "success": False,
+            "error": "INTERNAL_ERROR",
+            "message": "Error interno del servidor"
+        }), 500
 
 # === PREVIEW ENDPOINTS ===
 
