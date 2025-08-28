@@ -1612,15 +1612,28 @@ class FastVirtualModuleGenerator(VerificationBaseService):
             kinesthetic_score = learning_style.get("kinesthetic", 0) / 100.0
             reading_writing_score = learning_style.get("readingWriting", 0) / 100.0 # Corregido a camelCase
 
-            # PASO 3: Inferir discapacidades desde los campos de texto
-            diagnosis_lower = diagnosis.lower()
-            difficulties_str = " ".join(cognitive_difficulties).lower()
+            # PASO 3: Inferir discapacidades desde los campos de texto y estructurados
+            diagnosis_lower = diagnosis.lower() if isinstance(diagnosis, str) else ""
+            if isinstance(diagnosis, list):
+                diagnosis_lower = " ".join(diagnosis).lower()
             
-            has_adhd = "tda" in diagnosis_lower or "hiperactividad" in diagnosis_lower or \
-                       "distractibilidad" in difficulties_str or "concentración" in difficulties_str
+            difficulties_str = " ".join(cognitive_difficulties).lower() if cognitive_difficulties else ""
             
-            has_dyslexia = "dislexia" in diagnosis_lower or "lectura" in difficulties_str or \
-                           "escritura" in difficulties_str
+            # Verificar ADHD en múltiples fuentes
+            learning_disabilities = profile_data.get("learning_disabilities", {})
+            has_adhd_from_disabilities = learning_disabilities.get("adhd", False)
+            has_adhd_from_text = "tda" in diagnosis_lower or "hiperactividad" in diagnosis_lower or \
+                                "adhd" in diagnosis_lower or "distractibilidad" in difficulties_str or \
+                                "concentración" in difficulties_str
+            
+            has_adhd = has_adhd_from_disabilities or has_adhd_from_text
+            
+            # Verificar dislexia en múltiples fuentes
+            has_dyslexia_from_disabilities = learning_disabilities.get("dyslexia", False)
+            has_dyslexia_from_text = "dislexia" in diagnosis_lower or "lectura" in difficulties_str or \
+                                    "escritura" in difficulties_str
+            
+            has_dyslexia = has_dyslexia_from_disabilities or has_dyslexia_from_text
 
             # PASO 3.5: Obtener preferencias de contenido del perfil adaptativo (Fase 2B)
             content_preferences = {}
@@ -1778,10 +1791,19 @@ class FastVirtualModuleGenerator(VerificationBaseService):
                 
                 # Filtrar contenidos de solo texto si hay alternativas suficientes
                 if len(preferred_specific) >= 2:
-                    original_count = len(selected_contents)
-                    selected_contents = [c for c in selected_contents if c.get("content_type") != "text"]
-                    if len(selected_contents) < original_count:
-                        logging.debug("Removido contenido de texto por dislexia")
+                    # Verificar si hay otros contenidos completos además de texto
+                    complete_types = ["text", "slides", "video", "feynman", "story", "summary", "narrated_presentation"]
+                    non_text_complete = [c for c in selected_contents 
+                                       if c.get("content_type") in complete_types and c.get("content_type") != "text"]
+                    
+                    # Solo remover texto si hay otros contenidos completos disponibles
+                    if non_text_complete:
+                        original_count = len(selected_contents)
+                        selected_contents = [c for c in selected_contents if c.get("content_type") != "text"]
+                        if len(selected_contents) < original_count:
+                            logging.debug("Removido contenido de texto por dislexia (hay otros contenidos completos)")
+                    else:
+                        logging.debug("Mantenido contenido de texto para preservar contenidos completos")
             
             # PASO 9: Agregar contenidos específicos seleccionados (sin duplicados)
             seen_ids = {c["_id"] for c in selected_contents}

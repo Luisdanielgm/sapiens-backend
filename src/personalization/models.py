@@ -110,12 +110,37 @@ class RLModelRequest:
         """
         Convierte la solicitud a formato esperado por la API de RL
         """
-        return {
-            "student_id": self.student_id,
-            "context": self.context_data,
-            "action": self.action_type,
-            "parameters": self.additional_params
-        }
+        # Formato requerido por el servicio RL externo
+        if self.action_type == "get_recommendation":
+            return {
+                "group": "rl_tutor_tool",
+                "tool": "get_recommendation",
+                "action": "execute",
+                "arguments": {
+                    "student_id": self.student_id,
+                    **self.context_data,
+                    **self.additional_params
+                }
+            }
+        elif self.action_type == "submit_feedback":
+            return {
+                "group": "rl_tutor_tool",
+                "tool": "submit_feedback",
+                "action": "execute",
+                "arguments": {
+                    "student_id": self.student_id,
+                    **self.context_data,
+                    **self.additional_params
+                }
+            }
+        else:
+            # Formato fallback
+            return {
+                "student_id": self.student_id,
+                "context": self.context_data,
+                "action": self.action_type,
+                "parameters": self.additional_params
+            }
 
 
 class RLModelResponse:

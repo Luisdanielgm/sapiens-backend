@@ -47,6 +47,19 @@ class AdaptivePersonalizationService:
             Tuple[bool, Dict]: (éxito, datos de recomendación o error)
         """
         try:
+            # Validar que student_id sea un ObjectId válido
+            try:
+                ObjectId(student_id)
+            except Exception:
+                logging.error(f"student_id inválido: {student_id}")
+                return False, {"error": "student_id debe ser un ObjectId válido", "message": f"Valor recibido: {student_id}"}
+            
+            # Validar que topic_id sea un ObjectId válido
+            try:
+                ObjectId(topic_id)
+            except Exception:
+                logging.error(f"topic_id inválido: {topic_id}")
+                return False, {"error": "topic_id debe ser un ObjectId válido", "message": f"Valor recibido: {topic_id}"}
             # 1. Preparar datos para el modelo RL
             rl_context = self._prepare_rl_context(student_id, topic_id, context_data or {})
 
@@ -62,9 +75,17 @@ class AdaptivePersonalizationService:
             rl_response = self._call_rl_model(rl_request)
 
             if not rl_response.success:
-                return False, {
-                    "error": "Error en modelo RL",
-                    "message": rl_response.error_message
+                # Implementar fallback cuando el servicio RL no esté disponible
+                logging.warning(f"Servicio RL no disponible, usando fallback: {rl_response.error_message}")
+                recommendations = self._generate_fallback_recommendations(student_id, topic_id, rl_context)
+                
+                return True, {
+                    "recommendations": recommendations["content_recommendations"],
+                    "learning_path_adjustment": recommendations["learning_path_adjustment"],
+                    "confidence_score": recommendations["confidence_score"],
+                    "reasoning": recommendations["reasoning"],
+                    "fallback_mode": True,
+                    "rl_error": rl_response.error_message
                 }
 
             # 4. Procesar recomendaciones del RL
@@ -96,6 +117,139 @@ class AdaptivePersonalizationService:
         except Exception as e:
             logging.error(f"Error obteniendo recomendaciones adaptativas: {str(e)}")
             return False, {"error": "Error interno del servidor", "message": str(e)}
+
+    def _generate_fallback_recommendations(self, student_id: str, topic_id: str, rl_context: Dict) -> Dict:
+        """
+        Genera recomendaciones básicas cuando el servicio RL externo no está disponible
+        """
+        try:
+            # Obtener perfil cognitivo del contexto
+            cognitive_profile = rl_context.get("student_profile", {})
+            recent_interactions = rl_context.get("recent_interactions", [])
+            vakr_stats = rl_context.get("vakr_statistics", {})
+            
+            # Recomendaciones básicas basadas en perfil cognitivo
+            content_recommendations = []
+            
+            # Si hay perfil cognitivo, usar esa información
+            if cognitive_profile:
+                learning_style = cognitive_profile.get("learning_style", {})
+                
+                # Recomendaciones basadas en estilo de aprendizaje
+                if learning_style.get("visual", 0) > 60:
+                    content_recommendations.extend([
+                        {
+                            "content_type": "diagram",
+                            "priority": 1,
+                            "reasoning": "Perfil visual dominante",
+                            "estimated_effectiveness": 0.8
+                        },
+                        {
+                            "content_type": "image",
+                            "priority": 2,
+                            "reasoning": "Apoyo visual",
+                            "estimated_effectiveness": 0.7
+                        }
+                    ])
+                
+                if learning_style.get("auditory", 0) > 60:
+                    content_recommendations.append({
+                        "content_type": "audio",
+                        "priority": 1,
+                        "reasoning": "Perfil auditivo dominante",
+                        "estimated_effectiveness": 0.8
+                    })
+                
+                if learning_style.get("kinesthetic", 0) > 60:
+                    content_recommendations.append({
+                        "content_type": "interactive_exercise",
+                        "priority": 1,
+                        "reasoning": "Perfil kinestésico dominante",
+                        "estimated_effectiveness": 0.8
+                    })
+                
+                if learning_style.get("reading_writing", 0) > 60:
+                    content_recommendations.append({
+                        "content_type": "text",
+                        "priority": 1,
+                        "reasoning": "Perfil lectura/escritura dominante",
+                        "estimated_effectiveness": 0.8
+                    })
+            
+            # Si no hay recomendaciones específicas, usar recomendaciones generales
+            if not content_recommendations:
+                content_recommendations = [
+                    {
+                        "content_type": "video",
+                        "priority": 1,
+                        "reasoning": "Contenido multimedia general",
+                        "estimated_effectiveness": 0.6
+                    },
+                    {
+                        "content_type": "text",
+                        "priority": 2,
+                        "reasoning": "Material de lectura complementario",
+                        "estimated_effectiveness": 0.5
+                    }
+                ]
+            
+            # Ajustes básicos del plan de aprendizaje
+            learning_path_adjustment = {
+                "difficulty_adjustment": 0,  # Sin cambios por defecto
+                "pace_adjustment": 0,        # Sin cambios por defecto
+                "focus_areas": [],           # Sin áreas específicas
+                "recommended_duration": 30   # 30 minutos por defecto
+            }
+            
+            # Analizar rendimiento reciente si está disponible
+            if recent_interactions:
+                avg_score = sum(interaction.get("score", 0) for interaction in recent_interactions) / len(recent_interactions)
+                
+                if avg_score < 60:
+                    learning_path_adjustment["difficulty_adjustment"] = -1
+                    learning_path_adjustment["recommended_duration"] = 45
+                elif avg_score > 85:
+                    learning_path_adjustment["difficulty_adjustment"] = 1
+                    learning_path_adjustment["recommended_duration"] = 25
+            
+            # Confianza baja para fallback
+            confidence_score = 0.4
+            
+            # Explicación del fallback
+            reasoning = "Recomendaciones generadas por sistema de fallback debido a indisponibilidad del servicio RL. "
+            if cognitive_profile:
+                reasoning += "Basadas en perfil cognitivo del estudiante."
+            else:
+                reasoning += "Recomendaciones generales aplicadas."
+            
+            return {
+                "content_recommendations": content_recommendations,
+                "learning_path_adjustment": learning_path_adjustment,
+                "confidence_score": confidence_score,
+                "reasoning": reasoning
+            }
+            
+        except Exception as e:
+            logging.error(f"Error generando recomendaciones de fallback: {str(e)}")
+            # Fallback del fallback - recomendaciones mínimas
+            return {
+                "content_recommendations": [
+                    {
+                        "content_type": "video",
+                        "priority": 1,
+                        "reasoning": "Contenido por defecto",
+                        "estimated_effectiveness": 0.5
+                    }
+                ],
+                "learning_path_adjustment": {
+                    "difficulty_adjustment": 0,
+                    "pace_adjustment": 0,
+                    "focus_areas": [],
+                    "recommended_duration": 30
+                },
+                "confidence_score": 0.3,
+                "reasoning": "Recomendaciones mínimas por error en sistema de fallback"
+            }
 
     def submit_learning_feedback(self, feedback_data: Dict) -> Tuple[bool, str]:
         """
@@ -159,6 +313,12 @@ class AdaptivePersonalizationService:
             Tuple[bool, Dict]: (éxito, estadísticas o error)
         """
         try:
+            # Validar que student_id sea un ObjectId válido
+            try:
+                ObjectId(student_id)
+            except Exception:
+                logging.error(f"student_id inválido en get_vakr_statistics: {student_id}")
+                return False, {"error": "student_id debe ser un ObjectId válido", "message": f"Valor recibido: {student_id}"}
             # 1. Buscar estadísticas recientes (últimas 24 horas)
             if not force_refresh:
                 recent_stats = self.vakr_stats_collection.find_one({
