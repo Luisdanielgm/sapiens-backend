@@ -501,6 +501,36 @@ class ResourceService(VerificationBaseService):
             return None
         except Exception:
             return None
+    
+    def list_teacher_resources(self, teacher_id: str, folder_id: Optional[str] = None) -> List[Dict]:
+        """
+        Lista todos los recursos de un profesor, opcionalmente filtrando por carpeta.
+        Este método es un alias de get_teacher_resources para mantener compatibilidad.
+        
+        Args:
+            teacher_id: ID del profesor
+            folder_id: ID de la carpeta (opcional)
+            
+        Returns:
+            List[Dict]: Lista de recursos
+        """
+        return self.get_teacher_resources(teacher_id, folder_id)
+    
+    def search_teacher_resources(self, teacher_id: str, query: str, folder_id: Optional[str] = None, filters: Optional[Dict] = None) -> List[Dict]:
+        """
+        Busca recursos de un profesor por texto y filtros.
+        Este método es un alias de search_resources para mantener compatibilidad.
+        
+        Args:
+            teacher_id: ID del profesor
+            query: Texto a buscar
+            folder_id: ID de la carpeta (opcional)
+            filters: Filtros adicionales (tipo, tags, rango de fechas)
+            
+        Returns:
+            List[Dict]: Lista de recursos que coinciden con la búsqueda
+        """
+        return self.search_resources(teacher_id, query, filters)
 
 
 class ResourceFolderService(VerificationBaseService):
