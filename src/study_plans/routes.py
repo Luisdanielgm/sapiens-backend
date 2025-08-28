@@ -377,21 +377,21 @@ def get_module_topics_publication_status(module_id):
         return APIRoute.error(ErrorCodes.SERVER_ERROR, str(e), status_code=500)
 
 
-@study_plan_bp.route('/module/<module_id>/evaluations', methods=['GET'])
+@study_plan_bp.route('/topic/<topic_id>/evaluations', methods=['GET'])
 @APIRoute.standard(auth_required_flag=True)
-def list_module_evaluations_route(module_id):
-    """Lista las evaluaciones de un módulo. Si se indica student_id, retorna el estado para ese estudiante."""
+def list_topic_evaluations_route(topic_id):
+    """Lista las evaluaciones de un tema. Si se indica student_id, retorna el estado para ese estudiante."""
     student_id = request.args.get('student_id')
     if student_id:
-        evaluations = evaluation_service.get_evaluations_status_for_student(module_id, student_id)
+        evaluations = evaluation_service.get_evaluations_status_for_student(topic_id, student_id)
     else:
-        evaluations = evaluation_service.get_evaluations_by_module(module_id)
+        evaluations = evaluation_service.get_evaluations_by_topic(topic_id)
     evaluations = ensure_json_serializable(evaluations)
     return APIRoute.success(data={"evaluations": evaluations})
 
 # Rutas para Evaluaciones
 @study_plan_bp.route('/evaluation', methods=['POST'])
-@APIRoute.standard(auth_required_flag=True, roles=[ROLES["TEACHER"]], required_fields=['module_id', 'title', 'description', 'weight', 'criteria', 'due_date'])
+@APIRoute.standard(auth_required_flag=True, roles=[ROLES["TEACHER"]], required_fields=['topic_ids', 'title', 'description', 'weight', 'criteria', 'due_date'])
 def create_evaluation():
     """Crea una nueva evaluación"""
     data = request.get_json()
@@ -462,8 +462,8 @@ def delete_evaluation_result(result_id):
 @APIRoute.standard(auth_required_flag=True)
 def get_student_results(student_id):
     """Obtiene resultados de evaluaciones de un estudiante"""
-    module_id = request.args.get('module_id')
-    results = evaluation_service.get_student_results(student_id, module_id)
+    topic_id = request.args.get('topic_id')
+    results = evaluation_service.get_student_results(student_id, topic_id)
     results = ensure_json_serializable(results)
     return APIRoute.success(data=results)
 

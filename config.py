@@ -52,6 +52,11 @@ class Config:
     # Logging
     # Valores posibles: 'none', 'basic', 'detailed'
     API_LOGGING = os.getenv('API_LOGGING', 'basic')
+
+    # Stripe
+    STRIPE_SECRET_KEY = os.getenv('STRIPE_SECRET_KEY')
+    STRIPE_PUBLIC_KEY = os.getenv('STRIPE_PUBLIC_KEY')
+    STRIPE_WEBHOOK_SECRET = os.getenv('STRIPE_WEBHOOK_SECRET')
     
     @classmethod
     def validate(cls):

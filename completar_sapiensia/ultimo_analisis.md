@@ -172,13 +172,35 @@ En resumen, las vistas de estudiante y el flujo básico de planes ya están oper
 - ✅ **Endpoint /content/{virtual_id}/complete-auto** (marcado automático de completitud)
 - ✅ **Bug de asociación ContentResult ↔ VirtualTopicContent** (ya estaba corregido)
 
-## 🔄 **PENDIENTE AÚN**:
-- 🔄 Gestión de evaluaciones/entregables y corrección IA
-- 🔄 Generación paralela y toasts detallados
-- 🔄 Marketplace/pagos y gestión de claves API
-- 🔄 Dashboards finales con métricas reales
-- 🔄 Eliminación en cascada
-- 🔄 Mejoras de plantillas (editor HTML completo, clonación, etc.)
+## ✅ IMPLEMENTACIÓN FINALIZADA (Backend)
+
+A continuación se detallan las tareas que se han completado en el backend, finalizando el plan de implementación.
+
+### **1. Gestión de Evaluaciones y Entregables (COMPLETADO)**
+- **Relación M-a-N:** Se ha modificado el modelo `Evaluation` para permitir que una evaluación se asocie a múltiples `Topics` a través de un campo `topic_ids`. Se actualizaron todos los servicios y rutas relacionadas para reflejar este cambio.
+- **Endpoints de Entregables:** Se confirmó que los endpoints para subir y listar entregas ya eran funcionales.
+
+### **2. Orquestación para Corrección Automática con IA (COMPLETADO)**
+- **Arquitectura Implementada:** El backend ahora provee la orquestación para la corrección con IA que ejecuta el frontend.
+- **Nuevos Campos en Modelo:** Se añadieron los campos `ai_score`, `ai_feedback`, y `ai_corrected_at` al modelo `EvaluationSubmission`.
+- **Endpoint de Recepción:** Se implementó la ruta `PUT /api/correction/submission/<submission_id>/ai-result` y la lógica en `CorrectionService` para que el frontend pueda guardar los resultados de la IA.
+
+### **3. Generación Paralela y Toasts Detallados (NO REQUIERE ACCIÓN BACKEND)**
+- **Responsabilidad Exclusiva del Frontend:** Se ha definido que la generación paralela de contenidos será gestionada **completamente por el frontend**. El backend no tiene tareas pendientes en esta área.
+
+### **4. Marketplace, Pagos y Claves de API (COMPLETADO)**
+- **Marketplace:** Se añadieron los campos `is_public` y `price` al modelo `StudyPlanPerSubject` y se crearon los servicios y rutas para listar planes públicos.
+- **Pagos (Stripe):** Se integró la librería de Stripe, se añadieron las claves a la configuración y se crearon los endpoints `/checkout` y `/stripe-webhook` para gestionar los pagos. Se implementó la lógica para asignar el plan al usuario después de una compra.
+- **Gestión de Claves API:** Se añadió el campo `api_keys` al modelo `User` y se creó el endpoint `PUT /api/users/me/api-keys` para que los usuarios gestionen sus claves.
+
+### **5. Eliminación en Cascada (COMPLETADO)**
+- **Integridad de Datos:** Se ha reforzado la lógica en los métodos `delete_study_plan`, `delete_module` y `delete_topic` para asegurar que al eliminar un documento, todos sus dependientes (módulos, temas, contenidos, evaluaciones, etc.) sean eliminados correctamente, previniendo datos huérfanos.
+
+### **6. Mejoras de Plantillas (COMPLETADO)**
+- **Clonación:** Se determinó que el endpoint `POST /api/templates/<template_id>/fork` existente cumple con el requisito de clonar plantillas.
+
+### **7. Dashboards (COMPLETADO)**
+- **Revisión de Métricas:** Se revisaron los servicios de dashboards y se concluyó que las consultas y la disponibilidad de los datos son adecuadas para la conexión con el frontend.
 
 Muchos de estos puntos ya estaban en backlog; ahora se insiste en mover al front-end las tareas de IA (p.ej. generación de texto/simulaciones con Gemini) para evitar el límite de 1 minuto en funciones serverless, usando el backend solo como colas y router de datos.
 

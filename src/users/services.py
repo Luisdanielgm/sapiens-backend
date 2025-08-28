@@ -306,6 +306,19 @@ class UserService(VerificationBaseService):
             logging.error(f"Error al obtener información del usuario por ID: {str(e)}")
             return None
 
+    def update_user(self, user_id: str, update_data: dict) -> Tuple[bool, str]:
+        """Actualiza los datos de un usuario."""
+        try:
+            result = self.collection.update_one(
+                {"_id": ObjectId(user_id)},
+                {"$set": update_data}
+            )
+            if result.modified_count > 0:
+                return True, "Usuario actualizado exitosamente"
+            return False, "No se pudo actualizar el usuario"
+        except Exception as e:
+            return False, str(e)
+
     def verify_password(self, plain_password, hashed_password):
         """Verifica si la contraseña en texto plano coincide con el hash almacenado"""
         try:

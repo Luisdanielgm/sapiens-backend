@@ -226,13 +226,20 @@ class StudyPlanService(VerificationBaseService):
                 
                 module["topics"] = topics
                 
-                # Obtener evaluaciones y convertir sus ObjectId
-                evaluations = list(get_db().evaluations.find({"module_id": ObjectId(module["_id"])}))
-                for evaluation in evaluations:
-                    evaluation["_id"] = str(evaluation["_id"])
-                    evaluation["module_id"] = str(evaluation["module_id"])
+                # Obtener evaluaciones asociadas a los temas del módulo
+                module_topic_ids = [ObjectId(t["_id"]) for t in topics]
+                evaluations = []
+                if module_topic_ids:
+                    evaluations = list(get_db().evaluations.find({"topic_ids": {"$in": module_topic_ids}}))
                 
-                module["evaluations"] = evaluations
+                # Prevenir duplicados si una evaluación está en múltiples temas del mismo módulo
+                unique_evaluations = {str(e["_id"]): e for e in evaluations}.values()
+
+                for evaluation in unique_evaluations:
+                    evaluation["_id"] = str(evaluation["_id"])
+                    evaluation["topic_ids"] = [str(tid) for tid in evaluation["topic_ids"]]
+                
+                module["evaluations"] = list(unique_evaluations)
 
             plan["modules"] = modules
             
@@ -317,12 +324,16 @@ class StudyPlanService(VerificationBaseService):
             
             # 1. Eliminar todos los temas asociados a los módulos
             if module_ids:
-                topics_result = get_db().topics.delete_many({"module_id": {"$in": module_ids}})
+                topic_ids_to_delete = [t["_id"] for t in get_db().topics.find({"module_id": {"$in": module_ids}}, {"_id": 1})]
+                topics_result = get_db().topics.delete_many({"_id": {"$in": topic_ids_to_delete}})
                 total_topics_deleted = topics_result.deleted_count
                 
-                # 2. Eliminar todas las evaluaciones asociadas a los módulos
-                evaluations_result = get_db().evaluations.delete_many({"module_id": {"$in": module_ids}})
-                total_evaluations_deleted = evaluations_result.deleted_count
+                # 2. Eliminar todas las evaluaciones asociadas a los temas
+                if topic_ids_to_delete:
+                    evaluations_result = get_db().evaluations.delete_many({"topic_ids": {"$in": topic_ids_to_delete}})
+                    total_evaluations_deleted = evaluations_result.deleted_count
+                else:
+                    total_evaluations_deleted = 0
                 
                 # 3. Eliminar los módulos
                 modules_result = get_db().modules.delete_many({"_id": {"$in": module_ids}})
@@ -675,8 +686,11 @@ class ModuleService(VerificationBaseService):
             # Obtener temas relacionados
             topics = list(get_db().topics.find({"module_id": ObjectId(module_id)}))
             
-            # Obtener evaluaciones relacionadas
-            evaluations = list(get_db().evaluations.find({"module_id": ObjectId(module_id)}))
+            # Obtener evaluaciones relacionadas a los temas
+            topic_ids = [t["_id"] for t in topics]
+            evaluations = []
+            if topic_ids:
+                evaluations = list(get_db().evaluations.find({"topic_ids": {"$in": topic_ids}}))
             
             # Agregar temas y evaluaciones al módulo
             module['topics'] = topics
@@ -868,8 +882,10 @@ class ModuleService(VerificationBaseService):
         unpublished_topics_count = total_topics - published_topics_count
         missing_theory = [t for t in topics if not t.get("theory_content")]
         missing_resources = [t for t in topics if not t.get("resources") or len(t.get("resources")) == 0]
-        # Contar evaluaciones asociadas
-        eval_count = db.evaluations.count_documents({"module_id": ObjectId(module_id)})
+        topic_ids = [t["_id"] for t in topics]
+        eval_count = 0
+        if topic_ids:
+            eval_count = db.evaluations.count_documents({"topic_ids": {"$in": topic_ids}})
         
         # Calcular content_completeness_score
         content_completeness_score = 0
@@ -1044,31 +1060,49 @@ class TopicService(VerificationBaseService):
     
     def delete_topic(self, topic_id: str) -> Tuple[bool, str]:
         """
-        Elimina un tema y sus vinculaciones. 
-        Elimina los recursos asociados SOLO si este tema era el único que los vinculaba.
+        Elimina un tema y sus contenidos asociados.
+        También gestiona las evaluaciones vinculadas: las elimina si solo estaban vinculadas a este tema,
+        o actualiza la lista de temas si estaban vinculadas a múltiples.
         """
         try:
-            # Validar ID
             topic_id_obj = ObjectId(topic_id)
+            db = get_db()
 
             # Verificar que el tema existe
-            topic = self.collection.find_one({"_id": topic_id_obj})
-            if not topic:
+            if not db.topics.find_one({"_id": topic_id_obj}):
                 return False, "Tema no encontrado"
 
-            # Eliminar todos los TopicContent asociados a este tema
-            content_result = get_db().topic_contents.delete_many({"topic_id": topic_id_obj})
-            logging.info(f"Eliminados {content_result.deleted_count} contenidos asociados al tema {topic_id}")
+            # 1. Gestionar Evaluaciones vinculadas
+            evaluations_to_update = list(db.evaluations.find({"topic_ids": topic_id_obj}))
+            evals_to_delete_ids = []
             
-            # Finalmente, eliminar el tema en sí
+            for evac in evaluations_to_update:
+                # Si la evaluación solo está vinculada a este tema, se elimina
+                if len(evac.get("topic_ids", [])) == 1:
+                    evals_to_delete_ids.append(evac["_id"])
+                # Si está vinculada a más temas, se quita la referencia a este tema
+                else:
+                    db.evaluations.update_one(
+                        {"_id": evac["_id"]},
+                        {"$pull": {"topic_ids": topic_id_obj}}
+                    )
+            
+            if evals_to_delete_ids:
+                db.evaluations.delete_many({"_id": {"$in": evals_to_delete_ids}})
+                # También eliminar los resultados de esas evaluaciones
+                db.evaluation_results.delete_many({"evaluation_id": {"$in": evals_to_delete_ids}})
+
+            # 2. Eliminar todos los TopicContent asociados a este tema
+            content_result = db.topic_contents.delete_many({"topic_id": topic_id_obj})
+            
+            # 3. Finalmente, eliminar el tema en sí
             result = self.collection.delete_one({"_id": topic_id_obj})
             
             if result.deleted_count > 0:
-                msg = f"Tema y {content_result.deleted_count} contenidos asociados eliminados exitosamente."
+                msg = f"Tema, {content_result.deleted_count} contenidos y {len(evals_to_delete_ids)} evaluaciones eliminados exitosamente."
                 return True, msg
             
-            # Si llegamos aquí, el tema no se eliminó por alguna razón
-            return False, "No se pudo eliminar el tema después de procesar sus contenidos"
+            return False, "No se pudo eliminar el tema después de procesar sus dependencias"
 
         except Exception as e:
             logging.error(f"Error al eliminar el tema {topic_id}: {str(e)}")
@@ -1222,15 +1256,18 @@ class EvaluationService(VerificationBaseService):
 
     def create_evaluation(self, evaluation_data: dict) -> Tuple[bool, str]:
         try:
-            # Validar que existe el módulo
-            module_id = evaluation_data.get('module_id')
-            module = get_db().modules.find_one({"_id": ObjectId(module_id)})
-            if not module:
-                return False, "Módulo no encontrado"
+            topic_ids = evaluation_data.get('topic_ids')
+            if not topic_ids or not isinstance(topic_ids, list):
+                return False, "topic_ids es requerido y debe ser una lista"
+
+            # Validar que todos los topics existen
+            for tid in topic_ids:
+                if not get_db().topics.find_one({"_id": ObjectId(tid)}):
+                    return False, f"El tema con ID {tid} no fue encontrado"
             
             # Crear una copia con los datos necesarios para el constructor
             evaluation_dict = {
-                "module_id": ObjectId(module_id),
+                "topic_ids": topic_ids,
                 "title": evaluation_data.get("title"),
                 "description": evaluation_data.get("description", ""),
                 "weight": evaluation_data.get("weight", 0),
@@ -1280,9 +1317,15 @@ class EvaluationService(VerificationBaseService):
             if not evaluation:
                 return False, "Evaluación no encontrada"
             
-            # Convertir module_id a ObjectId si se actualiza
-            if 'module_id' in update_data and isinstance(update_data['module_id'], str):
-                update_data['module_id'] = ObjectId(update_data['module_id'])
+            # Validar que todos los topics existen si se actualiza topic_ids
+            if 'topic_ids' in update_data:
+                topic_ids = update_data.get('topic_ids')
+                if not topic_ids or not isinstance(topic_ids, list):
+                    return False, "topic_ids debe ser una lista no vacía"
+                for tid in topic_ids:
+                    if not get_db().topics.find_one({"_id": ObjectId(tid)}):
+                        return False, f"El tema con ID {tid} no fue encontrado"
+                update_data['topic_ids'] = [ObjectId(tid) for tid in topic_ids]
             
             # Manejo de linked_quiz_id para actualización de evaluación
             if 'linked_quiz_id' in update_data and isinstance(update_data['linked_quiz_id'], str):
@@ -1348,27 +1391,28 @@ class EvaluationService(VerificationBaseService):
 
             # Convertir ObjectId a string
             evaluation['_id'] = str(evaluation['_id'])
-            evaluation['module_id'] = str(evaluation['module_id'])
+            if 'topic_ids' in evaluation:
+                evaluation['topic_ids'] = [str(tid) for tid in evaluation['topic_ids']]
 
             return evaluation
         except Exception as e:
             return None
 
-    def get_evaluations_by_module(self, module_id: str) -> List[Dict]:
-        """Lista todas las evaluaciones de un módulo."""
+    def get_evaluations_by_topic(self, topic_id: str) -> List[Dict]:
+        """Lista todas las evaluaciones asociadas a un tema específico."""
         try:
-            evaluations = list(self.collection.find({"module_id": ObjectId(module_id)}))
+            evaluations = list(self.collection.find({"topic_ids": ObjectId(topic_id)}))
             for ev in evaluations:
                 ev["_id"] = str(ev["_id"])
-                ev["module_id"] = str(ev["module_id"])
+                ev["topic_ids"] = [str(tid) for tid in ev["topic_ids"]]
             return evaluations
         except Exception:
             return []
 
-    def get_evaluations_status_for_student(self, module_id: str, student_id: str) -> List[Dict]:
-        """Obtiene evaluaciones del módulo con estado para un estudiante."""
+    def get_evaluations_status_for_student(self, topic_id: str, student_id: str) -> List[Dict]:
+        """Obtiene evaluaciones de un tema con estado para un estudiante."""
         try:
-            evaluations = self.get_evaluations_by_module(module_id)
+            evaluations = self.get_evaluations_by_topic(topic_id)
             db = get_db()
             results = []
             for ev in evaluations:
@@ -1471,17 +1515,17 @@ class EvaluationService(VerificationBaseService):
         except Exception as e:
             return False, str(e)
 
-    def get_student_results(self, student_id: str, module_id: str = None) -> List[Dict]:
+    def get_student_results(self, student_id: str, topic_id: str = None) -> List[Dict]:
         """
-        Obtiene los resultados de las evaluaciones de un estudiante para un módulo.
+        Obtiene los resultados de las evaluaciones de un estudiante para un tema.
         Utiliza el servicio unificado de ContentResult.
         """
         try:
-            # Primero, obtener todas las evaluaciones del módulo
-            if not module_id:
-                raise ValueError("Se requiere un module_id para buscar resultados de evaluación.")
+            # Primero, obtener todas las evaluaciones del tema
+            if not topic_id:
+                raise ValueError("Se requiere un topic_id para buscar resultados de evaluación.")
 
-            evaluations = list(self.collection.find({"module_id": ObjectId(module_id)}))
+            evaluations = list(self.collection.find({"topic_ids": ObjectId(topic_id)}))
             evaluation_ids = [str(e["_id"]) for e in evaluations]
 
             if not evaluation_ids:

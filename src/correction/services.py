@@ -16,6 +16,45 @@ class CorrectionService(VerificationBaseService):
     """
     def __init__(self):
         super().__init__(collection_name="correction_tasks")
+        self.submissions_collection = get_db().evaluation_submissions
+
+    def save_ai_correction(self, submission_id: str, ai_score: float, ai_feedback: str, user_id: str) -> Tuple[bool, Optional[Dict]]:
+        """
+        Guarda el resultado de una corrección de IA realizada en el frontend.
+        """
+        try:
+            submission = self.submissions_collection.find_one({"_id": ObjectId(submission_id)})
+            if not submission:
+                return False, {"error": "Submission not found"}
+
+            # Basic permission check: only the student can save their own AI correction for now
+            if str(submission.get("student_id")) != user_id:
+                return False, {"error": "Permission denied"}
+
+            update_data = {
+                "ai_score": ai_score,
+                "ai_feedback": ai_feedback,
+                "ai_corrected_at": datetime.now(),
+                "grade": ai_score, # Also update the main grade
+                "feedback": ai_feedback, # Also update the main feedback
+                "status": "graded",
+                "graded_by": ObjectId(user_id), # Mark as graded by the user (student)
+                "updated_at": datetime.now()
+            }
+
+            result = self.submissions_collection.update_one(
+                {"_id": ObjectId(submission_id)},
+                {"$set": update_data}
+            )
+
+            if result.modified_count > 0:
+                return True, {"submission_id": submission_id, "status": "graded"}
+            
+            return False, {"error": "Failed to update submission"}
+
+        except Exception as e:
+            logging.error(f"Error saving AI correction: {str(e)}")
+            return False, {"error": "Internal server error"}
 
     def start_correction_task(self, evaluation_id: str, submission_resource_id: str, 
                               rubric_resource_id: Optional[str], teacher_id: str) -> Tuple[bool, str]:

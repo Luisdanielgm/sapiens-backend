@@ -18,6 +18,8 @@ class StudyPlanPerSubject:
                  workspace_type: Optional[str] = None,
                  is_personal: bool = False,
                  objectives: Optional[List[str]] = None,
+                 is_public: bool = False,
+                 price: Optional[float] = None,
                  created_at: Optional[datetime] = None,
                  updated_at: Optional[datetime] = None):
         self.version = version
@@ -33,6 +35,8 @@ class StudyPlanPerSubject:
         self.workspace_type = workspace_type
         self.is_personal = is_personal
         self.objectives = objectives or []
+        self.is_public = is_public
+        self.price = price
         self.created_at = created_at or datetime.now()
         self.updated_at = updated_at or datetime.now()
 
@@ -51,6 +55,8 @@ class StudyPlanPerSubject:
             "workspace_type": self.workspace_type,
             "is_personal": self.is_personal,
             "objectives": self.objectives,
+            "is_public": self.is_public,
+            "price": self.price,
             "created_at": self.created_at,
             "updated_at": self.updated_at
         }
@@ -150,7 +156,7 @@ class Topic:
 
 class Evaluation:
     def __init__(self,
-                 module_id: str,
+                 topic_ids: List[str],
                  title: str,
                  description: str,
                  weight: float,
@@ -160,7 +166,7 @@ class Evaluation:
                  requires_submission: bool = False,
                  linked_quiz_id: Optional[str] = None,
                  auto_grading: bool = False):
-        self.module_id = ObjectId(module_id)
+        self.topic_ids = [ObjectId(tid) for tid in topic_ids]
         self.title = title
         self.description = description
         self.weight = weight
@@ -175,7 +181,7 @@ class Evaluation:
 
     def to_dict(self) -> dict:
         return {
-            "module_id": self.module_id,
+            "topic_ids": self.topic_ids,
             "title": self.title,
             "description": self.description,
             "weight": self.weight,
@@ -261,6 +267,9 @@ class EvaluationSubmission:
                  is_late: bool = False,
                  attempts: int = 1,
                  status: str = "submitted",
+                 ai_score: Optional[float] = None,
+                 ai_feedback: Optional[str] = None,
+                 ai_corrected_at: Optional[datetime] = None,
                  _id: Optional[ObjectId] = None,
                  created_at: Optional[datetime] = None,
                  updated_at: Optional[datetime] = None):
@@ -278,6 +287,9 @@ class EvaluationSubmission:
         self.is_late = is_late
         self.attempts = attempts
         self.status = status
+        self.ai_score = ai_score
+        self.ai_feedback = ai_feedback
+        self.ai_corrected_at = ai_corrected_at
         self.created_at = created_at or datetime.now()
         self.updated_at = updated_at or datetime.now()
 
@@ -297,6 +309,9 @@ class EvaluationSubmission:
             "is_late": self.is_late,
             "attempts": self.attempts,
             "status": self.status,
+            "ai_score": self.ai_score,
+            "ai_feedback": self.ai_feedback,
+            "ai_corrected_at": self.ai_corrected_at,
             "created_at": self.created_at,
             "updated_at": self.updated_at
         }

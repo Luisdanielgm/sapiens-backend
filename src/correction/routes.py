@@ -12,6 +12,39 @@ from .services import CorrectionService
 correction_bp = APIBlueprint('correction', __name__)
 correction_service = CorrectionService()
 
+@correction_bp.route('/submission/<submission_id>/ai-result', methods=['PUT'])
+@auth_required
+def record_ai_correction(submission_id):
+    """
+    Endpoint para que el frontend guarde el resultado de una corrección hecha por IA.
+    """
+    try:
+        data = request.json
+        user_id = get_jwt_identity()
+
+        required_fields = ["ai_score", "ai_feedback"]
+        if not all(field in data for field in required_fields):
+            return APIRoute.error(ErrorCodes.MISSING_FIELDS, "Faltan campos requeridos (ai_score, ai_feedback).")
+
+        success, result = correction_service.save_ai_correction(
+            submission_id=submission_id,
+            ai_score=data["ai_score"],
+            ai_feedback=data["ai_feedback"],
+            user_id=user_id
+        )
+
+        if success:
+            return APIRoute.success(
+                data=result,
+                message="Resultado de la corrección IA guardado exitosamente."
+            )
+        else:
+            return APIRoute.error(ErrorCodes.OPERATION_FAILED, result)
+            
+    except Exception as e:
+        logging.error(f"Error en endpoint record_ai_correction: {str(e)}")
+        return APIRoute.error(ErrorCodes.SERVER_ERROR, "Error interno del servidor.")
+
 @correction_bp.route('/start', methods=['POST'])
 @auth_required
 @role_required(ROLES["TEACHER"])

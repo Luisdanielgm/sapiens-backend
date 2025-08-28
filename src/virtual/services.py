@@ -549,8 +549,11 @@ class ContentChangeDetector(VerificationBaseService):
             # Obtener temas del módulo
             topics = list(self.db.topics.find({"module_id": ObjectId(module_id)}))
             
-            # Obtener evaluaciones del módulo
-            evaluations = list(self.db.evaluations.find({"module_id": ObjectId(module_id)}))
+            # Obtener evaluaciones del módulo a través de sus temas
+            topic_ids = [t["_id"] for t in topics]
+            evaluations = []
+            if topic_ids:
+                evaluations = list(self.db.evaluations.find({"topic_ids": {"$in": topic_ids}}))
             
             # Crear string con el contenido relevante
             content_string = ""

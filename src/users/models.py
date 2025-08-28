@@ -16,7 +16,8 @@ class User:
                 picture: str = "",
                 status: str = "active",
                 provider: str = "local",
-                email_verified: bool = False):
+                                 email_verified: bool = False,
+                 api_keys: Optional[Dict[str, str]] = None):
         self.email = email
         self.name = name
         self.birth_date = birth_date
@@ -26,6 +27,7 @@ class User:
         self.status = status
         self.provider = provider
         self.email_verified = email_verified
+        self.api_keys = api_keys or {}
         self.created_at = datetime.now()
         self.updated_at = datetime.now()
         
@@ -40,6 +42,7 @@ class User:
             "status": self.status,
             "provider": self.provider,
             "email_verified": self.email_verified,
+            "api_keys": self.api_keys,
             "created_at": self.created_at,
             "updated_at": self.updated_at
         }

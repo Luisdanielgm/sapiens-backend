@@ -47,6 +47,7 @@ from src.ai_monitoring.routes import ai_monitoring_bp  # Sistema de monitoreo de
 from src.correction.routes import correction_bp
 from src.workspaces.routes import workspaces_bp
 from src.personalization.routes import personalization_bp  # Sistema de personalización adaptativa
+from src.marketplace.routes import marketplace_bp # Sistema de marketplace
 # Sistema de plantillas
 from src.content.template_routes import template_bp, instance_bp, preview_bp
 
@@ -227,6 +228,7 @@ def create_app(config_object=active_config):
     app.register_blueprint(correction_bp, url_prefix='/api/correction')
     app.register_blueprint(workspaces_bp, url_prefix='/api/workspaces')
     app.register_blueprint(personalization_bp)  # Ya incluye url_prefix='/api/personalization'
+    app.register_blueprint(marketplace_bp) # Ya incluye url_prefix='/api/marketplace'
     
     # Sistema de plantillas
     app.register_blueprint(template_bp)  # Ya incluye url_prefix='/api/templates'

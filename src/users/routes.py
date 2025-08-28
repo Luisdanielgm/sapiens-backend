@@ -273,3 +273,23 @@ def reset_password():
 @APIRoute.standard(auth_required_flag=True)
 def verify_token():
     return APIRoute.success()
+
+@users_bp.route('/me/api-keys', methods=['PUT'])
+@APIRoute.standard(auth_required_flag=True)
+def update_my_api_keys():
+    """Updates the API keys for the current user."""
+    try:
+        data = request.get_json() or {}
+        user_id = get_jwt_identity()
+        api_keys = data.get('api_keys', {})
+        success, message = user_service.update_user(user_id, {"api_keys": api_keys})
+        if success:
+            return APIRoute.success(message="API keys updated")
+        return APIRoute.error(
+            ErrorCodes.UPDATE_ERROR,
+            message,
+            status_code=400,
+        )
+    except Exception as e:
+        log_error(f"Error updating API keys: {str(e)}", e, "users.routes")
+        return APIRoute.error(ErrorCodes.SERVER_ERROR, "Error interno al actualizar las claves de API")
