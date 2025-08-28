@@ -274,6 +274,31 @@ def reset_password():
 def verify_token():
     return APIRoute.success()
 
+@users_bp.route('/me', methods=['GET'])
+@APIRoute.standard(auth_required_flag=True)
+def get_current_user():
+    """Obtiene la información del usuario autenticado actual."""
+    try:
+        user_id = get_jwt_identity()
+        user_info = user_service.get_user_info_by_id(user_id)
+        
+        if user_info:
+            # Normalizar el rol si existe
+            if user_info.get("role"):
+                user_info["role"] = normalize_role(user_info["role"])
+            
+            # Obtener workspaces del usuario
+            workspaces = membership_service.get_user_workspaces(user_id)
+            user_info["workspaces"] = workspaces if workspaces else []
+            
+            return APIRoute.success(data={"user": user_info})
+        else:
+            return APIRoute.error(ErrorCodes.RESOURCE_NOT_FOUND, "Usuario no encontrado")
+            
+    except Exception as e:
+        log_error(f"Error obteniendo información del usuario actual: {str(e)}", e, "users.routes")
+        return APIRoute.error(ErrorCodes.SERVER_ERROR, "Error interno al obtener la información del usuario")
+
 @users_bp.route('/me/api-keys', methods=['PUT'])
 @APIRoute.standard(auth_required_flag=True)
 def update_my_api_keys():
