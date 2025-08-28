@@ -101,9 +101,16 @@ class ClassService(VerificationBaseService):
         except Exception as e:
             return False, str(e)
 
-    def get_class_details(self, class_id: str) -> Optional[Dict]:
+    def get_class_details(self, class_id: str, workspace_info: dict = None) -> Optional[Dict]:
         try:
-            class_data = self.collection.find_one({"_id": ObjectId(class_id)})
+            # Crear filtro base
+            filter_query = {"_id": ObjectId(class_id)}
+            
+            # Aplicar filtro de workspace si está disponible
+            if workspace_info and workspace_info.get('workspace_id'):
+                filter_query["workspace_id"] = ObjectId(workspace_info['workspace_id'])
+            
+            class_data = self.collection.find_one(filter_query)
             if not class_data:
                 return None
 
@@ -213,7 +220,7 @@ class ClassService(VerificationBaseService):
             print(f"Error al actualizar clase: {str(e)}")
             return False, str(e)
 
-    def get_classes_by_level(self, level_id: str) -> List[Dict]:
+    def get_classes_by_level(self, level_id: str, workspace_info: dict = None) -> List[Dict]:
         """
         Obtiene todas las clases de un nivel específico con información detallada
         
@@ -228,8 +235,15 @@ class ClassService(VerificationBaseService):
                 - Información del horario de la sección
         """
         try:
+            # Crear filtro base
+            filter_query = {"level_id": ObjectId(level_id)}
+            
+            # Aplicar filtro de workspace si está disponible
+            if workspace_info and workspace_info.get('workspace_id'):
+                filter_query["workspace_id"] = ObjectId(workspace_info['workspace_id'])
+            
             # Obtener todas las clases del nivel
-            classes = list(self.collection.find({"level_id": ObjectId(level_id)}))
+            classes = list(self.collection.find(filter_query))
             result = []
             
             for class_item in classes:
