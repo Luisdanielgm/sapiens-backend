@@ -108,7 +108,24 @@ class ClassService(VerificationBaseService):
             
             # Aplicar filtro de workspace si está disponible
             if workspace_info and workspace_info.get('workspace_id'):
-                filter_query["workspace_id"] = ObjectId(workspace_info['workspace_id'])
+                workspace_type = workspace_info.get('workspace_type')
+                
+                if workspace_type == 'INSTITUTE':
+                    # Para workspaces de instituto, buscar por workspace_id O por institute_id
+                    # (para compatibilidad con clases existentes sin workspace_id)
+                    filter_query = {
+                        "_id": ObjectId(class_id),
+                        "$or": [
+                            {"workspace_id": ObjectId(workspace_info['workspace_id'])},
+                            {
+                                "workspace_id": {"$exists": False},
+                                "institute_id": ObjectId(workspace_info.get('institute_id'))
+                            }
+                        ]
+                    }
+                else:
+                    # Para otros tipos de workspace, mantener filtro estricto
+                    filter_query["workspace_id"] = ObjectId(workspace_info['workspace_id'])
             
             class_data = self.collection.find_one(filter_query)
             if not class_data:
@@ -240,7 +257,24 @@ class ClassService(VerificationBaseService):
             
             # Aplicar filtro de workspace si está disponible
             if workspace_info and workspace_info.get('workspace_id'):
-                filter_query["workspace_id"] = ObjectId(workspace_info['workspace_id'])
+                workspace_type = workspace_info.get('workspace_type')
+                
+                if workspace_type == 'INSTITUTE':
+                    # Para workspaces de instituto, buscar por workspace_id O por institute_id
+                    # (para compatibilidad con clases existentes sin workspace_id)
+                    filter_query = {
+                        "level_id": ObjectId(level_id),
+                        "$or": [
+                            {"workspace_id": ObjectId(workspace_info['workspace_id'])},
+                            {
+                                "workspace_id": {"$exists": False},
+                                "institute_id": ObjectId(workspace_info.get('institute_id'))
+                            }
+                        ]
+                    }
+                else:
+                    # Para otros tipos de workspace, mantener filtro estricto
+                    filter_query["workspace_id"] = ObjectId(workspace_info['workspace_id'])
             
             # Obtener todas las clases del nivel
             classes = list(self.collection.find(filter_query))

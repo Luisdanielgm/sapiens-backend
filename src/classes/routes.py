@@ -202,10 +202,28 @@ def check_class_dependencies(class_id):
         workspace_info = get_current_workspace_info()
         
         # Verificar que la clase existe y pertenece al workspace
-        class_data = class_service.collection.find_one({
-            "_id": ObjectId(class_id),
-            "workspace_id": ObjectId(workspace_info.get('workspace_id'))
-        })
+        workspace_type = workspace_info.get('workspace_type')
+        
+        if workspace_type == 'INSTITUTE':
+            # Para workspaces de instituto, buscar por workspace_id O por institute_id
+            filter_query = {
+                "_id": ObjectId(class_id),
+                "$or": [
+                    {"workspace_id": ObjectId(workspace_info['workspace_id'])},
+                    {
+                        "workspace_id": {"$exists": False},
+                        "institute_id": ObjectId(workspace_info.get('institute_id'))
+                    }
+                ]
+            }
+        else:
+            # Para otros tipos de workspace, mantener filtro estricto
+            filter_query = {
+                "_id": ObjectId(class_id),
+                "workspace_id": ObjectId(workspace_info.get('workspace_id'))
+            }
+        
+        class_data = class_service.collection.find_one(filter_query)
         if not class_data:
             return APIRoute.error(
                 ErrorCodes.NOT_FOUND,
@@ -598,11 +616,28 @@ def update_subperiod(class_id, subperiod_id):
             )
         
         # Verificar que el subperíodo pertenece a la clase especificada
-        subperiod = subperiod_service.collection.find_one({
-            "_id": ObjectId(subperiod_id),
-            "class_id": ObjectId(class_id),
-            "workspace_id": ObjectId(workspace_info.get('workspace_id'))
-        })
+        if workspace_type == 'INSTITUTE':
+            # Para workspaces de instituto, buscar por workspace_id O por institute_id
+            subperiod_filter = {
+                "_id": ObjectId(subperiod_id),
+                "class_id": ObjectId(class_id),
+                "$or": [
+                    {"workspace_id": ObjectId(workspace_info['workspace_id'])},
+                    {
+                        "workspace_id": {"$exists": False},
+                        "institute_id": ObjectId(workspace_info.get('institute_id'))
+                    }
+                ]
+            }
+        else:
+            # Para otros tipos de workspace, mantener filtro estricto
+            subperiod_filter = {
+                "_id": ObjectId(subperiod_id),
+                "class_id": ObjectId(class_id),
+                "workspace_id": ObjectId(workspace_info.get('workspace_id'))
+            }
+        
+        subperiod = subperiod_service.collection.find_one(subperiod_filter)
         
         if not subperiod:
             return APIRoute.error(
@@ -655,11 +690,28 @@ def delete_subperiod(class_id, subperiod_id):
                 )
         
         # Verificar que el subperíodo pertenece a la clase especificada
-        subperiod = subperiod_service.collection.find_one({
-            "_id": ObjectId(subperiod_id),
-            "class_id": ObjectId(class_id),
-            "workspace_id": ObjectId(workspace_info.get('workspace_id'))
-        })
+        if workspace_type == 'INSTITUTE':
+            # Para workspaces de instituto, buscar por workspace_id O por institute_id
+            subperiod_filter = {
+                "_id": ObjectId(subperiod_id),
+                "class_id": ObjectId(class_id),
+                "$or": [
+                    {"workspace_id": ObjectId(workspace_info['workspace_id'])},
+                    {
+                        "workspace_id": {"$exists": False},
+                        "institute_id": ObjectId(workspace_info.get('institute_id'))
+                    }
+                ]
+            }
+        else:
+            # Para otros tipos de workspace, mantener filtro estricto
+            subperiod_filter = {
+                "_id": ObjectId(subperiod_id),
+                "class_id": ObjectId(class_id),
+                "workspace_id": ObjectId(workspace_info.get('workspace_id'))
+            }
+        
+        subperiod = subperiod_service.collection.find_one(subperiod_filter)
         
         if not subperiod:
             return APIRoute.error(
