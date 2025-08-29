@@ -1,245 +1,213 @@
-# Plan de Implementación Actualizado con Sistema de Plantillas - SapiensIA
+# Plan de Implementación Final - SapiensAI
 
-## Evolución Arquitectónica y Estado Actual
+## Estado Actual del Sistema
 
-### 1. Sistema de Plantillas e Instancias (IMPLEMENTADO)
+### ✅ Sistemas Implementados y Funcionales
 
-**Arquitectura Core:**
-- ✅ **Modelo Template**: Plantillas HTML interactivas con schema de parámetros
-- ✅ **Modelo TemplateInstance**: Instancias personalizadas con props específicos
-- ✅ **Sistema de Marcadores**: Extracción automática de parámetros (`data-sapiens-param`, `data-sapiens-asset`)
-- ✅ **Motor de Renderizado**: Render dinámico HTML + props en tiempo real
-- ✅ **Marketplace Privado**: Gestión de plantillas por profesor
+#### 1. Sistema de Contenido en Diapositivas y Plantillas por Subtema
+- **Estado**: ✅ **IMPLEMENTADO** (Base) - 🔄 **EN ACTUALIZACIÓN**
+- **Funcionalidades Actuales**:
+  - Sistema básico de TopicContent
+  - Plantillas HTML básicas
+  - Editor de plantillas con vista previa
+- **Nuevas Funcionalidades (En Implementación)**:
+  - Contenido dividido en diapositivas por subtema
+  - Plantillas interactivas por subtema con etiquetas
+  - Vinculación parent_content_id para diapositivas relacionadas
+- **Ubicación**: `/src/content/`, `/src/templates/`
 
-**Funcionalidades Operativas:**
-- ✅ Editor de plantillas con Monaco Editor y realce de sintaxis
-- ✅ Previsualización en vivo con iframe sandbox y postMessage
-- ✅ Formularios dinámicos basados en propsSchema
-- ✅ Clonación y versionado con POST /api/templates/{id}/fork
-- ✅ Integración seamless con TopicContent existente
-- ✅ Sistema de scopes: private, org, public
+#### 2. Personalización Adaptativa con Reinforcement Learning
+- **Estado**: ✅ **IMPLEMENTADO COMPLETAMENTE**
+- **Funcionalidades**:
+  - Integración con modelo RL externo (http://149.50.139.104:8000/api/tools/msp/execute)
+  - Análisis V-A-K-R basado en historial de 30 días
+  - Recomendaciones adaptativas de plantillas por subtema
+  - Sistema de feedback continuo para mejora del modelo
+  - Personalización en tiempo real basada en interacciones
+- **Módulo**: `/src/personalization/` (nuevo módulo completo)
+- **Tests**: 8/8 pruebas de integración pasando (100% éxito)
 
-**APIs Implementadas:**
-```
-POST /api/templates - Crear plantilla
-GET /api/templates - Listar plantillas con filtros
-PUT /api/templates/{id} - Actualizar plantilla
-POST /api/templates/{id}/extract - Extraer marcadores
-POST /api/templates/{id}/fork - Clonar plantilla
-POST /api/template-instances - Crear instancia
-GET /preview/instance/{instanceId} - Render en vivo
-```
+#### 3. Sistema de Workspaces Unificado
+- **Estado**: ✅ **IMPLEMENTADO COMPLETAMENTE**
+- **Funcionalidades**:
+  - Gestión completa de espacios de trabajo
+  - Sistema de roles: Owner, Admin, Member, Viewer
+  - Invitaciones con códigos de acceso
+  - 12 endpoints REST para gestión completa
+  - Integración con planes de estudio
+  - Tests de integración 100% exitosos
+- **Ubicación**: `/src/workspaces/` (módulo completo)
+- **Impacto**: Unifica la experiencia de profesores y alumnos
 
-### 2. Tres Niveles de Personalización (ARQUITECTURA HÍBRIDA)
+#### 4. Sistema de Evaluaciones Flexible (Many-to-Many)
+- **Estado**: 📋 **PLANIFICADO PARA FASE 3**
+- **Funcionalidades Actuales**:
+  - Evaluaciones básicas por tema individual
+  - Sistema de calificaciones simple
+- **Nuevas Funcionalidades (Planificadas)**:
+  - Relación Many-to-Many entre Evaluations y Topics
+  - Tabla intermedia evaluation_topics con ponderación
+  - Cálculo de notas distribuidas proporcionalmente
+  - Soporte para entregables de archivos
+  - Sistema de rúbricas detalladas
 
-**Nivel 1 - Personalización Básica (✅ IMPLEMENTADO):**
-- Adaptación inicial basada en perfil VARK del estudiante
-- Selección de tipos de contenido según preferencias cognitivas
-- Ajuste de dificultad según nivel académico
+#### 5. Sistema de Pagos y Monetización
+- **Estado**: 📋 **PLANIFICADO PARA FASE 4**
+- **Funcionalidades Planificadas**:
+  - Integración con PayPal y Binance Pay
+  - Planes de suscripción: Free, Premium, Enterprise
+  - PlanService para verificación de límites
+  - Marketplace monetizado para plantillas y cursos
+  - Encriptación segura de API Keys de usuario
+- **Impacto**: Modelo de negocio sostenible para la plataforma
 
-**Nivel 2 - Personalización Adaptativa (🔄 EN DESARROLLO):**
-- Motor estadístico que analiza ContentResult históricos
-- Cálculo de contentPreferences basado en performance
-- Ajuste dinámico de tipos de contenido según éxito/fracaso
-- Retroalimentación continua del sistema
+## Plan de Implementación Final en 5 Fases
 
-**Nivel 3 - Personalización Híbrida (🔄 PLANIFICADO):**
-- Combinación de motor estadístico + Reinforcement Learning
-- Predicción de contenido óptimo usando ML avanzado
-- Adaptación en tiempo real durante la sesión de estudio
-- Optimización multi-objetivo (engagement, retención, performance)
+### 🎯 Fase 1: Reestructuración de Contenido en Diapositivas (Semanas 1-3)
+**Objetivo**: Implementar el nuevo sistema de contenido dividido en diapositivas por subtema
 
-### 3. Módulos Virtuales Evolucionados
+#### Tareas Principales:
+1. **Reestructuración del Modelo de Contenido**
+   - Modificar TopicContent para soporte de diapositivas independientes
+   - Implementar campo `parent_content_id` para vinculación
+   - Crear sistema de subtemas automático
+   - Migrar contenido existente al nuevo formato
 
-**Estado Actual:**
-- ✅ VirtualModule y VirtualTopic con soporte para plantillas
-- ✅ VirtualTopicContent con instanceId para contenidos basados en plantillas
-- ✅ Generación automática que combina IA + plantillas predefinidas
-- ✅ Sistema de progresión que incluye contenidos interactivos
+2. **Generación de Diapositivas por IA**
+   - Adaptar prompts para generación por subtemas específicos
+   - Implementar división automática de contenido teórico
+   - Sistema de generación paralela por diapositiva
+   - Integración con el motor de personalización existente
 
-**Nuevas Capacidades:**
-- ✅ **Contenido Híbrido**: Mezcla de contenido generado por IA y plantillas
-- ✅ **Render Condicional**: TopicContent con render_engine="html_template"
-- ✅ **Personalización de Instancias**: Props ajustados por perfil del estudiante
-- 🔄 **Overrides Estudiantiles**: Personalización a nivel individual (Fase 5)
+3. **Plantillas Interactivas por Subtema**
+   - Implementar sistema de etiquetas para categorización
+   - Crear modalidades: contenido separado vs embebido
+   - Sistema de precedencia para orden de presentación
+   - Recomendación automática de plantillas por subtema
 
-### 4. Sistema de Evaluaciones Avanzado (PENDIENTE MEJORAS)
+#### Resultado Esperado:
+- Contenido teórico completamente reestructurado en diapositivas
+- Sistema de plantillas por subtema operativo
+- Generación automática de contenido por IA funcionando
 
-**Estado Actual:**
-- ✅ Evaluaciones básicas por tema
-- ✅ ContentResult para tracking de progreso
-- ✅ Integración con sistema de calificaciones
+### 🔧 Fase 2: Integración de Plantillas por Subtema (Semanas 4-6)
+**Objetivo**: Completar la integración de plantillas con el nuevo sistema de diapositivas
 
-**Brechas Identificadas:**
-- ❌ **Evaluaciones Multi-Tema**: Una evaluación que abarque varios temas
-- ❌ **Evaluaciones Compuestas**: Combinación de múltiples ContentResult
-- ❌ **Entregables Avanzados**: Sistema de recursos y documentos
-- ❌ **Evaluación Automática**: IA para corrección de exámenes escritos
+#### Tareas Principales:
+1. **Actualización de "Mis Plantillas"**
+   - Adaptar interfaz para organización por subtemas
+   - Implementar filtros por etiquetas y modalidad
+   - Sistema de vinculación automática con diapositivas
+   - Editor mejorado con soporte para ambas modalidades
 
-**Requerimientos Específicos:**
-1. **Flexibilidad de Asociación**: Evaluaciones → múltiples temas/módulos
-2. **Tres Tipos de Ponderación**:
-   - Manual (exposiciones, presentaciones)
-   - Automática (ContentResult individuales o combinados)
-   - Entregables (documentos subidos por estudiantes)
-3. **Sistema de Recursos Expandido**:
-   - Recursos de apoyo (rúbricas, plantillas de evaluación)
-   - Recursos entregables (trabajos de estudiantes)
-   - Recursos de referencia (materiales de consulta)
+2. **Sistema de Recomendación Inteligente**
+   - Integración con RL para sugerir plantillas por subtema
+   - Análisis de patrones V-A-K-R para recomendaciones
+   - Sistema de precedencia automática
+   - Feedback loop para mejora continua
 
-### 5. Motor de Corrección Automática (NUEVO MÓDULO)
+3. **Reproducción Adaptativa en Frontend**
+   - Implementar lógica de presentación basada en personalización
+   - Sistema de navegación entre diapositivas
+   - Integración de plantillas según modalidad seleccionada
+   - Gestión de resultados de contenido para plantillas
 
-**Funcionalidades Requeridas:**
-- 📋 **Procesamiento de Imágenes**: OCR para exámenes fotografiados
-- 📋 **Procesamiento de Documentos**: Análisis directo de PDFs/Word
-- 📋 **Sistema de Rúbricas**: Criterios de evaluación personalizables
-- 📋 **IA de Evaluación**: Modelos de visión + NLP para corrección
-- 📋 **Sandbox de Código**: Ejecución segura para ejercicios de programación
+#### Resultado Esperado:
+- Sistema completo de plantillas por subtema
+- Recomendación automática funcionando
+- Experiencia de usuario adaptativa implementada
 
-**Arquitectura Propuesta:**
-```
-Modelos de Datos:
-- EvaluationRubric: Criterios y pesos de evaluación
-- AutoGradingResult: Resultado de corrección automática
-- CodeExecution: Resultados de ejecución en sandbox
+### 🔄 Fase 3: Sistema de Evaluaciones Flexible (Semanas 7-9)
+**Objetivo**: Implementar el nuevo sistema de evaluaciones Many-to-Many
 
-APIs Requeridas:
-- POST /api/auto-grading/image - Procesar imagen de examen
-- POST /api/auto-grading/document - Procesar documento digital
-- POST /api/auto-grading/code - Ejecutar y evaluar código
-- GET /api/rubrics - Gestionar rúbricas de evaluación
-```
+#### Tareas Principales:
+1. **Reestructuración del Modelo de Evaluaciones**
+   - Crear tabla intermedia `evaluation_topics`
+   - Implementar relación Many-to-Many entre Evaluations y Topics
+   - Sistema de ponderación por tema dentro de evaluaciones
+   - Migración de datos de evaluaciones existentes
 
-## Plan de Implementación por Fases
+2. **Soporte para Entregables**
+   - Sistema de gestión de archivos (subida, descarga, versionado)
+   - Integración con recursos de apoyo
+   - Sistema de rúbricas detalladas
+   - Tipos expandidos: cuestionarios, ensayos, proyectos, archivos
 
-### Fase 1 - Correcciones Backend Críticas (Semana 1)
+3. **Cálculo de Notas Combinadas**
+   - Algoritmo de distribución proporcional entre temas
+   - Actualización de endpoints para soporte multi-tema
+   - UI actualizada para profesores y alumnos
+   - Sistema de feedback integrado con V-A-K-R
 
-**Objetivo**: Estabilizar la base del sistema y corregir inconsistencias detectadas.
+#### Resultado Esperado:
+- Sistema de evaluaciones completamente flexible
+- Soporte completo para entregables
+- Cálculo automático de notas distribuidas
 
-**(B) Corrección de Lógica de Módulos Virtuales:**
-- Revisar y corregir VirtualTopicService.generate_virtual_content()
-- Asegurar que VirtualTopicContent.personalization_data se aplique correctamente
-- Validar que el progreso se calcule adecuadamente con contenidos mixtos (IA + plantillas)
-- Corregir cualquier inconsistencia en la relación VirtualTopic ↔ TopicContent
+### 💰 Fase 4: Pagos y Planes de Suscripción (Semanas 10-12)
+**Objetivo**: Implementar sistema de monetización y pagos
 
-**(B) Optimización de ContentResult:**
-- Verificar que ContentResult esté asociado correctamente a VirtualTopicContent
-- Implementar lógica diferenciada por tipo de contenido:
-  - Lectura: 100% al completar visualización
-  - Quiz: Porcentaje basado en respuestas correctas
-  - Juegos: Score del juego como porcentaje
-  - Plantillas interactivas: Resultado enviado via postMessage
+#### Tareas Principales:
+1. **Definición de Planes de Suscripción**
+   - Crear colección de planes: Free, Premium, Enterprise
+   - Definir límites específicos por plan
+   - Implementar PlanService para verificación automática
+   - Asignación de planes a usuarios/workspaces
 
-**(B) Cascada de Eliminación Completa:**
-- Implementar eliminación en cascada para Topics → TopicContents → TemplateInstances
-- Agregar eliminación de VirtualTopicContents al eliminar VirtualTopics
-- Probar eliminación completa: StudyPlan → Modules → Topics → Contents → Instances
+2. **Integración de Pasarelas de Pago**
+   - Integración con API de PayPal
+   - Integración con Binance Pay
+   - Sistema de webhooks para confirmación de pagos
+   - Gestión de suscripciones recurrentes
 
-### Fase 2 - Fundamentos del Ecosistema de Plantillas (Semana 2)
+3. **Encriptación y Seguridad**
+   - Sistema de encriptación para API Keys de usuario
+   - Almacenamiento seguro de claves personales
+   - Priorización de claves de usuario sobre globales
+   - UI de gestión de claves API
 
-**Objetivo**: Establecer la base sólida del sistema de plantillas y su integración.
+4. **Marketplace Monetizado**
+   - Sistema de precios para plantillas y cursos
+   - Comisiones y distribución de ingresos
+   - Dashboard de ventas para creadores
 
-**(B) APIs de Plantillas e Instancias:**
-- Completar endpoints faltantes para gestión avanzada de plantillas
-- Implementar sistema de extracción de marcadores mejorado
-- Crear endpoints de preview/render con seguridad CSP
-- Desarrollar lógica de fork automático para plantillas públicas
+#### Resultado Esperado:
+- Sistema de pagos completamente funcional
+- Planes de suscripción operativos
+- Marketplace monetizado activo
 
-**(B) Integración con Contenidos Legacy:**
-- Asegurar compatibilidad total entre contenidos tradicionales y plantillas
-- Implementar render condicional en ContentService.get_topic_content()
-- Adaptar VirtualTopicService para manejar contenidos híbridos
-- Crear migración suave sin romper funcionalidad existente
+### 🔧 Fase 5: Refinamientos y Pruebas Integrales (Semanas 13-15)
+**Objetivo**: Completar refinamientos finales y preparar para producción
 
-**(F) Vista "Mis Plantillas" Mejorada:**
-- Refinar UI con grid de tarjetas más informativo
-- Implementar filtros avanzados (tipo, estado, scope)
-- Mejorar editor con autocompletado y validación
-- Agregar sistema de tags y categorización
+#### Tareas Principales:
+1. **Eliminación en Cascada y Migración**
+   - Implementar eliminación en cascada para todos los modelos
+   - Migración completa de datos antiguos al nuevo formato
+   - Compatibilidad con contenido heredado
+   - Limpieza de datos huérfanos
 
-### Fase 3 - Marketplace Público y Uso Avanzado (Semana 3)
+2. **Pruebas Integrales del Sistema**
+   - Tests de UI con diferentes perfiles de usuario
+   - Pruebas de carga con múltiples workspaces
+   - Validación de flujos completos de pago
+   - Tests de integración con servicios externos
 
-**Objetivo**: Abrir el ecosistema de plantillas a la comunidad y refinar la experiencia.
+3. **Monitoreo y Ajustes Finales**
+   - Sistema de monitoreo de recomendaciones RL
+   - Ajustes del algoritmo de personalización
+   - Optimización de performance de diapositivas
+   - Documentación técnica completa
 
-**(F) Marketplace Público de Plantillas:**
-- Crear página pública accesible desde landing
-- Implementar filtros por categoría, popularidad y certificación
-- Desarrollar sistema de rating y reviews
-- Crear flujo de fork automático para plantillas públicas
+4. **Preparación para Producción**
+   - Configuración de entornos de producción
+   - Backup y recuperación de datos
+   - Monitoreo de errores en tiempo real
+   - Ajustes menores de UI y UX
 
-**(B) Sistema de Certificación:**
-- Implementar endpoint admin PUT /api/templates/{id}/certify
-- Crear flujo de validación manual por administradores
-- Desarrollar insignias y badges de calidad
-- Establecer criterios de certificación documentados
-
-**(F) Editor de Plantillas Avanzado:**
-- Integrar editor de código con realce de sintaxis completo
-- Implementar previsualización en tiempo real con postMessage
-- Crear formulario de edición de schema JSON manual
-- Desarrollar sistema de versionado y historial
-
-**(B) Documentación para Creadores:**
-- Crear manual de convenciones de marcadores
-- Documentar APIs de integración con ContentResult
-- Establecer guías de seguridad para plantillas
-- Crear ejemplos de plantillas de referencia
-
-### Fase 4 - Motor Adaptativo Estadístico (Semana 4)
-
-**Objetivo**: Implementar la primera fase del motor de personalización híbrido.
-
-**(B) Servicio de Personalización Estadística:**
-- Desarrollar AdaptiveLearningService.calculate_content_preferences()
-- Implementar análisis de ContentResult históricos
-- Crear algoritmo de cálculo de prefer_types/avoid_types
-- Integrar con cognitive_profile.contentPreferences
-
-**(B) Adaptación de VirtualTopic:**
-- Modificar generación de contenidos según contentPreferences
-- Implementar sesgo VARK dinámico en VirtualTopicContent
-- Crear sistema de vakHints para plantillas
-- Desarrollar lógica de ajuste de dificultad
-
-**(F) Feedback del Estudiante:**
-- Implementar modal de encuesta post-módulo
-- Crear selector de tipos de contenido preferidos
-- Desarrollar captura de feedback cualitativo
-- Integrar feedback manual con perfil cognitivo
-
-**(F) Visualización de Progreso Adaptativo:**
-- Crear página "Mi Perfil de Aprendizaje"
-- Implementar gráficos de rendimiento por tipo de contenido
-- Desarrollar indicadores de estilo de aprendizaje
-- Mostrar evolución del perfil cognitivo
-
-### Fase 5 - Sistema de Evaluaciones Avanzado (Semana 5)
-
-**Objetivo**: Completar el sistema de evaluaciones con flexibilidad multi-tema y entregables.
-
-**(B) Evaluaciones Multi-Tema:**
-- Modificar modelo Evaluation para soportar múltiples topic_ids
-- Crear lógica de evaluación compuesta (múltiples ContentResult)
-- Implementar cálculo de nota final ponderada
-- Desarrollar UI para asociar evaluaciones a múltiples temas
-
-**(B) Sistema de Entregables:**
-- Expandir modelo Resource con tipos: support, deliverable, reference
-- Crear flujo de subida de entregables por estudiantes
-- Implementar asociación Evaluation ↔ Resource (rúbricas y entregables)
-- Desarrollar sistema de revisión manual por profesores
-
-**(F) UI de Gestión de Evaluaciones:**
-- Crear interfaz para configurar evaluaciones multi-tema
-- Implementar selector de tipo de ponderación (manual/automática/entregable)
-- Desarrollar vista de revisión de entregables
-- Crear dashboard de evaluaciones pendientes
-
-**(B) Preparación para IA de Corrección:**
-- Diseñar modelos de datos para EvaluationRubric
-- Crear estructura para AutoGradingResult
-- Implementar endpoints base para procesamiento futuro
-- Documentar especificaciones para módulo de IA
+#### Resultado Esperado:
+- Sistema completamente estable y optimizado
+- Todos los flujos de usuario validados
+- Listo para lanzamiento en producción
 
 ## Funcionalidades Futuras (Post-Fase 5)
 

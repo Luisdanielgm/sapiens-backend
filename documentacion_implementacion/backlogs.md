@@ -6,21 +6,21 @@ Este documento consolida todos los requerimientos, funcionalidades y políticas 
 
 ---
 
-## 1. Sistema de Plantillas e Instancias
+## 1. Sistema de Contenido en Diapositivas y Plantillas por Subtema
 
-### 1.1 Arquitectura de Plantillas HTML
+### 1.1 Arquitectura de Contenido en Diapositivas
 - **Prioridad**: Alta
 - **Estado**: Planificado
-- **Descripción**: Sistema de plantillas HTML reutilizables con personalización avanzada
+- **Descripción**: Contenido teórico dividido en diapositivas por subtema
 - **Requerimientos**:
-  - **Modelo templates**: Plantillas globales o forks, nunca ligadas a topics
-  - **Campos clave**: ownerId, scope (private/public/org), status (draft/usable/certified)
-  - **Personalización**: marcadores data-sapiens-* para params, assets, slots, vars de alumno
-  - **Versionado**: semver con forkOf para plantillas derivadas
-  - **Mix V-A-K-R**: baselineMix obligatorio en plantillas
-  - **Capacidades**: audio, mic, camera definidas por plantilla
-  - **Etiquetas**: styleTags (interactivo, diagrama) y subjectTags (astronomía, biología)
-  - **Editor de Plantillas**: Interfaz visual para crear y editar plantillas con vista previa en tiempo real
+  - **Reestructuración**: Contenido teórico dividido en diapositivas por subtema
+  - **TopicContent independiente**: Cada diapositiva como entidad separada
+  - **Generación por IA**: Contenido automático basado en subtemas específicos
+  - **Vinculación**: parent_content_id para relacionar diapositivas del mismo tema
+  - **Modalidad 1**: Contenido separado - plantilla independiente del contenido teórico
+  - **Modalidad 2**: Contenido embebido - plantilla integrada en la diapositiva
+  - **Etiquetas**: Sistema de categorización para recomendación automática
+  - **Precedencia**: Campo para determinar orden de presentación
 
 ### 1.2 Sistema de Instancias
 - **Prioridad**: Alta
@@ -73,66 +73,70 @@ Este documento consolida todos los requerimientos, funcionalidades y políticas 
 
 ## 2. Interfaz de Usuario y Marketplace
 
-### 2.1 Vista "Mis Plantillas" (Reutilización de Juegos y Simulaciones)
+### 2.1 Vista "Mis Plantillas" (Actualizada)
 - **Prioridad**: Alta
 - **Estado**: Planificado
-- **Descripción**: Vista unificada para gestión de plantillas del profesor
+- **Descripción**: Vista unificada para gestión de plantillas organizadas por subtema
 - **Requerimientos**:
-  - **Header**: "Mis plantillas" con filtros rápidos y botón "Nueva plantilla"
-  - **Grid de cards**: Solo plantillas del autor con mini preview y badges
-  - **Acciones por card**: Ver, Editar, Clonar, Usar, toggle Publicar/Privada
-  - **Código lazy-load**: No se muestra por defecto, carga en modo avanzado
-  - **Previsualización**: Ventana nueva con iframe sandbox + CSP
+  - **Listado**: Plantillas organizadas por subtema y etiquetas
+  - **Búsqueda**: Filtros por subtema, etiquetas, modalidad (separado/embebido)
+  - **Edición**: Editor HTML con soporte para ambas modalidades
+  - **Vinculación**: Asociación automática con diapositivas por precedencia
+  - **Previsualización**: Vista previa integrada con contenido de diapositiva
   - **Flujo de creación**: Card temporal → ventana preview → botones Extraer, Probar, Guardar
 
-### 2.2 Marketplace Público
+### 2.2 Marketplace Público (Expandido)
 - **Prioridad**: Media
 - **Estado**: Planificado
-- **Descripción**: Catálogo público de plantillas certificadas
+- **Descripción**: Catálogo público con monetización integrada
 - **Requerimientos**:
-  - **Ruta separada**: Lista plantillas scope=public (usable o certified)
+  - **Catálogo**: Plantillas y planes de estudio completos
+  - **Monetización**: Integración con PayPal y Binance Pay
+  - **Suscripciones**: Planes Free, Premium, Enterprise
+  - **Certificación**: Sistema de validación de calidad y contenido
   - **Filtros avanzados**: Por mix V-A-K-R, styleTags, subjectTags
   - **Badges dinámicos**: "Muy visual", "Auditivo alto", etc.
   - **Acciones**: Ver, Clonar, Usar (sin edición)
-  - **Certificación**: Flujo de validación para estado certified
-  - **Publicación de Plantillas**: Sistema para que profesores publiquen plantillas al marketplace
   - **Sistema de Valoraciones**: Calificaciones y comentarios de usuarios sobre plantillas
   - **Búsqueda y Filtrado**: Sistema de búsqueda avanzada por categorías, materias y niveles
 
 ---
 
-## 3. Sistema de Evaluaciones Avanzado
+## 3. Sistema de Evaluaciones Flexible (Many-to-Many)
 
-### 3.1 Sistema de Evaluaciones Flexible
+### 3.1 Arquitectura Many-to-Many
 - **Prioridad**: Alta
 - **Estado**: Requiere modificación
-- **Descripción**: Sistema completo de evaluaciones con integración de plantillas
+- **Descripción**: Sistema flexible con asociaciones múltiples
 - **Requerimientos**:
-  - **CRÍTICO**: Modificar modelo Evaluation para permitir asociación Many-to-Many con Topics
-  - **Ciclo completo**: Recurso-Plantilla → Descarga → Entrega
+  - **Relación flexible**: Evaluaciones pueden asociarse a múltiples temas
+  - **Tabla intermedia**: evaluation_topics para gestionar asociaciones
+  - **Ponderación**: Peso específico por tema dentro de cada evaluación
+  - **Cálculo combinado**: Notas distribuidas proporcionalmente entre temas
   - **Corrección automática**: Integración con CorrectionService por IA
   - **Evaluaciones personalizadas**: Basadas en plantillas con mix V-A-K-R
   - **Feedback detallado**: Análisis por perfil cognitivo del estudiante
-  - **Métricas avanzadas**: Rendimiento contra tags de contenido
   - **API Keys personales**: Usuario puede usar sus propias claves de IA
 
-### 3.2 Evaluaciones Multi-Tema
+### 3.2 Soporte para Entregables
 - **Prioridad**: Alta
 - **Estado**: Pendiente
-- **Descripción**: Evaluaciones que abarquen múltiples temas o módulos completos
+- **Descripción**: Gestión completa de entregables y recursos
 - **Requerimientos**:
-  - **Flexibilidad de Asociación**: Evaluaciones que abarquen múltiples temas o módulos completos
-  - **Quiz Multi-Tema**: Capacidad de crear evaluaciones que cubran varios temas simultáneamente
-  - **Ponderación Flexible**: Sistema de pesos configurables por tema dentro de una evaluación
+  - **Tipos expandidos**: Cuestionarios, ensayos, proyectos, entregables de archivos
+  - **Gestión de archivos**: Subida, descarga y versionado de entregables
+  - **Recursos de apoyo**: Materiales adicionales vinculados a evaluaciones
+  - **Rúbricas**: Sistema de criterios de evaluación detallados
 
-### 3.3 Tres Modalidades de Evaluación
+### 3.3 Modalidades de Evaluación (Actualizada)
 - **Prioridad**: Alta
 - **Estado**: Pendiente
-- **Descripción**: Sistema flexible que soporte diferentes tipos de evaluación
+- **Descripción**: Sistema flexible con personalización adaptativa
 - **Requerimientos**:
-  - **Manual**: Evaluaciones presenciales (exposiciones, presentaciones) con calificación manual
-  - **Basada en Content Results**: Evaluación automática basada en resultados de contenidos virtuales
-  - **Por Entregables**: Evaluación de documentos/recursos subidos por estudiantes
+  - **Formativa**: Evaluación continua con feedback inmediato
+  - **Sumativa**: Evaluación con peso distribuido entre múltiples temas
+  - **Diagnóstica**: Evaluación inicial para personalización adaptativa
+  - **Autoevaluación**: Evaluación reflexiva integrada con sistema V-A-K-R
 
 ### 3.4 Sistema de Recursos Evaluativos
 - **Prioridad**: Media
@@ -187,26 +191,30 @@ Este documento consolida todos los requerimientos, funcionalidades y políticas 
 
 ---
 
-## 5. Módulos Virtuales y Personalización Avanzada
+## 5. Módulos Virtuales y Personalización Adaptativa
 
-### 5.1 Módulos Virtuales Personalizados y Generación Progresiva
+### 5.1 Generación Progresiva con Diapositivas
 - **Prioridad**: Alta
 - **Estado**: Implementado parcialmente
-- **Descripción**: Sistema de módulos virtuales con generación progresiva
+- **Descripción**: Sistema de módulos virtuales con contenido en diapositivas
 - **Requerimientos**:
-  - **Generación Progresiva**: Al iniciar un módulo virtual, se generan los contenidos del primer tema para acceso inmediato y los siguientes 2 temas en segundo plano
+  - **Trigger automático**: Al alcanzar 80% de progreso en módulo actual
+  - **Generación por subtemas**: Cada diapositiva generada independientemente
+  - **Validaciones previas**: Evaluaciones completadas, plantillas por subtema disponibles
+  - **Vinculación automática**: parent_content_id para relacionar diapositivas
   - **Colchón de Contenido**: Mantener siempre al menos dos temas futuros ya virtualizados
-  - **Anticipación de Módulos**: Al llegar a ~80% de progreso en un módulo, comenzar virtualización del siguiente módulo
   - **Requisitos de Virtualización**: Un módulo solo puede virtualizarse si todos sus temas han sido preparados y publicados por el profesor
 
-### 5.2 Cola de Generación Progresiva
+### 5.2 Personalización Adaptativa con RL
 - **Prioridad**: Alta
 - **Estado**: En desarrollo
-- **Descripción**: Sistema de colas para procesamiento en segundo plano
+- **Descripción**: Sistema de personalización con Reinforcement Learning
 - **Requerimientos**:
+  - **Reinforcement Learning**: Integración con modelo externo para recomendaciones
+  - **Análisis V-A-K-R**: Patrones de aprendizaje basados en historial de 30 días
+  - **Recomendación de plantillas**: IA sugiere plantillas por subtema según perfil
+  - **Adaptación en tiempo real**: Ajuste dinámico basado en interacciones
   - **Cola de tareas**: VirtualGenerationTask para procesar generación por IA sin bloquear la experiencia del usuario
-  - **Tipos de tareas**: "generate", "update" o "enhance", con prioridades
-  - **Encolado automático**: Al llegar a 80% de un tema
   - **Gestión de reintentos**: En caso de fallos
 
 ### 5.3 Personalización de Contenidos y Perfil Cognitivo
@@ -274,30 +282,33 @@ Este documento consolida todos los requerimientos, funcionalidades y políticas 
 
 ---
 
-## 6. Arquitectura Técnica y Servicios
+## 6. Arquitectura Técnica y Servicios (Actualizada)
 
-### 6.1 Arquitectura de Servicios Modular
+### 6.1 Arquitectura Modular con Workspaces
 - **Prioridad**: Alta
 - **Estado**: En desarrollo
-- **Descripción**: Arquitectura escalable con servicios especializados
+- **Descripción**: Arquitectura escalable con sistema de workspaces
 - **Requerimientos**:
+  - **Sistema de Workspaces**: Gestión unificada de espacios de trabajo
+  - **Roles y permisos**: Owner, Admin, Member, Viewer con permisos específicos
+  - **Invitaciones**: Sistema de códigos de acceso y gestión de miembros
+  - **APIs RESTful**: 12 endpoints para gestión completa de workspaces
   - **Pool de generación**: 5 hilos asíncronos configurables
-  - **Asignación por modelo**: Configuración de modelos por hilo
   - **Servicios especializados**: TemplateService, InstanceService, VirtualizationService
-  - **APIs mínimas**: CRUD para templates, instances, preview, marketplace
   - **Seguridad**: iframe sandbox + CSP estricta para previews
-  - **Rendimiento**: Cache inteligente y lazy-loading de código
 
-### 6.2 Gestión de Estado Granular
+### 6.2 Gestión de Estado y Pagos
 - **Prioridad**: Media
 - **Estado**: Planificado
-- **Descripción**: Control detallado del estado de generación y notificaciones
+- **Descripción**: Control de estado con integración de pagos
 - **Requerimientos**:
+  - **Encriptación de API Keys**: Almacenamiento seguro de claves de usuario
+  - **Integración de pagos**: PayPal y Binance Pay para suscripciones
+  - **Planes de suscripción**: Free, Premium, Enterprise con límites específicos
+  - **PlanService**: Verificación automática de límites por plan
   - **Estados de generación**: draft, processing, completed, failed por contenido
   - **Notificaciones persistentes**: Toasts granulares con botón de cierre
-  - **Progress tracking**: Estado detallado por hilo de generación
   - **Error handling**: Recuperación automática y logs detallados
-  - **Estado de virtualización**: Control de habilitación más estricto
 
 ### 6.3 Backend Mejorado
 - **Prioridad**: Alta

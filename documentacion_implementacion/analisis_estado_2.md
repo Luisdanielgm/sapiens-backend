@@ -1,17 +1,17 @@
-# Estado Actual de SapiensAI - Sistema 100% Funcional y Listo para Producción
+# Estado Actual de SapiensAI - Sistema Evolucionado con Nueva Arquitectura
 
-**🎉 ESTADO ACTUAL: BACKEND 100% IMPLEMENTADO Y FUNCIONAL**
+**🎉 ESTADO ACTUAL: BACKEND FUNCIONAL CON NUEVA ARQUITECTURA EN IMPLEMENTACIÓN**
 
-El sistema SapiensAI ha alcanzado un estado de **implementación completa** con todos los módulos principales operativos y **todos los tests de integración pasando al 100%**. El backend está **listo para producción** sin datos mock, con integración real de servicios externos y funcionalidades avanzadas completamente implementadas.
+El sistema SapiensAI ha evolucionado hacia una **nueva arquitectura basada en diapositivas y personalización adaptativa** con todos los módulos principales operativos. El backend mantiene su estabilidad mientras se implementan las nuevas funcionalidades estructurales: contenido en diapositivas por subtema, evaluaciones Many-to-Many, sistema de pagos y Workspaces unificados.
 
-## 🚀 **RESUMEN EJECUTIVO - SISTEMA COMPLETAMENTE FUNCIONAL**
+## 🚀 **RESUMEN EJECUTIVO - SISTEMA EN EVOLUCIÓN ARQUITECTÓNICA**
 
-- ✅ **Backend 100% Implementado**: Todos los módulos principales operativos
-- ✅ **Tests de Integración 100% Exitosos**: 6/6 suites de pruebas pasando
+- ✅ **Backend Estable**: Todos los módulos principales operativos
+- ✅ **Tests de Integración Exitosos**: 6/6 suites de pruebas pasando
 - ✅ **Servicio RL 100% Funcional**: Integración real con modelo externo
 - ✅ **Sistema de Workspaces Completo**: Funcionalidad completa implementada
-- ✅ **Sin Datos Mock**: Todas las respuestas provienen de datos reales
-- ✅ **Listo para Producción**: Sistema estable y completamente operativo
+- 🔄 **Nueva Arquitectura en Implementación**: Diapositivas, evaluaciones Many-to-Many, pagos
+- 📋 **Roadmap Definido**: Plan de implementación en 5 fases claramente estructurado
 
 ## ✅ IMPLEMENTACIONES COMPLETADAS RECIENTEMENTE
 
@@ -162,18 +162,20 @@ GitHub
 
 Todas las áreas funcionales críticas del sistema SapiensAI están **completamente implementadas y operativas**. El backend está listo para producción con integración real de servicios externos.
 
-### **Módulos Virtuales (Generación Progresiva)**: ✅ **COMPLETAMENTE IMPLEMENTADO**
-- ✅ **Lógica de encolado inicial y trigger automático al 80%** - Operativo
-- ✅ **Validaciones previas completas** - Evaluaciones, plantillas críticas, contenidos interactivos, perfil cognitivo
-- ✅ **Sistema de intercalación dinámica** - Algoritmos inteligentes integrados
-- ✅ **Endpoints REST funcionales** - `/api/virtual/progressive-generation`, `/api/virtual/trigger-next-generation`
+### **Módulos Virtuales con Diapositivas (Nueva Arquitectura)**: 🔄 **EN EVOLUCIÓN**
+- ✅ **Base funcional** - Sistema actual de generación progresiva operativo
+- 🔄 **Reestructuración en diapositivas** - Contenido dividido por subtemas independientes
+- 🔄 **Vinculación parent_content_id** - Para relacionar diapositivas del mismo tema
+- 🔄 **Generación por subtemas** - Cada diapositiva generada independientemente por IA
+- 📋 **Plantillas por subtema** - Sistema de recomendación automática planificado
 - ✅ **Tests de integración pasando** - Verificado en `test_virtual_personalization.py`
 
-### **Personalización de Contenidos (Perfil Cognitivo)**: ✅ **COMPLETAMENTE IMPLEMENTADO**
+### **Personalización Adaptativa con RL (Expandida)**: ✅ **COMPLETAMENTE IMPLEMENTADO**
 - ✅ **Almacenamiento y consulta de ContentResult** - Base de datos operativa
 - ✅ **Servicio completo V-A-K-R** - Análisis de patrones y recomendaciones
 - ✅ **Integración real con modelo RL** - `http://149.50.139.104:8000/api/tools/msp/execute`
 - ✅ **Endpoint `/api/personalization/adaptive`** - Recomendaciones adaptativas funcionales
+- 🔄 **Recomendación de plantillas por subtema** - Integración con nueva arquitectura
 - ✅ **Tests de integración 100% exitosos** - Verificado en `test_live_personalization.py`
 
 ### **Motor Adaptativo / Aprendizaje por Refuerzo**: ✅ **COMPLETAMENTE IMPLEMENTADO**
@@ -183,42 +185,72 @@ Todas las áreas funcionales críticas del sistema SapiensAI están **completame
 - ✅ **Mapeo completo de datos** - Perfil cognitivo, historial, métricas de sesión
 - ✅ **Tests 8/8 pasando** - Verificado en `test_rl_service_final.py`
 
-### **Sistema de Workspaces**: ✅ **COMPLETAMENTE IMPLEMENTADO**
+### **Sistema de Workspaces Unificado**: ✅ **COMPLETAMENTE IMPLEMENTADO**
 - ✅ **Gestión completa de workspaces** - Crear, listar, actualizar, eliminar
 - ✅ **Sistema de roles y permisos** - Owner, admin, member, viewer
 - ✅ **Invitaciones y códigos de acceso** - Sistema completo operativo
 - ✅ **Integración con planes de estudio** - Asignación automática funcional
 - ✅ **12 endpoints REST** - Todos implementados y verificados
+- 🔄 **Integración con planes de suscripción** - Preparado para sistema de pagos
 - ✅ **Tests de integración 100% exitosos** - Verificado en `test_integration_workspaces.py`
 
-Nuevos tipos de contenido: El backend debe permitir definir y validar nuevos formatos (ejercicios matemáticos, simulaciones, GEMINI_LIVE, etc.) en el modelo ContentType. A futuro, debería listar esos tipos dinámicamente. En el frontend, habrá que crear la UI para seleccionar/generar estos contenidos y verificar su renderizado (p. ej. vistas de simulación interactivas).
+## 🔄 **NUEVAS FUNCIONALIDADES EN IMPLEMENTACIÓN**
 
-Generación masiva/paralela (profesor): Falta implementar un pool de generación asíncrona (p.ej. 5 workers configurables por modelo) que genere en paralelo contenidos de un tema. Cada sub-tarea de generación paralela debe ejecutar un modelo de IA (en frontend) según el provider configurado y reintentos. El backend orquestará la cola (ParallelContentGenerationTask existe en el modelo
-GitHub
-). En el UI, se deben mostrar toasts independientes por contenido generado (persistentes hasta cerrarlos) y ocultar notificaciones genéricas al aparecer específicas.
+### **Sistema de Diapositivas por Subtema**: 🔄 **FASE 1 - EN DESARROLLO**
+- **Reestructuración de contenido**: División automática en diapositivas por subtema
+- **TopicContent independiente**: Cada diapositiva como entidad separada
+- **Vinculación parent_content_id**: Para relacionar diapositivas del mismo tema
+- **Generación por IA**: Contenido automático basado en subtemas específicos
+- **Modalidades de plantillas**: Contenido separado vs embebido
 
-Contenido teórico (“primeros principios”): Se planea generar explicaciones tipo método Feynman. Hay que ajustar los prompts de generación en el backend (o mejor, en el front-end) para que el modelo emita explicaciones simples y analogías. Documentar dichos prompts en el código. La generación de texto largo debe realizarse en el frontend.
+### **Sistema de Evaluaciones Many-to-Many**: 📋 **FASE 3 - PLANIFICADO**
+- **Relación flexible**: Evaluaciones asociadas a múltiples temas
+- **Tabla intermedia**: evaluation_topics para gestionar asociaciones
+- **Ponderación**: Peso específico por tema dentro de evaluaciones
+- **Cálculo combinado**: Notas distribuidas proporcionalmente
+- **Soporte para entregables**: Gestión completa de archivos
 
-Desbloqueo de temas y actualizaciones: Implementar la política de desbloqueo:
+### **Sistema de Pagos y Monetización**: 📋 **FASE 4 - PLANIFICADO**
+- **Integración de pagos**: PayPal y Binance Pay
+- **Planes de suscripción**: Free, Premium, Enterprise
+- **PlanService**: Verificación automática de límites
+- **Marketplace monetizado**: Plantillas y cursos con precios
+- **Encriptación de API Keys**: Almacenamiento seguro de claves de usuario
 
-Añadir contenido: se inserta al final de los no vistos (backend: ordenar correctamente en VirtualTopic).
+## 📋 **FUNCIONALIDADES FUTURAS Y REFINAMIENTOS**
 
-Editar contenido: afectar solo a alumnos que aún no lo vieron (verificar VirtualTopicContent).
+### **Eliminación en Cascada y Migración**: 📋 **FASE 5 - PLANIFICADO**
+- **Eliminación en cascada**: Para todos los modelos del sistema
+- **Migración de datos**: Contenido antiguo al nuevo formato de diapositivas
+- **Compatibilidad**: Con contenido heredado durante la transición
+- **Limpieza**: Datos huérfanos y optimización de base de datos
 
-Eliminar contenido: debe ocultarse para nuevos alumnos pero conservar históricos (quizás marcando status “archived”). Reforzar que las consultas de VirtualTopicContent apliquen estas reglas. En el frontend, refrescar las listas sin perder el progreso marcado y corregir los checkmarks según estos cambios.
+### **Resultados de Contenido (ContentResult)**: ✅ **ASOCIACIÓN CORREGIDA**
+- ✅ **RESUELTO**: ContentResult vinculado correctamente al VirtualTopicContent
+- ✅ **NUEVO**: Endpoint `/content/{virtual_id}/complete-auto` implementado
+- 🔄 **Adaptación**: Para trabajar con nuevo sistema de diapositivas
+- 🔄 **Gestión de resultados**: Para plantillas por subtema
 
-Resultados de contenido (ContentResult): ✅ **ASOCIACIÓN CORREGIDA**
-- ✅ **RESUELTO**: ContentResult ahora se vincula correctamente al VirtualTopicContent (asociación corregida)
-- ✅ **NUEVO**: Endpoint `/content/{virtual_id}/complete-auto` totalmente implementado para marcar completitud automática
-- ✅ En el frontend, luego de interacciones no evaluativas, debe enviarse esta marca de completitud para actualizar el progreso.
+### **Funcionalidades Avanzadas Futuras**:
 
-Evaluaciones y entregables: Pendiente definir la relación M:N entre Evaluation y Topic, así como endpoints para subir/listar entregables y vincular recursos de apoyo. En el frontend, habrá que permitir descargar rúbricas, subir archivos de estudiante y mostrar el estado de la entrega.
+**Corrección Automática con IA**: 📋 **POST-FASE 5**
+- Servicio de OCR para documentos escaneados
+- Análisis de texto con modelos de IA
+- Comparación automática con rúbricas
+- Sandbox para ejecución de código
+- Sistema de feedback detallado
 
-Corrección automática con IA: Aún no está implementado. Se planea un servicio (CorrectionService) que realice OCR de entregas, compare con rúbrica y ejecute código en sandbox. Al subir una entrega (y si hay rúbrica), el backend debería invocar este servicio. En el frontend, se requerirán vistas para mostrar el progreso/resultados de la corrección y permitir ajustes manuales por parte del profesor.
+**Gestión de Claves API**: 🔄 **INTEGRADO EN FASE 4**
+- Campos en perfil de usuario para claves de IA
+- Almacenamiento seguro con encriptación
+- Prioridad sobre claves globales
+- Soporte para Gemini, OpenRouter, Groq
 
-Marketplace de cursos: Pendiente implementar la publicación y listado de planes de estudio públicos con precios, integración con pasarelas (e.g. Stripe) y landing page. El frontend debe mostrar el marketplace (/pages/landing y listado), gestionar inscripción gratuita o de pago.
-
-Gestión de claves de API: Falta crear campos en el perfil del usuario para que el usuario introduzca sus claves de IA (Gemini, OpenRouter, Groq). En el backend, guardar esas claves seguras y darles prioridad sobre las globales al realizar llamadas a los servicios IA.
+**Aplicación Móvil**: 📋 **FUTURO**
+- React Native para iOS y Android
+- Funcionalidades de corrección IA
+- Cursado de módulos offline
+- Sincronización con plataforma web
 
 Aplicación móvil y UI: Aún faltan la app móvil (e.g. React Native) iniciando con corrección IA y cursado de módulos, además de mejoras de UI como modo oscuro completo, responsividad y limpieza de código.
 
@@ -237,16 +269,24 @@ Herramientas de concentración: En frontend, pulir temporizador Pomodoro con son
 
 Eliminación en cascada: Asegurarse de que al borrar objetos (topics, contenidos, módulos) se eliminen también datos asociados sin dejar huérfanos (cascada en DB). En el frontend, sincronizar las eliminaciones con confirmaciones y refresco adecuado de listas.
 
-En resumen, las vistas de estudiante y el flujo básico de planes ya están operativos, y se han completado implementaciones críticas del backend:
+## 🎯 **ESTADO ACTUAL Y PRÓXIMOS PASOS**
 
-## ✅ **COMPLETADO RECIENTEMENTE**:
-- ✅ **Sistema de personalización adaptativa completo** (nuevo módulo `/api/personalization/`)
-- ✅ **Validaciones previas para módulos virtuales** (evaluaciones, plantillas crítico, contenidos interactivos, perfil cognitivo)
+El sistema mantiene su funcionalidad completa mientras evoluciona hacia la nueva arquitectura. Las vistas de estudiante y el flujo básico de planes están operativos, con implementaciones críticas del backend completadas.
+
+## ✅ **COMPLETADO Y ESTABLE**:
+- ✅ **Sistema de personalización adaptativa completo** (módulo `/api/personalization/`)
+- ✅ **Sistema de Workspaces unificado** (gestión completa, roles, invitaciones)
+- ✅ **Servicio RL 100% funcional** (integración real con modelo externo)
+- ✅ **Validaciones previas para módulos virtuales** (evaluaciones, plantillas, perfil cognitivo)
 - ✅ **Intercalación dinámica de contenidos** (análisis de historial, algoritmos inteligentes)
-- ✅ **Servicio estadístico V-A-K-R** (estadísticas completas, recomendaciones inteligentes)
-- ✅ **Corrección del bug PUT /api/templates/:id** (validación completa de HTML)
-- ✅ **Endpoint /content/{virtual_id}/complete-auto** (marcado automático de completitud)
-- ✅ **Bug de asociación ContentResult ↔ VirtualTopicContent** (ya estaba corregido)
+- ✅ **Tests de integración 6/6 exitosos** (sistema completamente verificado)
+
+## 🔄 **EN IMPLEMENTACIÓN (ROADMAP 5 FASES)**:
+- **Fase 1**: Reestructuración de contenido en diapositivas por subtema
+- **Fase 2**: Integración de plantillas por subtema con recomendación IA
+- **Fase 3**: Sistema de evaluaciones flexible Many-to-Many
+- **Fase 4**: Pagos, suscripciones y marketplace monetizado
+- **Fase 5**: Refinamientos finales y preparación para producción
 
 ## ✅ IMPLEMENTACIÓN FINALIZADA (Backend)
 
