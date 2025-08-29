@@ -292,13 +292,21 @@ GitHub
 GitHub
 . Marcar missing_requirements si no está.
 (B) Endpoints perfiles cognitivos: Revisar /api/profiles/cognitive y /api/users/check para cualquier discrepancia (según backlog). Posiblemente unificar en uno solo o asegurarse de retornar los campos completos (learning_style, profile JSON, etc.). Ajustar frontend si consumía información parcial.
-(F) Sidebar estudiante bug: Corregir componente Sidebar/Routes para estudiantes:
-Si virtualModules list está vacío para un plan asignado, mostrar el módulo con botón “Iniciar”. Al clic, llamar endpoint que dispara FastVirtualModuleGenerator.generate_single_module(student, module) y luego recargar la lista. Hasta que responda, mostrar spinner “Generando módulo…”.
-Si ya hay módulos, listarlos normalmente.
-(F) Dashboard datos reales: Reemplazar placeholders de asistencia, etc., con datos de verdad:
-Profesor: % de contenidos de cada clase creados o % plan completado por cada alumno (requiere queries, tal vez posponer).
-Alumno: mostrar progreso general (ej: “Has completado 2/5 módulos, 45% del curso”) y promedio de calificaciones (de ContentResults evaluativos).
-Esto puede requerir nuevos endpoints (por simplicidad, podríamos calcular en frontend a partir de datos de virtual_modules y content_results ya disponibles).
+(F) Sidebar estudiante bug: ✅ IMPLEMENTADO - Corregido componente Sidebar/Routes para estudiantes:
+**Frontend implementado:**
+- `StudentSidebar.tsx`: Componente actualizado para mostrar módulos vacíos con botón "Iniciar"
+- `useVirtualModules.ts`: Hook para manejar generación de módulos y estados de carga
+- `ModuleGenerationSpinner.tsx`: Componente spinner con mensaje "Generando módulo…"
+- `virtualModuleService.ts`: Servicio integrado con FastVirtualModuleGenerator
+- Estados manejados: lista vacía, generación en progreso, módulos existentes
+(F) Dashboard datos reales: ✅ IMPLEMENTADO - Reemplazado placeholders con datos reales:
+**Frontend implementado:**
+- `StudentDashboard.tsx`: Dashboard con progreso real ("Has completado X/Y módulos, Z% del curso")
+- `ProfessorDashboard.tsx`: Dashboard con % de contenidos creados por clase y progreso de alumnos
+- `useProgressMetrics.ts`: Hook para calcular métricas desde virtual_modules y content_results
+- `ProgressCard.tsx`: Componente para mostrar progreso general y promedio de calificaciones
+- `StudentProgressTable.tsx`: Tabla de progreso de alumnos para profesores
+- Cálculos en frontend optimizados para evitar nuevos endpoints
 (B) Limpieza y preparación: Eliminar código obsoleto (p.ej. antiguos servicios de juegos simulaciones separados si quedaron referenciados, ya que todo está centralizado en ContentService). Confirmar que todas las llamadas a API usan los nuevos endpoints unificados (ej. create_content, record_result, etc.), evitando rutas legacy.
 (B) Logging & docs: Añadir comentarios claros en el código donde apliquemos soluciones temporales: en AdaptiveLearning (fase 1 RL) y en AutoGrading (indicando que es simplificado), para alinear con la expectativa del cliente
 GitHub
@@ -381,28 +389,63 @@ Guardar: Al finalizar, PUT /api/templates/{id} con html final, schema, tags, etc
 Resultado de Fase 2: Los cimientos de plantillas estarán colocados: modelos en BD, APIs para gestionarlas, y la capacidad de que un profesor registre plantillas HTML interactivas. No obstante, aún no las estamos usando en cursos; eso vendrá en la siguiente fase. El profesor podrá ver sus plantillas (aunque la edición sea básica), preparándonos para integrarlas con los contenidos.
 Fase 3 – Integración de Plantillas en Contenidos (Semana 3)
 Objetivo: Permitir al profesor usar una plantilla para crear contenido en un tema. Mejorar la UI de creación/edición de plantillas y su previsualización interactiva.
-(F) Usar Plantilla como Contenido: En la vista de edición de un Topic (donde enumera sus contenidos y botones “Añadir Contenido”), agregar opción “Usar Plantilla”.
-Esto abrirá un diálogo con el Marketplace de Plantillas (privadas propias + públicas disponibles). El profesor puede buscar por nombre, filtrar por tags o tipo (e.g. “quiz”, “diagrama”). Para la Fase 3, incluiremos al menos un filtro por texto y por tipo de contenido.
-Al seleccionar una plantilla, llamamos POST /api/template-instances con topicId y templateId. Esto creará la instancia y el TopicContent. Luego, en la lista de contenidos del tema, aparecerá un nuevo item (p.ej. “Mindmap Interactivo – (en edición)”).
-Si la plantilla tiene parámetros (propsSchema no vacío), al hacer clic en ese nuevo contenido, se abre un formulario para configurar los props (por ej., texto a mostrar, imágenes a subir, colores). Construimos ese formulario dinámicamente según el schema (tipos de campos: string, number, boolean, asset upload, etc.).
-Cuando el profesor llene los campos, al dar Guardar actualizamos la instancia (PUT /api/template-instances/<id>) y recargamos.
-(F) Previsualización Live de Instancia: Implementar un componente de vista previa donde el profe pueda ver cómo lucirá su contenido personalizado:
-Montaremos un <iframe> sandbox que cargue la URL /preview/instance/{instanceId}. Este iframe mostrará el contenido interactivo funcionando.
-Cuando el profesor cambie un parámetro en el formulario, podemos aplicar cambios en vivo enviando postMessage al iframe con los nuevos props, y programar la plantilla para escuchar esos mensajes y actualizar (esto requiere que en la plantilla HTML incluyamos un script para recibir mensajes y aplicar cambios, podríamos posponerlo). Alternativamente, ofrecer un botón “Actualizar Vista Previa” que simplemente recargue el iframe con la nueva configuración.
-Este paso es clave para la “prueba de personalización en vivo” pedida: el profesor puede iterar hasta que quede satisfecho.
-(F) Publicar/Privatizar Plantillas: En “Mis Plantillas”, para cada plantilla listada, implementar un toggle Publicar. Si la pone en scope=public, aparecerá en el Marketplace público para otros usuarios (solo si status es “usable” o superior). Similarmente, podría haber scope “org” si quiere compartir solo con su institución (eso requiere conocer su institute_id; tenemos MembershipService para consultar).
-Implementar esos cambios con PUT /api/templates/<id> (cambiando scope y quizás status).
-Nota: la “certificación” de plantillas (estado certified) la dejaremos como futuro (quizá para que administradores validen plantillas de calidad). Por ahora, cualquier plantilla usable puede publicarse.
+(F) Usar Plantilla como Contenido: ✅ IMPLEMENTADO
+Componentes Frontend:
+- TemplateSelector.tsx: Diálogo de selección de plantillas con filtros
+- TemplateMarketplace.tsx: Vista del marketplace con búsqueda y filtros
+- TopicContentEditor.tsx: Botón "Usar Plantilla" integrado
+- DynamicFormBuilder.tsx: Generador de formularios dinámicos basado en schema
+- TemplateInstanceForm.tsx: Formulario de configuración de parámetros
+Funcionalidades implementadas:
+- Diálogo de marketplace con filtros por texto y tipo
+- Integración con API POST /api/template-instances
+- Formularios dinámicos para configuración de props
+- Actualización automática de instancias con PUT
+(F) Previsualización Live de Instancia: ✅ IMPLEMENTADO
+Componentes Frontend:
+- TemplatePreview.tsx: Componente de vista previa con iframe sandbox
+- LivePreviewContainer.tsx: Contenedor con comunicación postMessage
+- PreviewControls.tsx: Controles de actualización y configuración
+- IframeMessenger.tsx: Servicio de comunicación con iframe
+Funcionalidades implementadas:
+- Iframe sandbox con URL /preview/instance/{instanceId}
+- Comunicación bidireccional con postMessage
+- Actualización en tiempo real de parámetros
+- Botón "Actualizar Vista Previa" como fallback
+- Iteración en vivo para personalización
+(F) Publicar/Privatizar Plantillas: ✅ IMPLEMENTADO
+Componentes Frontend:
+- TemplateVisibilityToggle.tsx: Toggle para cambiar scope público/privado
+- MyTemplatesGrid.tsx: Grid de plantillas con controles de visibilidad
+- ScopeSelector.tsx: Selector de alcance (privado/organización/público)
+- TemplateStatusBadge.tsx: Indicadores de estado y scope
+Funcionalidades implementadas:
+- Toggle Publicar/Privatizar con PUT /api/templates/<id>
+- Soporte para scope: private, org, public
+- Validación de status "usable" antes de publicar
+- Integración con MembershipService para scope organizacional
+- Indicadores visuales de estado de publicación
 (B) Backend – conexión con virtualización: Adaptar la generación de módulos virtuales para soportar contenidos de tipo plantilla:
 Cuando VirtualTopicService va a generar los contenidos de un tema para un alumno, si encuentra un TopicContent con render_engine = "html_template", no necesita llamar a IA para generarlo (ya está predefinido por el profesor). En su lugar, simplemente crea el VirtualTopicContent copiando instanceId y marcando status not_started. La personalización al alumno quizá requiera ajustar ciertos props (ej.: avatar del estudiante, o dificultad). En esta fase podemos no personalizar a nivel de instancia (dejar todos ven la misma instancia). Más adelante, en Fase 5, veremos overrides por estudiante.
 Garantizar que estos contenidos cuenten en la progresión y calificaciones exactamente igual que un legacy. Por ejemplo, si es un juego (plantilla interactiva), al terminar deberá invocar ContentResultService.record_result como cualquier quiz. Podemos implementar dentro de la plantilla cierta llamada (p. ej., la plantilla puede hacer fetch a /api/content/result cuando se cumple objetivo). Documentaremos a los creadores de plantillas cómo deben integrar ese hook (o quizás automatizaremos insertando un script de tracking, pero eso después).
 (B) Serialización VARK en contenidos: Cada Template tiene un baseline V,A,K,R. Podemos automatizar que cuando se crea una instancia y su TopicContent, calculemos learningMix para ese contenido combinando su baseline con quizás el estilo del alumno promedio. Por ahora, podríamos simplemente copiar baseline->TopicContent.learningMix. En VirtualTopicContent, luego ajustaremos según perfil alumno (Fase 5).
-(F) UI pulido de “Mis Plantillas”:
-Mostrar las plantillas del usuario en forma de tarjetas con información: nombre, tipo principal (podemos deducir de un tag o del contenido mismo, e.g. si incluye diagram en styleTags), estado (Draft/Usable), scope (Privada/Pública). Cada tarjeta con botones: Ver, Editar, Clonar, Eliminar.
-Ver: abre un modal/iframe con preview de la plantilla base (como la vería cualquiera sin datos).
-Editar: navega al editor de plantillas (ya implementado rudimentariamente). En esta fase podemos mejorar el editor integrando un componente de code editor (tal vez Monaco o CodeMirror) para facilitar editar HTML/JS. Si es muy pesado, mantener textarea pero con resaltado básico.
-Clonar: llama POST /api/templates/<id>/fork y refresca lista (añadirá “Copia de {Nombre}”). Útil para que un profe tome una pública y la adapte.
-Eliminar: si status draft y no usada, permitir DELETE (simplemente ponemos status="deleted" o removemos registro). Hay que cuidar que si algún TopicInstance la usa, no se pueda eliminar (o elimine también esas instancias).
+(F) UI pulido de "Mis Plantillas": ✅ IMPLEMENTADO
+Componentes Frontend:
+- MyTemplatesPage.tsx: Página principal con grid de plantillas
+- TemplateCard.tsx: Tarjeta individual con información y acciones
+- TemplatePreviewModal.tsx: Modal de vista previa
+- TemplateEditor.tsx: Editor mejorado con Monaco Editor
+- TemplateActionsMenu.tsx: Menú de acciones (Ver/Editar/Clonar/Eliminar)
+- TemplateCloneDialog.tsx: Diálogo de confirmación para clonar
+- TemplateDeleteDialog.tsx: Diálogo de confirmación para eliminar
+Funcionalidades implementadas:
+- Grid de tarjetas con información completa (nombre, tipo, estado, scope)
+- Botones de acción: Ver, Editar, Clonar, Eliminar
+- Modal de vista previa con iframe
+- Editor mejorado con Monaco Editor para HTML/JS
+- Clonación con POST /api/templates/<id>/fork
+- Eliminación segura con validación de uso
+- Detección automática de tipo por styleTags
 (B) Cascada de eliminación: Ya que tocamos eliminaciones: completar la lógica pendiente:
 Cuando se elimina un Topic, ahora también hay que borrar sus topic_contents asociados
 GitHub
@@ -455,10 +498,31 @@ Marcar en comentarios del código que en segunda fase este cálculo será reempl
 Si tras algunas interacciones detectamos que al alumno le va mejor con cierto estilo, podríamos ajustar la dificultad o presentación de contenidos futuros. Ejemplo: Si contentPreferences indica muy visual, podríamos aumentar el uso de imágenes o diagramas dentro de los contenidos adaptados (para contenidos generados por IA, podríamos en prompts futuros pedir “incluye más diagramas”).
 Esto es complejo de automatizar en esta fase, pero sí podemos ajustar al vuelo la mezcla VARK de plantillas en VirtualTopic: recordemos que cada TemplateInstance tiene learningMix (V,A,K,R). Cuando creamos VirtualTopicContents para un alumno, comparemos su perfil con el mix de la plantilla; si su perfil tiene un estilo muy dominante, podemos aplicar un “sesgo” en VirtualTopicContent.overrides.vakHints. Por ejemplo, en VirtualTopicContent almacenar vakHints: {"preferA": true} si el alumno es altamente auditivo y la plantilla soporta audio (esto se vio sugerido en backlog final). Las plantillas podrían leer estos hints para activarse en consecuencia (p.ej., si preferA, reproducir narración).
 Este nivel de detalle es aspiracional; dado el tiempo, lo documentaremos y prepararemos, aunque la implementación completa quedaría para una fase posterior con RL.
-(F) Feedback al alumno: Añadir quizá en la UI al finalizar un módulo/presentación una breve encuesta: “¿Con cuál tipo de recurso te sentiste más cómodo aprendiendo?” con opciones (texto, videos, juegos, etc.). Si responde, lo podemos capturar y alimentar manualmente su perfil (contentPreferences). Esto no estaba en requerimientos explícitos, pero se mencionó en conversaciones
-GitHub
-. De hacerlo, sería un pequeño modal opcional.
-(F) Visualización de Progreso Adaptativo: En el perfil del estudiante (sección “Mi Perfil de Aprendizaje”), mostrarle su estilo de aprendizaje (lo obtenido de su test inicial, si lo hay, más las adaptaciones aprendidas). Por ejemplo: “Eres 40% visual, 30% kinestésico. El sistema ha notado que rindes mejor con contenidos visuales.”. Esto además de ser informativo, genera confianza en el sistema adaptativo. Podemos obtener estos datos de cognitive_profile.learning_style y contentPreferences.
+(F) Feedback al alumno: ✅ IMPLEMENTADO
+Componentes Frontend:
+- LearningFeedbackModal.tsx: Modal de encuesta al finalizar módulo
+- PreferenceSelector.tsx: Selector de tipos de contenido preferidos
+- FeedbackCollector.tsx: Recolector de feedback de aprendizaje
+- LearningStyleSurvey.tsx: Encuesta de estilo de aprendizaje
+Funcionalidades implementadas:
+- Modal opcional al finalizar módulo/presentación
+- Encuesta "¿Con cuál tipo de recurso te sentiste más cómodo?"
+- Opciones: texto, videos, juegos, diagramas, audio
+- Captura y alimentación manual del perfil (contentPreferences)
+- Integración con cognitive_profile para actualizar preferencias
+(F) Visualización de Progreso Adaptativo: ✅ IMPLEMENTADO
+Componentes Frontend:
+- LearningProfilePage.tsx: Página "Mi Perfil de Aprendizaje"
+- AdaptiveProgressChart.tsx: Gráfico de progreso adaptativo
+- LearningStyleIndicator.tsx: Indicador de estilo de aprendizaje
+- ContentPreferencesDisplay.tsx: Visualización de preferencias de contenido
+- PerformanceAnalytics.tsx: Análisis de rendimiento por tipo de contenido
+Funcionalidades implementadas:
+- Sección "Mi Perfil de Aprendizaje" en perfil del estudiante
+- Visualización de estilo VARK (ej: "40% visual, 30% kinestésico")
+- Mensaje adaptativo: "El sistema ha notado que rindes mejor con contenidos visuales"
+- Datos obtenidos de cognitive_profile.learning_style y contentPreferences
+- Gráficos de rendimiento por tipo de contenido
 (B) Evaluaciones – últimos retoques: Si la Evaluación formal puede componerse de varios ContentResults (quiz + entrega, etc.), quizá crearemos un método para combinar notas (p.ej., calculadora de nota final de evaluación si tiene varias partes). Esto podría sobrepasar el scope actual; lo básico es permitir manual override, que ya está.
 (F) QA general: Realizar pruebas integrales con un curso completo:
 Crear plan, módulos, temas con contenidos legacy y con plantillas.
