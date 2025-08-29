@@ -95,9 +95,9 @@ def get_class_details(class_id):
         if class_details:
             return APIRoute.success(data=class_details)
         else:
-            return APIRoute.error("Clase no encontrada", 404)
+            return APIRoute.error(ErrorCodes.NOT_FOUND, "Clase no encontrada", status_code=404)
     except Exception as e:
-        return APIRoute.error(str(e), 500)
+        return APIRoute.error(ErrorCodes.SERVER_ERROR, str(e), status_code=500)
 
 @classes_bp.route('/<class_id>/update', methods=['PUT'])
 @auth_required
@@ -123,7 +123,7 @@ def update_class(class_id):
         
         # Validar que viene al menos un campo para actualizar
         if not request.json:
-            return APIRoute.error("No se proporcionaron datos para actualizar", 400)
+            return APIRoute.error(ErrorCodes.MISSING_FIELD, "No se proporcionaron datos para actualizar", status_code=400)
         
         # Campos permitidos para actualización
         allowed_fields = ['name', 'access_code', 'status', 'settings']
@@ -134,7 +134,7 @@ def update_class(class_id):
                 updates[field] = request.json[field]
         
         if not updates:
-            return APIRoute.error("No se proporcionaron campos válidos para actualizar", 400)
+            return APIRoute.error(ErrorCodes.MISSING_FIELD, "No se proporcionaron campos válidos para actualizar", status_code=400)
         
         success, result = class_service.update_class(class_id, updates, workspace_info)
 
@@ -143,7 +143,7 @@ def update_class(class_id):
         else:
             return APIRoute.error(ErrorCodes.UPDATE_ERROR, result)
     except Exception as e:
-        return APIRoute.error(str(e), 500)
+        return APIRoute.error(ErrorCodes.SERVER_ERROR, str(e), status_code=500)
 
 @classes_bp.route('/<class_id>', methods=['DELETE'])
 @auth_required
@@ -264,14 +264,14 @@ def add_class_member(class_id):
         
         # Validar que vienen los campos requeridos
         if 'user_id' not in request.json or 'role' not in request.json:
-            return APIRoute.error("Se requieren los campos user_id y role", 400)
+            return APIRoute.error(ErrorCodes.MISSING_FIELD, "Se requieren los campos user_id y role", status_code=400)
         
         user_id = request.json['user_id']
         role = request.json['role']
         
         # Validar que el rol es válido
         if role not in ["TEACHER", "STUDENT"]:
-            return APIRoute.error("Rol no válido. Debe ser 'TEACHER' o 'STUDENT'", 400)
+            return APIRoute.error(ErrorCodes.INVALID_DATA, "Rol no válido. Debe ser 'TEACHER' o 'STUDENT'", status_code=400)
         
         success, result = membership_service.add_member(class_id, user_id, role, workspace_info)
 
@@ -280,7 +280,7 @@ def add_class_member(class_id):
         else:
             return APIRoute.error(ErrorCodes.CREATION_ERROR, result)
     except Exception as e:
-        return APIRoute.error(str(e), 500)
+        return APIRoute.error(ErrorCodes.SERVER_ERROR, str(e), status_code=500)
 
 @classes_bp.route('/<class_id>/members', methods=['GET'])
 @auth_required
@@ -309,7 +309,7 @@ def get_class_members(class_id):
         members = membership_service.get_class_members(class_id, role)
         return APIRoute.success(data=members)
     except Exception as e:
-        return APIRoute.error(str(e), 500)
+        return APIRoute.error(ErrorCodes.SERVER_ERROR, str(e), status_code=500)
 
 @classes_bp.route('/teacher/<teacher_id_or_email>', methods=['GET'])
 @auth_required
@@ -337,7 +337,7 @@ def get_teacher_classes(teacher_id_or_email):
         )
         return APIRoute.success(data=classes)
     except Exception as e:
-        return APIRoute.error(str(e), 500)
+        return APIRoute.error(ErrorCodes.SERVER_ERROR, str(e), status_code=500)
 
 @classes_bp.route('/student/<student_id_or_email>', methods=['GET'])
 @auth_required
@@ -365,7 +365,7 @@ def get_student_classes(student_id_or_email):
         )
         return APIRoute.success(data=classes)
     except Exception as e:
-        return APIRoute.error(str(e), 500)
+        return APIRoute.error(ErrorCodes.SERVER_ERROR, str(e), status_code=500)
 
 @classes_bp.route('/<class_id>/students', methods=['GET'])
 @APIRoute.standard(auth_required_flag=True, roles=[ROLES["TEACHER"], ROLES["INSTITUTE_ADMIN"]])
@@ -377,7 +377,7 @@ def get_class_students(class_id):
         students = membership_service.get_class_students(class_id)
         return APIRoute.success(data=students)
     except Exception as e:
-        return APIRoute.error(str(e), 500)
+        return APIRoute.error(ErrorCodes.SERVER_ERROR, str(e), status_code=500)
 
 @classes_bp.route('/<class_id>/members/<member_id>', methods=['DELETE'])
 @auth_required
@@ -517,7 +517,7 @@ def create_subperiod(class_id):
         required_fields = ['name', 'start_date', 'end_date']
         for field in required_fields:
             if field not in request.json:
-                return APIRoute.error(f"Campo requerido: {field}", 400)
+                return APIRoute.error(ErrorCodes.MISSING_FIELD, f"Campo requerido: {field}", status_code=400)
         
         # Obtener el ID del usuario actual
         user_id = get_jwt_identity()
@@ -541,7 +541,7 @@ def create_subperiod(class_id):
         else:
             return APIRoute.error(ErrorCodes.CREATION_ERROR, result)
     except Exception as e:
-        return APIRoute.error(str(e), 500)
+        return APIRoute.error(ErrorCodes.SERVER_ERROR, str(e), status_code=500)
 
 @classes_bp.route('/<class_id>/subperiods', methods=['GET'])
 @auth_required
@@ -555,7 +555,7 @@ def get_class_subperiods(class_id):
         subperiods = subperiod_service.get_class_subperiods(class_id)
         return APIRoute.success(data=subperiods)
     except Exception as e:
-        return APIRoute.error(str(e), 500)
+        return APIRoute.error(ErrorCodes.SERVER_ERROR, str(e), status_code=500)
 
 @classes_bp.route('/<class_id>/subperiod/<subperiod_id>', methods=['PUT'])
 @auth_required
@@ -701,7 +701,7 @@ def get_level_classes(level_id):
         classes = class_service.get_classes_by_level(level_id, workspace_info)
         return APIRoute.success(data=classes)
     except Exception as e:
-        return APIRoute.error(str(e), 500)
+        return APIRoute.error(ErrorCodes.SERVER_ERROR, str(e), status_code=500)
 
 @classes_bp.route('/', methods=['OPTIONS'])
 @classes_bp.route('/<path:path>', methods=['OPTIONS'])
