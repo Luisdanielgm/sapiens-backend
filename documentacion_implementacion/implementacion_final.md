@@ -1062,14 +1062,14 @@ Probablemente se requiera una colección evaluation_results (student_id, evaluat
 
 Integrar con RL feedback: buenas evaluaciones podrían ser un input de alto nivel (ej: si un alumno reprobó la eval de 3 temas, RL debería ajustar dificultads). - **[VERIFICADO]** El `study_plans/services.py` está integrado con `ContentResultService` para el cálculo y registro de resultados de evaluaciones.
 
-(B) IA para corrección automática (preparación): No entraremos a implementarlo completamente, pero dejaremos preparado:
+(B) IA para corrección automática (preparación): 
 
-Endpoint POST /api/auto-grading que recibe un deliverable (texto o imagen) y devuelve una puntuación o feedback. Esto se puede conectar más tarde a un servicio IA. Por ahora devolvería perhaps "not implemented".
+> **⚠️ NOTA ARQUITECTÓNICA CRÍTICA**: 
+> Las llamadas a LLMs para corrección de evaluaciones con IA se realizan en el **FRONTEND**, no en el backend, debido a las limitaciones de Vercel serverless (timeout de 1 minuto). El OCR y procesamiento multimodal se realiza usando **Gemini 2.5 Pro** que puede interpretar imágenes con alta precisión. El backend solo recibe y almacena los resultados ya procesados por el frontend.
 
-Modelos EvaluationRubric, AutoGradingResult como en backlog
-GitHub
-GitHub
- para futura extensión. - **[EN PROGRESO]** El `AutomaticGradingService` y el hook para la corrección automática están presentes en el código (`src/study_plans/routes.py`), pero la funcionalidad completa de IA aún no está implementada.
+Endpoint POST /api/auto-grading que recibe los resultados ya procesados por el frontend (puntuación, feedback, análisis OCR) y los almacena. El procesamiento de IA (incluyendo OCR con Gemini 2.5 Pro) se ejecuta completamente en el frontend.
+
+Modelos EvaluationRubric, AutoGradingResult como en backlog para almacenar resultados procesados. - **[EN PROGRESO]** El `AutomaticGradingService` y el hook para la corrección automática están presentes en el código (`src/study_plans/routes.py`), configurados para recibir resultados del frontend.
 
 Fase 4: Pagos y Planes de Suscripción
 
