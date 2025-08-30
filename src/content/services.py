@@ -765,6 +765,14 @@ class ContentResultService(VerificationBaseService):
                             f"No se encontró virtual_content_id para content_id: {content_id}, student_id: {student_id}"
                         )
 
+            # Validar y convertir evaluation_id si está presente
+            if result_data.get("evaluation_id"):
+                try:
+                    ObjectId(result_data["evaluation_id"])  # Validar formato
+                except Exception:
+                    logging.warning(f"evaluation_id inválido: {result_data['evaluation_id']}")
+                    result_data.pop("evaluation_id", None)
+
             content_result = ContentResult(**result_data)
             result = self.collection.insert_one(content_result.to_dict())
 

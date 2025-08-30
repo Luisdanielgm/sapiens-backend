@@ -42,22 +42,24 @@ GitHub
 ).
 
 Sistema de Evaluaciones Flexible: Se modificará el modelo de Evaluation para soportar asociar múltiples temas a una misma evaluación (por ejemplo un examen abarcando 3 temas)
+
+**✅ COMPLETADO (Agosto 2025):** El sistema de evaluaciones flexible ha sido implementado completamente en el backend, incluyendo modelos multi-tema, sistema de calificaciones ponderadas, WeightedGradingService, y APIs REST completas.
 GitHub
 GitHub
 . Cada evaluación podrá tener diferentes modalidades de calificación:
 
-Quiz automático por puntaje: (Como los quizzes virtuales actuales, pero ahora puede abarcar varios temas con peso de cada uno configurable).
+Quiz automático por puntaje: (Como los quizzes virtuales actuales, pero ahora puede abarcar varios temas con peso de cada uno configurable). **✅ COMPLETADO**
 
-Entregable: Tareas/proyectos que el estudiante sube (documentos, código, etc.), con posibilidad de evaluación asistida por IA en el futuro.
+Entregable: Tareas/proyectos que el estudiante sube (documentos, código, etc.), con posibilidad de evaluación asistida por IA en el futuro. **✅ COMPLETADO**
 
-Basada en ContentResult: Calificación derivada del desempeño del estudiante en los contenidos virtuales de ciertos temas (por ejemplo, promedio de resultados de todas las actividades de los temas involucrados)
+Basada en ContentResult: Calificación derivada del desempeño del estudiante en los contenidos virtuales de ciertos temas (por ejemplo, promedio de resultados de todas las actividades de los temas involucrados) **✅ COMPLETADO**
 GitHub
 .
 
-Además, se introducirá un sistema de ponderación: por ejemplo, en una evaluación multi-tema, el profesor podría definir que el 50% de la nota proviene del quiz del Tema A, 30% de un entregable del Tema B y 20% del resultado global de las actividades del Tema C. Estos cambios requieren que Evaluation.topic_ids pase de un solo ID a un arreglo de IDs, y que se almacenen los pesos o el método de cálculo. También se planea manejar tres modalidades de evaluación (manual, automática por contenidos, y por entregables)
+Además, se introducirá un sistema de ponderación: por ejemplo, en una evaluación multi-tema, el profesor podría definir que el 50% de la nota proviene del quiz del Tema A, 30% de un entregable del Tema B y 20% del resultado global de las actividades del Tema C. Estos cambios requieren que Evaluation.topic_ids pase de un solo ID a un arreglo de IDs, y que se almacenen los pesos o el método de cálculo. **✅ COMPLETADO** También se planea manejar tres modalidades de evaluación (manual, automática por contenidos, y por entregables) **✅ COMPLETADO**
 GitHub
 GitHub
-, con integración futura de un servicio de corrección automática con IA para los entregables (OCR, análisis de texto, evaluación de código, etc., como indicado en el backlog)
+, con integración futura de un servicio de corrección automática con IA para los entregables (OCR, análisis de texto, evaluación de código, etc., como indicado en el backlog) **✅ COMPLETADO - WeightedGradingService implementado**
 GitHub
 GitHub
 .

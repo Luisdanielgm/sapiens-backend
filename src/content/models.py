@@ -203,6 +203,7 @@ class ContentResult:
         score: float,
         content_id: Optional[str] = None,
         virtual_content_id: Optional[str] = None,
+        evaluation_id: Optional[str] = None,
         feedback: Optional[str] = None,
         metrics: Optional[Dict] = None,
         session_type: str = "content_interaction",
@@ -215,6 +216,7 @@ class ContentResult:
         self._id = _id or ObjectId()
         self.content_id = ObjectId(content_id) if content_id else None
         self.virtual_content_id = ObjectId(virtual_content_id) if virtual_content_id else None
+        self.evaluation_id = ObjectId(evaluation_id) if evaluation_id else None
         self.student_id = ObjectId(student_id)
         self.score = score
         self.feedback = feedback
@@ -236,6 +238,8 @@ class ContentResult:
             data["content_id"] = self.content_id
         if self.virtual_content_id:
             data["virtual_content_id"] = self.virtual_content_id
+        if self.evaluation_id:
+            data["evaluation_id"] = self.evaluation_id
         return data
 
 

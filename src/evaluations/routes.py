@@ -2,6 +2,7 @@ from flask import Blueprint, request, jsonify
 from datetime import datetime
 from bson import ObjectId
 from src.evaluations.services import EvaluationService
+from src.evaluations.weighted_grading_service import weighted_grading_service
 from src.shared.decorators import auth_required
 from src.shared.validators import validate_object_id
 
@@ -498,6 +499,116 @@ def bulk_create_evaluations(current_user):
             'successful': len(results),
             'failed': len(errors)
         }), 200
+        
+    except Exception as e:
+        return jsonify({'error': f'Error interno: {str(e)}'}), 500
+
+# ==================== Weighted Grading Service ====================
+
+@evaluation_routes.route('/<evaluation_id>/students/<student_id>/calculate-weighted-grade', methods=['POST'])
+@auth_required
+def calculate_weighted_grade_for_student(current_user, evaluation_id, student_id):
+    """
+    Calcular calificación ponderada para un estudiante específico.
+    """
+    try:
+        if not validate_object_id(evaluation_id):
+            return jsonify({'error': 'ID de evaluación inválido'}), 400
+        
+        result = weighted_grading_service.calculate_weighted_grade_for_student(evaluation_id, student_id)
+        
+        if 'error' in result:
+            return jsonify({'error': result['error']}), 400
+        
+        return jsonify(result), 200
+        
+    except Exception as e:
+        return jsonify({'error': f'Error interno: {str(e)}'}), 500
+
+@evaluation_routes.route('/<evaluation_id>/students/<student_id>/update-submission-grade', methods=['PUT'])
+@auth_required
+def update_submission_grade_weighted(current_user, evaluation_id, student_id):
+    """
+    Actualizar calificación de submission basada en cálculo ponderado.
+    """
+    try:
+        if not validate_object_id(evaluation_id):
+            return jsonify({'error': 'ID de evaluación inválido'}), 400
+        
+        success = weighted_grading_service.update_evaluation_submission_grade(evaluation_id, student_id)
+        
+        if not success:
+            return jsonify({'error': 'No se pudo actualizar la calificación'}), 400
+        
+        return jsonify({'message': 'Calificación actualizada exitosamente'}), 200
+        
+    except Exception as e:
+        return jsonify({'error': f'Error interno: {str(e)}'}), 500
+
+@evaluation_routes.route('/<evaluation_id>/recalculate-all-grades', methods=['POST'])
+@auth_required
+def recalculate_all_grades(current_user, evaluation_id):
+    """
+    Recalcular calificaciones ponderadas para todos los estudiantes de una evaluación.
+    """
+    try:
+        if not validate_object_id(evaluation_id):
+            return jsonify({'error': 'ID de evaluación inválido'}), 400
+        
+        result = weighted_grading_service.recalculate_all_students_for_evaluation(evaluation_id)
+        
+        if 'error' in result:
+            return jsonify({'error': result['error']}), 400
+        
+        return jsonify(result), 200
+        
+    except Exception as e:
+        return jsonify({'error': f'Error interno: {str(e)}'}), 500
+
+@evaluation_routes.route('/validate-topic-weights', methods=['POST'])
+@auth_required
+def validate_topic_weights(current_user):
+    """
+    Validar pesos de temas para evaluaciones multi-tema.
+    """
+    try:
+        data = request.get_json()
+        
+        if 'topic_weights' not in data:
+            return jsonify({'error': 'Campo requerido: topic_weights'}), 400
+        
+        is_valid, message = weighted_grading_service.validate_topic_weights(data['topic_weights'])
+        
+        return jsonify({
+            'valid': is_valid,
+            'message': message,
+            'topic_weights': data['topic_weights']
+        }), 200
+        
+    except Exception as e:
+        return jsonify({'error': f'Error interno: {str(e)}'}), 500
+
+@evaluation_routes.route('/topics/<topic_id>/performance-summary', methods=['GET'])
+@auth_required
+def get_topic_performance_summary(current_user, topic_id):
+    """
+    Obtener resumen de rendimiento para un tema específico.
+    """
+    try:
+        if not validate_object_id(topic_id):
+            return jsonify({'error': 'ID de tema inválido'}), 400
+        
+        # Obtener parámetro opcional de límite
+        limit = request.args.get('limit', 50, type=int)
+        if limit > 200:  # Limitar para evitar sobrecarga
+            limit = 200
+        
+        result = weighted_grading_service.get_topic_performance_summary(topic_id, limit)
+        
+        if 'error' in result:
+            return jsonify({'error': result['error']}), 400
+        
+        return jsonify(result), 200
         
     except Exception as e:
         return jsonify({'error': f'Error interno: {str(e)}'}), 500

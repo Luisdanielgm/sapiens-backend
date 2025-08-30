@@ -9,13 +9,12 @@ from .models import (
 )
 
 from .services import EvaluationService
-from .routes import evaluation_routes
+# Note: routes are imported separately to avoid circular imports
 
 __all__ = [
     'Evaluation',
     'EvaluationSubmission', 
     'EvaluationResource',
     'EvaluationRubric',
-    'EvaluationService',
-    'evaluation_routes'
+    'EvaluationService'
 ]

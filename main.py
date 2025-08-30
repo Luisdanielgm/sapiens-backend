@@ -51,6 +51,8 @@ from src.marketplace.routes import marketplace_bp # Sistema de marketplace
 from src.evaluations.routes import evaluation_routes  # Sistema de evaluaciones flexible
 # Sistema de plantillas
 from src.content.template_routes import template_bp, instance_bp, preview_bp
+# Sistema de eliminación en cascada
+from src.shared.cascade_routes import cascade_bp
 
 def create_app(config_object=active_config):
     """
@@ -236,6 +238,9 @@ def create_app(config_object=active_config):
     app.register_blueprint(template_bp)  # Ya incluye url_prefix='/api/templates'
     app.register_blueprint(instance_bp)  # Ya incluye url_prefix='/api/template-instances'  
     app.register_blueprint(preview_bp)   # Ya incluye url_prefix='/preview'
+    
+    # Sistema de eliminación en cascada
+    app.register_blueprint(cascade_bp, url_prefix='/api/cascade')
 
     # Alias para rutas de módulos (virtualización) bajo /api/modules para compatibilidad con frontend
     from src.study_plans.routes import get_virtualization_readiness
