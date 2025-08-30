@@ -318,3 +318,20 @@ def update_my_api_keys():
     except Exception as e:
         log_error(f"Error updating API keys: {str(e)}", e, "users.routes")
         return APIRoute.error(ErrorCodes.SERVER_ERROR, "Error interno al actualizar las claves de API")
+
+@users_bp.route('/me/api-keys', methods=['GET'])
+@APIRoute.standard(auth_required_flag=True)
+def get_my_api_keys():
+    """Gets the API keys for the current user."""
+    try:
+        user_id = get_jwt_identity()
+        api_keys = user_service.get_user_api_keys(user_id)
+        
+        if api_keys is not None:
+            return APIRoute.success(data={"api_keys": api_keys})
+        else:
+            return APIRoute.error(ErrorCodes.RESOURCE_NOT_FOUND, "Usuario no encontrado")
+            
+    except Exception as e:
+        log_error(f"Error getting API keys: {str(e)}", e, "users.routes")
+        return APIRoute.error(ErrorCodes.SERVER_ERROR, "Error interno al obtener las claves de API")

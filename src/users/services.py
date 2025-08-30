@@ -15,6 +15,7 @@ import bcrypt
 from src.classes.services import ClassService
 from src.institute.services import GenericAcademicService
 from src.members.services import MembershipService
+from src.shared.encryption_service import encryption_service
 
 # Función auxiliar para hacer objetos serializables
 def make_json_serializable(obj):
@@ -309,15 +310,52 @@ class UserService(VerificationBaseService):
     def update_user(self, user_id: str, update_data: dict) -> Tuple[bool, str]:
         """Actualiza los datos de un usuario."""
         try:
+            # Crear una copia de los datos para no modificar el original
+            processed_data = update_data.copy()
+            
+            # Si se están actualizando API keys, encriptarlas
+            if "api_keys" in processed_data and processed_data["api_keys"]:
+                try:
+                    encrypted_keys = encryption_service.encrypt_api_keys_dict(processed_data["api_keys"])
+                    processed_data["api_keys"] = encrypted_keys
+                    logging.info(f"API keys encriptadas para usuario {user_id}")
+                except Exception as encrypt_error:
+                    logging.error(f"Error encriptando API keys para usuario {user_id}: {encrypt_error}")
+                    return False, "Error al encriptar las API keys"
+            
             result = self.collection.update_one(
                 {"_id": ObjectId(user_id)},
-                {"$set": update_data}
+                {"$set": processed_data}
             )
             if result.modified_count > 0:
                 return True, "Usuario actualizado exitosamente"
             return False, "No se pudo actualizar el usuario"
         except Exception as e:
+            logging.error(f"Error actualizando usuario {user_id}: {str(e)}")
             return False, str(e)
+
+    def get_user_api_keys(self, user_id: str) -> Optional[Dict[str, str]]:
+        """Obtiene las API keys desencriptadas de un usuario."""
+        try:
+            user = self.collection.find_one({"_id": ObjectId(user_id)})
+            if not user:
+                return None
+            
+            encrypted_api_keys = user.get("api_keys", {})
+            if not encrypted_api_keys:
+                return {}
+            
+            # Desencriptar las API keys
+            try:
+                decrypted_keys = encryption_service.decrypt_api_keys_dict(encrypted_api_keys)
+                return decrypted_keys
+            except Exception as decrypt_error:
+                logging.error(f"Error desencriptando API keys para usuario {user_id}: {decrypt_error}")
+                return {}
+                
+        except Exception as e:
+            logging.error(f"Error obteniendo API keys del usuario {user_id}: {str(e)}")
+            return None
 
     def verify_password(self, plain_password, hashed_password):
         """Verifica si la contraseña en texto plano coincide con el hash almacenado"""
