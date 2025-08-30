@@ -64,7 +64,11 @@ GitHub
 GitHub
 .
 
-Encriptación de API Keys y Nuevos Proveedores: El sistema actualmente soporta claves de API (por ejemplo de OpenAI) por usuario. Se deberá asegurar que las API keys almacenadas (OpenAI, Google/Gemini, etc.) estén cifradas en base de datos por seguridad. Asimismo, se añadirá soporte para proveedores adicionales como OpenRouter, Azure/Requestly o Grok si aplica, teniendo en cuenta que algunos actúan como intermediarios de modelos existentes. Cuando un usuario configura su propia API key para un proveedor, el sistema debe usarla en lugar de la clave global, y posiblemente indicar en la interfaz qué clave está en uso
+**✅ COMPLETAMENTE IMPLEMENTADO** - Encriptación de API Keys y Nuevos Proveedores: El sistema actualmente soporta claves de API (por ejemplo de OpenAI) por usuario. Las API keys almacenadas (OpenAI, Google/Gemini, etc.) están completamente cifradas en base de datos usando Fernet (cryptography library) para máxima seguridad. Implementación incluye:
+- ✅ EncryptionService con métodos encrypt_api_key() y decrypt_api_key()
+- ✅ Encriptación automática al guardar API keys en /me/api-keys
+- ✅ Desencriptación automática al recuperar API keys
+- ✅ Librería cryptography==41.0.7 instalada y configurada Asimismo, se añadirá soporte para proveedores adicionales como OpenRouter, Azure/Requestly o Grok si aplica, teniendo en cuenta que algunos actúan como intermediarios de modelos existentes. Cuando un usuario configura su propia API key para un proveedor, el sistema debe usarla en lugar de la clave global, y posiblemente indicar en la interfaz qué clave está en uso
 GitHub
 . Esto implica ampliar la gestión de proveedores en frontend/backend y probar las llamadas con dichas claves.
 
