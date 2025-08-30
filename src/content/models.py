@@ -87,6 +87,9 @@ class TopicContent:
                  template_id: Optional[str] = None,  # Referencia directa a Template
                  template_version: Optional[str] = None,  # Versión de plantilla usada
                  learning_mix: Optional[Dict] = None,  # Mix VARK para este contenido
+                 # Nuevos campos para Fase 1 y 2
+                 order: Optional[int] = None,  # Orden secuencial para diapositivas
+                 parent_content_id: Optional[str] = None,  # Vinculación con diapositiva padre
                  status: str = "draft",
                  _id: Optional[ObjectId] = None,
                  created_at: Optional[datetime] = None,
@@ -111,6 +114,9 @@ class TopicContent:
         self.template_id = ObjectId(template_id) if template_id else None
         self.template_version = template_version
         self.learning_mix = learning_mix or {}
+        # Nuevos campos para Fase 1 y 2
+        self.order = order
+        self.parent_content_id = ObjectId(parent_content_id) if parent_content_id else None
         self.status = status
         self.created_at = created_at or datetime.now()
         self.updated_at = updated_at or datetime.now()
@@ -135,6 +141,7 @@ class TopicContent:
             "slide_template": self.slide_template,
             "render_engine": self.render_engine,
             "learning_mix": self.learning_mix,
+            "order": self.order,
             "status": self.status,
             "created_at": self.created_at,
             "updated_at": self.updated_at
@@ -146,6 +153,8 @@ class TopicContent:
             data["template_id"] = self.template_id
         if self.template_version:
             data["template_version"] = self.template_version
+        if self.parent_content_id:
+            data["parent_content_id"] = self.parent_content_id
         return data
 
 class VirtualTopicContent:
@@ -270,6 +279,7 @@ class ContentTypes:
     EXAMPLES = "examples"
     DOCUMENTS = "documents"
     SLIDES = "slides"
+    SLIDE = "slide"  # Diapositiva individual
     IMAGE = "image"
     LINK = "link"
     
@@ -318,7 +328,7 @@ class ContentTypes:
             "theoretical": [cls.TEXT, cls.FEYNMAN, cls.STORY, cls.SUMMARY, cls.GLOSSARY, 
                           cls.GUIDED_QUESTIONS, cls.EXAMPLES, cls.DOCUMENTS, cls.LINK],
             "visual": [cls.DIAGRAM, cls.INFOGRAPHIC, cls.MINDMAP, cls.TIMELINE, 
-                     cls.ILLUSTRATION, cls.CHART, cls.PICTOGRAM, cls.IMAGE, cls.SLIDES],
+                     cls.ILLUSTRATION, cls.CHART, cls.PICTOGRAM, cls.IMAGE, cls.SLIDES, cls.SLIDE],
             "multimedia": [cls.VIDEO, cls.AUDIO, cls.MUSIC, cls.ANIMATION, 
                          cls.SCREENCAST, cls.NARRATED_PRESENTATION],
             "interactive": [cls.GAME, cls.SIMULATION, cls.VIRTUAL_LAB, cls.AR, 

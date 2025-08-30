@@ -670,6 +670,221 @@ def preview_instance(instance_id):
         logging.error(f"Error previewing instance {instance_id}: {str(e)}")
         return "<html><body><h1>Error cargando instancia</h1></body></html>", 500
 
+@template_bp.route('/recommendations', methods=['GET'])
+@auth_required
+def get_template_recommendations():
+    """
+    Obtiene recomendaciones de plantillas basadas en el modelo de aprendizaje por refuerzo.
+    
+    Query params:
+    - student_id: ID del estudiante (requerido)
+    - topic_id: ID del tema actual (requerido)
+    - limit: Número máximo de recomendaciones (opcional, default: 5)
+    """
+    try:
+        # Importar el servicio de personalización adaptativa
+        from src.personalization.services import AdaptivePersonalizationService
+        
+        # Obtener parámetros
+        student_id = request.args.get('student_id')
+        topic_id = request.args.get('topic_id')
+        limit = int(request.args.get('limit', 5))
+        
+        # Validar parámetros requeridos
+        if not student_id:
+            return jsonify({
+                "success": False,
+                "error": "VALIDATION_ERROR",
+                "message": "student_id es requerido"
+            }), 400
+            
+        if not topic_id:
+            return jsonify({
+                "success": False,
+                "error": "VALIDATION_ERROR",
+                "message": "topic_id es requerido"
+            }), 400
+        
+        # Validar que sean ObjectIds válidos
+        try:
+            ObjectId(student_id)
+            ObjectId(topic_id)
+        except Exception:
+            return jsonify({
+                "success": False,
+                "error": "VALIDATION_ERROR",
+                "message": "student_id y topic_id deben ser ObjectIds válidos"
+            }), 400
+        
+        # Obtener información del tema para filtrar por subject_tags
+        from src.shared.database import get_db
+        db = get_db()
+        topic = db.topics.find_one({"_id": ObjectId(topic_id)})
+        
+        if not topic:
+            return jsonify({
+                "success": False,
+                "error": "NOT_FOUND",
+                "message": "Tema no encontrado"
+            }), 404
+        
+        # Inicializar servicio de personalización adaptativa
+        personalization_service = AdaptivePersonalizationService()
+        
+        # Obtener recomendaciones del modelo RL
+        rl_success, rl_result = personalization_service.get_adaptive_recommendations(
+            student_id=student_id,
+            topic_id=topic_id,
+            context_data={"request_type": "template_recommendations"}
+        )
+        
+        if not rl_success:
+            return jsonify({
+                "success": False,
+                "error": "RL_SERVICE_ERROR",
+                "message": f"Error obteniendo recomendaciones RL: {rl_result.get('message', 'Error desconocido')}"
+            }), 500
+        
+        # Obtener plantillas disponibles
+        user_id = get_jwt_identity()
+        claims = get_jwt()
+        workspace_id = claims.get('workspace_id')
+        
+        available_templates = template_service.list_templates(
+            owner_filter='all',
+            scope_filter=None,
+            user_id=user_id,
+            workspace_id=workspace_id
+        )
+        
+        # Filtrar plantillas por subject_tags del tema
+        topic_subjects = topic.get('subject_tags', [])
+        if topic_subjects:
+            filtered_templates = [
+                t for t in available_templates 
+                if any(subject in t.subject_tags for subject in topic_subjects)
+            ]
+        else:
+            filtered_templates = available_templates
+        
+        # Procesar recomendaciones del RL para scoring de plantillas
+        rl_recommendations = rl_result.get('recommendations', [])
+        confidence_score = rl_result.get('confidence_score', 0.5)
+        reasoning = rl_result.get('reasoning', 'Recomendaciones basadas en modelo RL')
+        fallback_mode = rl_result.get('fallback_mode', False)
+        
+        # Crear mapa de tipos de contenido recomendados por RL
+        rl_content_types = {}
+        for rec in rl_recommendations:
+            content_type = rec.get('content_type')
+            if content_type:
+                rl_content_types[content_type] = {
+                    'priority': rec.get('priority', 1),
+                    'effectiveness': rec.get('estimated_effectiveness', 0.5),
+                    'reasoning': rec.get('reasoning', '')
+                }
+        
+        # Scoring de plantillas basado en recomendaciones RL
+        scored_templates = []
+        
+        for template in filtered_templates:
+            # Calcular score base
+            base_score = 0.5
+            template_reasoning = []
+            
+            # Score basado en baseline_mix VARK del template vs recomendaciones RL
+            if hasattr(template, 'baseline_mix') and template.baseline_mix:
+                vark_alignment = 0
+                for style, percentage in template.baseline_mix.items():
+                    # Buscar recomendaciones RL que coincidan con este estilo
+                    style_content_types = {
+                        'V': ['video', 'image', 'diagram'],
+                        'A': ['audio', 'music'],
+                        'K': ['interactive_exercise', 'game', 'simulation'],
+                        'R': ['text', 'quiz']
+                    }
+                    
+                    if style in style_content_types:
+                        for content_type in style_content_types[style]:
+                            if content_type in rl_content_types:
+                                vark_alignment += (percentage / 100) * rl_content_types[content_type]['effectiveness']
+                
+                base_score += vark_alignment * 0.4
+                if vark_alignment > 0.3:
+                    template_reasoning.append(f"Alineación VARK: {vark_alignment:.2f}")
+            
+            # Score basado en capabilities del template
+            if hasattr(template, 'capabilities') and template.capabilities:
+                capability_bonus = 0
+                for capability, enabled in template.capabilities.items():
+                    if enabled and capability in ['audio', 'video', 'interactive']:
+                        # Buscar si RL recomienda contenido que use esta capability
+                        capability_content_map = {
+                            'audio': ['audio', 'music'],
+                            'video': ['video'],
+                            'interactive': ['interactive_exercise', 'game', 'simulation']
+                        }
+                        
+                        if capability in capability_content_map:
+                            for content_type in capability_content_map[capability]:
+                                if content_type in rl_content_types:
+                                    capability_bonus += 0.1
+                                    template_reasoning.append(f"Capability {capability} recomendada")
+                
+                base_score += capability_bonus
+            
+            # Score basado en variedad de actividades (evitar repetición)
+            variety_bonus = min(0.2, len(template.style_tags) * 0.05) if hasattr(template, 'style_tags') else 0
+            base_score += variety_bonus
+            
+            # Normalizar score
+            final_score = min(1.0, base_score)
+            
+            scored_templates.append({
+                'template': template,
+                'score': final_score,
+                'reasoning': template_reasoning,
+                'rl_alignment': len([r for r in template_reasoning if 'VARK' in r or 'Capability' in r]) > 0
+            })
+        
+        # Ordenar por score descendente
+        scored_templates.sort(key=lambda x: x['score'], reverse=True)
+        
+        # Limitar resultados
+        top_templates = scored_templates[:limit]
+        
+        # Preparar respuesta
+        recommendations = []
+        for item in top_templates:
+            template = item['template']
+            recommendations.append({
+                'template': ensure_json_serializable(template.to_dict()),
+                'recommendation_score': round(item['score'], 3),
+                'reasoning': '; '.join(item['reasoning']) if item['reasoning'] else 'Plantilla compatible con perfil',
+                'rl_aligned': item['rl_alignment']
+            })
+        
+        return jsonify({
+            "success": True,
+            "data": {
+                "recommendations": recommendations,
+                "total_available": len(filtered_templates),
+                "rl_confidence": round(confidence_score, 3),
+                "rl_reasoning": reasoning,
+                "fallback_mode": fallback_mode,
+                "topic_subjects": topic_subjects
+            }
+        }), 200
+        
+    except Exception as e:
+        logging.error(f"Error getting template recommendations: {str(e)}")
+        traceback.print_exc()
+        return jsonify({
+            "success": False,
+            "error": "INTERNAL_ERROR",
+            "message": "Error interno del servidor"
+        }), 500
+
 def _apply_props_to_template(html: str, props: Dict[str, Any]) -> str:
     """
     Aplica las propiedades de una instancia al HTML de la plantilla.

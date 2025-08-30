@@ -3,7 +3,7 @@ import re
 import json
 from datetime import datetime
 from bson import ObjectId
-from typing import Dict, List, Optional, Union
+from typing import Dict, List, Optional, Union, Tuple
 from pymongo import MongoClient
 from pymongo.collection import Collection
 import os
@@ -359,6 +359,8 @@ class TemplateInstanceService:
         self.db = get_db()
         self.instances_collection: Collection = self.db.template_instances
         self.template_service = TemplateService()
+        self.templates_collection = self.db.templates
+        self.content_collection = self.db.topic_contents
         
     def create_instance(self, instance_data: Dict) -> TemplateInstance:
         """
@@ -378,6 +380,7 @@ class TemplateInstanceService:
                 template_id=instance_data["template_id"],
                 template_version=template.version,
                 topic_id=instance_data["topic_id"],
+                creator_id=instance_data.get("creator_id"),
                 props=initial_props,
                 assets=instance_data.get("assets", []),
                 learning_mix=instance_data.get("learning_mix")
@@ -477,6 +480,172 @@ class TemplateInstanceService:
         except Exception as e:
             logging.error(f"Error deleting template instance {instance_id}: {str(e)}")
             raise e
+    
+    def create_content_instance(self, template_id: str, parent_content_id: str, 
+                               topic_id: str, creator_id: str, 
+                               instance_props: Dict = None) -> Tuple[bool, str]:
+        """
+        Crea una instancia de plantilla vinculada a un contenido específico (diapositiva).
+        
+        Args:
+            template_id: ID de la plantilla base
+            parent_content_id: ID del contenido padre (diapositiva)
+            topic_id: ID del tema
+            creator_id: ID del creador
+            instance_props: Propiedades específicas para la instancia
+            
+        Returns:
+            Tuple[bool, str]: (éxito, mensaje/ID)
+        """
+        try:
+            # Verificar que la plantilla existe
+            template = self.templates_collection.find_one({"_id": ObjectId(template_id)})
+            if not template:
+                return False, "Plantilla no encontrada"
+            
+            # Verificar que el contenido padre existe
+            parent_content = self.content_collection.find_one({"_id": ObjectId(parent_content_id)})
+            if not parent_content:
+                return False, "Contenido padre no encontrado"
+            
+            # Verificar que el contenido padre es del tipo correcto (slide)
+            if parent_content.get("content_type") != "slide":
+                return False, "El contenido padre debe ser de tipo 'slide'"
+            
+            # Extraer marcadores de la plantilla
+            extractor = TemplateMarkupExtractor()
+            markers = extractor.extract_markers(template.get("html_content", ""))
+            
+            # Crear instancia con propiedades por defecto
+            default_props = markers.get("defaults", {})
+            if instance_props:
+                default_props.update(instance_props)
+            
+            # Crear nueva instancia vinculada al contenido
+            instance = TemplateInstance(
+                template_id=str(template["_id"]),
+                topic_id=topic_id,
+                creator_id=creator_id,
+                template_version=template.get("version", "1.0.0"),
+                parent_content_id=parent_content_id,
+                props=default_props,
+                assets={},
+                learning_mix=template.get("learning_mix", {}),
+                status="draft"
+            )
+            
+            instance_dict = instance.to_dict()
+            
+            result = self.instances_collection.insert_one(instance_dict)
+            return True, str(result.inserted_id)
+            
+        except Exception as e:
+            logging.error(f"Error creating content instance: {str(e)}")
+            return False, f"Error creando instancia: {str(e)}"
+    
+    def get_instances_by_content(self, parent_content_id: str) -> List[TemplateInstance]:
+        """
+        Obtiene todas las instancias de plantillas vinculadas a un contenido específico.
+        
+        Args:
+            parent_content_id: ID del contenido padre
+            
+        Returns:
+            Lista de instancias vinculadas al contenido
+        """
+        try:
+            instances = list(self.instances_collection.find({
+                "parent_content_id": ObjectId(parent_content_id)
+            }).sort("created_at", -1))
+            
+            result = []
+            for instance_data in instances:
+                instance = TemplateInstance(
+                    template_id=str(instance_data["template_id"]),
+                    topic_id=str(instance_data["topic_id"]),
+                    creator_id=str(instance_data["creator_id"]),
+                    props=instance_data.get("props", {}),
+                    assets=instance_data.get("assets", {}),
+                    learning_mix=instance_data.get("learning_mix", {}),
+                    status=instance_data.get("status", "draft"),
+                    _id=instance_data["_id"],
+                    created_at=instance_data.get("created_at"),
+                    updated_at=instance_data.get("updated_at")
+                )
+                # Añadir parent_content_id si existe
+                if "parent_content_id" in instance_data:
+                    instance.parent_content_id = str(instance_data["parent_content_id"])
+                
+                result.append(instance)
+            
+            return result
+            
+        except Exception as e:
+            logging.error(f"Error getting instances for content {parent_content_id}: {str(e)}")
+            raise e
+    
+    def update_content_templates(self, parent_content_id: str, 
+                                template_assignments: List[Dict]) -> Tuple[bool, str]:
+        """
+        Actualiza las plantillas asignadas a un contenido específico.
+        
+        Args:
+            parent_content_id: ID del contenido padre
+            template_assignments: Lista de asignaciones {template_id, props, status}
+            
+        Returns:
+            Tuple[bool, str]: (éxito, mensaje)
+        """
+        try:
+            # Obtener instancias existentes
+            existing_instances = self.get_instances_by_content(parent_content_id)
+            existing_template_ids = {inst.template_id for inst in existing_instances}
+            
+            # Procesar nuevas asignaciones
+            new_template_ids = set()
+            for assignment in template_assignments:
+                template_id = assignment.get("template_id")
+                if not template_id:
+                    continue
+                    
+                new_template_ids.add(template_id)
+                
+                # Si la instancia ya existe, actualizarla
+                existing_instance = next(
+                    (inst for inst in existing_instances if inst.template_id == template_id), 
+                    None
+                )
+                
+                if existing_instance:
+                    # Actualizar instancia existente
+                    update_data = {
+                        "props": assignment.get("props", existing_instance.props),
+                        "status": assignment.get("status", existing_instance.status)
+                    }
+                    self.update_instance(str(existing_instance._id), update_data)
+                else:
+                    # Crear nueva instancia
+                    parent_content = self.content_collection.find_one({"_id": ObjectId(parent_content_id)})
+                    if parent_content:
+                        self.create_content_instance(
+                            template_id=template_id,
+                            parent_content_id=parent_content_id,
+                            topic_id=str(parent_content["topic_id"]),
+                            creator_id=str(parent_content.get("creator_id", "")),
+                            instance_props=assignment.get("props", {})
+                        )
+            
+            # Eliminar instancias que ya no están asignadas
+            templates_to_remove = existing_template_ids - new_template_ids
+            for instance in existing_instances:
+                if instance.template_id in templates_to_remove:
+                    self.delete_instance(str(instance._id))
+            
+            return True, "Plantillas actualizadas correctamente"
+            
+        except Exception as e:
+            logging.error(f"Error updating content templates: {str(e)}")
+            return False, f"Error actualizando plantillas: {str(e)}"
 
 class TemplateMarkupExtractor:
     """

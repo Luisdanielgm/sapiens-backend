@@ -144,8 +144,10 @@ class TemplateInstance:
     """
     def __init__(self,
                  template_id: str,
-                 template_version: str,
                  topic_id: str,
+                 creator_id: str,
+                 template_version: str = "1.0.0",
+                 parent_content_id: Optional[str] = None,  # Vinculación con diapositiva específica
                  props: Optional[Dict] = None,
                  assets: List[Dict] = None,
                  learning_mix: Optional[Dict] = None,
@@ -158,6 +160,8 @@ class TemplateInstance:
         self.template_id = ObjectId(template_id)
         self.template_version = template_version
         self.topic_id = ObjectId(topic_id)
+        self.creator_id = ObjectId(creator_id)
+        self.parent_content_id = ObjectId(parent_content_id) if parent_content_id else None
         self.props = props or {}
         self.assets = assets or []  # Lista de {id, name, url, type}
         
@@ -178,11 +182,12 @@ class TemplateInstance:
             logging.warning(f"TemplateInstance received unexpected arguments, which were ignored: {list(kwargs.keys())}")
 
     def to_dict(self) -> dict:
-        return {
+        data = {
             "_id": self._id,
             "template_id": self.template_id,
             "template_version": self.template_version,
             "topic_id": self.topic_id,
+            "creator_id": self.creator_id,
             "props": self.props,
             "assets": self.assets,
             "learning_mix": self.learning_mix,
@@ -190,6 +195,9 @@ class TemplateInstance:
             "created_at": self.created_at,
             "updated_at": self.updated_at
         }
+        if self.parent_content_id:
+            data["parent_content_id"] = self.parent_content_id
+        return data
 
     def update_props(self, new_props: Dict):
         """Actualiza las propiedades de la instancia"""

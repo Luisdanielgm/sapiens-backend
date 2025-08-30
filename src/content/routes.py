@@ -87,12 +87,12 @@ def create_content_type():
 @APIRoute.standard(auth_required_flag=True, roles=[ROLES["TEACHER"], ROLES["ADMIN"]])
 def create_content():
     """
-    Crea contenido de cualquier tipo (game, simulation, quiz, diagram, etc.)
+    Crea contenido de cualquier tipo (game, simulation, quiz, diagram, slide, etc.)
     
     Body:
     {
         "topic_id": "ObjectId",
-        "content_type": "game|simulation|quiz|diagram|text|video|...",
+        "content_type": "game|simulation|quiz|diagram|text|video|slide|...",
         "title": "Título del contenido",
         "description": "Descripción",
         "content_data": {...},  // Contenido específico según tipo
@@ -102,7 +102,9 @@ def create_content():
         "learning_objectives": [...],
         "tags": [...],
         "resources": [...],
-        "generation_prompt": "..."  // Para contenido generado por IA
+        "generation_prompt": "...",  // Para contenido generado por IA
+        "order": 1,  // Orden secuencial del contenido (opcional)
+        "parent_content_id": "ObjectId"  // ID del contenido padre (opcional)
     }
     """
     try:

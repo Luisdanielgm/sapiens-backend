@@ -9,6 +9,7 @@ from src.shared.constants import STATUS
 from src.shared.standardization import VerificationBaseService, ErrorCodes
 from src.shared.exceptions import AppException
 from .models import ContentType, TopicContent, VirtualTopicContent, ContentResult, ContentTypes
+from .slide_style_service import SlideStyleService
 import re
 from src.ai_monitoring.services import AIMonitoringService
 
@@ -80,6 +81,7 @@ class ContentService(VerificationBaseService):
     def __init__(self):
         super().__init__(collection_name="topic_contents")
         self.content_type_service = ContentTypeService()
+        self.slide_style_service = SlideStyleService()
 
     def check_topic_exists(self, topic_id: str) -> bool:
         """Verifica si un tema existe."""
@@ -112,17 +114,15 @@ class ContentService(VerificationBaseService):
             if not content_type_def:
                 return False, f"Tipo de contenido '{content_type}' no válido"
 
-            # Validaciones específicas para diapositivas
-            if content_type == "slides":
+            # Validaciones específicas para diapositivas (tanto 'slides' como 'slide')
+            if content_type in ["slides", "slide"]:
                 slide_template = content_data.get("slide_template", {})
                 if not slide_template:
-                    return False, "El contenido de tipo 'slides' requiere un campo 'slide_template' con la plantilla de fondo"
+                    return False, f"El contenido de tipo '{content_type}' requiere un campo 'slide_template' con la plantilla de fondo"
                 
-                # Validar estructura básica de slide_template
-                required_template_fields = ["background", "styles"]
-                for field in required_template_fields:
-                    if field not in slide_template:
-                        return False, f"El slide_template debe incluir el campo '{field}'"
+                # Validar estructura del slide_template usando el servicio
+                if not self.slide_style_service.validate_slide_template(slide_template):
+                    return False, "El slide_template no tiene una estructura válida"
 
             # Crear contenido explícitamente para mapear campos
             # Convertir content a string si es dict para el extractor de marcadores
@@ -164,13 +164,14 @@ class ContentService(VerificationBaseService):
     def get_topic_content(self, topic_id: str, content_type: str = None) -> List[Dict]:
         """
         Obtiene contenido de un tema, opcionalmente filtrado por tipo.
+        Ordena por campo 'order' ascendente, con fallback a created_at descendente.
         
         Args:
             topic_id: ID del tema
             content_type: Tipo específico de contenido (opcional)
             
         Returns:
-            Lista de contenidos
+            Lista de contenidos ordenados
         """
         try:
             query = {
@@ -181,7 +182,11 @@ class ContentService(VerificationBaseService):
             if content_type:
                 query["content_type"] = content_type
                 
-            contents = list(self.collection.find(query).sort("created_at", -1))
+            # Ordenamiento: primero por 'order' ascendente (nulls last), luego por created_at descendente
+            contents = list(self.collection.find(query).sort([
+                ("order", 1),  # Ascendente, valores null van al final
+                ("created_at", -1)  # Descendente como fallback
+            ]))
             
             # Convertir ObjectIds a strings
             for content in contents:
@@ -189,12 +194,53 @@ class ContentService(VerificationBaseService):
                 content["topic_id"] = str(content["topic_id"])
                 if content.get("creator_id"):
                     content["creator_id"] = str(content["creator_id"])
+                if content.get("parent_content_id"):
+                    content["parent_content_id"] = str(content["parent_content_id"])
                     
             return contents
             
         except Exception as e:
             logging.error(f"Error obteniendo contenido del tema: {str(e)}")
             return []
+    
+    def generate_slide_template(self, palette_name: str = None, font_family: str = None, custom_colors: Dict = None) -> Dict:
+        """
+        Genera un slide_template usando el servicio de estilo de diapositivas.
+        
+        Args:
+            palette_name: Nombre de la paleta predefinida (opcional)
+            font_family: Familia de fuente específica (opcional)
+            custom_colors: Colores personalizados (opcional)
+            
+        Returns:
+            Dict con el slide_template generado
+        """
+        return self.slide_style_service.generate_slide_template(
+            palette_name=palette_name,
+            font_family=font_family,
+            custom_colors=custom_colors
+        )
+    
+    def get_available_slide_palettes(self) -> List[str]:
+        """
+        Obtiene las paletas de colores disponibles para diapositivas.
+        
+        Returns:
+            Lista de nombres de paletas disponibles
+        """
+        return self.slide_style_service.get_available_palettes()
+    
+    def get_slide_palette_preview(self, palette_name: str) -> Optional[Dict]:
+        """
+        Obtiene una vista previa de una paleta específica.
+        
+        Args:
+            palette_name: Nombre de la paleta
+            
+        Returns:
+            Dict con los colores de la paleta o None si no existe
+        """
+        return self.slide_style_service.get_palette_preview(palette_name)
 
     def get_interactive_content(self, topic_id: str) -> List[Dict]:
         """
@@ -271,16 +317,32 @@ class ContentService(VerificationBaseService):
 
     def delete_content(self, content_id: str) -> Tuple[bool, str]:
         """
-        Elimina contenido (soft delete).
+        Elimina contenido (soft delete) y sus contenidos hijos en cascada.
         """
         try:
+            # Primero eliminar contenidos hijos (cascada)
+            child_contents = self.collection.find({"parent_content_id": ObjectId(content_id)})
+            child_count = 0
+            
+            for child in child_contents:
+                child_result = self.collection.update_one(
+                    {"_id": child["_id"]},
+                    {"$set": {"status": "deleted", "updated_at": datetime.now()}}
+                )
+                if child_result.modified_count > 0:
+                    child_count += 1
+            
+            # Luego eliminar el contenido principal
             result = self.collection.update_one(
                 {"_id": ObjectId(content_id)},
                 {"$set": {"status": "deleted", "updated_at": datetime.now()}}
             )
             
             if result.modified_count > 0:
-                return True, "Contenido eliminado exitosamente"
+                message = "Contenido eliminado exitosamente"
+                if child_count > 0:
+                    message += f" (incluyendo {child_count} contenidos hijos)"
+                return True, message
             else:
                 return False, "No se encontró el contenido"
                 

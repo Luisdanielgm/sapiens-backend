@@ -29,7 +29,7 @@ def register():
         data = request.get_json()
         
         if user_service.verify_user_exists(data['email']):
-            return APIRoute.error(ErrorCodes.ALREADY_EXISTS, "El correo electrónico ya está registrado.")
+            return APIRoute.error(ErrorCodes.EMAIL_IN_USE, "El correo electrónico ya está registrado.")
 
         success, user_id_or_error = user_service.register_user(data)
 
