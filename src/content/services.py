@@ -12,6 +12,9 @@ from .models import ContentType, TopicContent, VirtualTopicContent, ContentResul
 from .slide_style_service import SlideStyleService
 import re
 from src.ai_monitoring.services import AIMonitoringService
+from .structured_sequence_service import StructuredSequenceService
+from .template_recommendation_service import TemplateRecommendationService
+from .embedded_content_service import EmbeddedContentService
 
 class ContentTypeService(VerificationBaseService):
     """
@@ -82,6 +85,9 @@ class ContentService(VerificationBaseService):
         super().__init__(collection_name="topic_contents")
         self.content_type_service = ContentTypeService()
         self.slide_style_service = SlideStyleService()
+        self.structured_sequence_service = StructuredSequenceService(get_db())
+        self.template_recommendation_service = TemplateRecommendationService()
+        self.embedded_content_service = EmbeddedContentService(self.db)
 
     def check_topic_exists(self, topic_id: str) -> bool:
         """Verifica si un tema existe."""
@@ -203,6 +209,78 @@ class ContentService(VerificationBaseService):
             logging.error(f"Error obteniendo contenido del tema: {str(e)}")
             return []
     
+    def get_structured_topic_content(self, topic_id: str, student_id: str = None) -> List[Dict]:
+        """
+        Obtiene contenido de un tema usando la secuencia estructurada.
+        Reemplaza la intercalación aleatoria con una secuencia predecible:
+        diapositivas → contenidos opcionales → evaluación
+        
+        Args:
+            topic_id: ID del tema
+            student_id: ID del estudiante (para personalización futura)
+            
+        Returns:
+            Lista de contenidos en secuencia estructurada
+        """
+        try:
+            return self.structured_sequence_service.get_structured_content_sequence(
+                topic_id=topic_id,
+                student_id=student_id
+            )
+        except Exception as e:
+            logging.error(f"Error obteniendo secuencia estructurada: {str(e)}")
+            # Fallback al método tradicional si falla la secuencia estructurada
+            return self.get_topic_content(topic_id)
+    
+    def validate_topic_sequence(self, topic_id: str) -> Tuple[bool, List[str]]:
+        """
+        Valida la integridad de la secuencia estructurada de un tema.
+        
+        Args:
+            topic_id: ID del tema
+            
+        Returns:
+            Tuple[bool, List[str]]: (es_válida, lista_de_errores)
+        """
+        try:
+            return self.structured_sequence_service.validate_sequence_integrity(topic_id)
+        except Exception as e:
+            logging.error(f"Error validando secuencia del tema: {str(e)}")
+            return False, [f"Error interno: {str(e)}"]
+    
+    def reorder_topic_slides(self, topic_id: str, slide_order_mapping: Dict[str, int]) -> Tuple[bool, str]:
+        """
+        Reordena las diapositivas de un tema.
+        
+        Args:
+            topic_id: ID del tema
+            slide_order_mapping: Dict {slide_id: new_order}
+            
+        Returns:
+            Tuple[bool, str]: (éxito, mensaje)
+        """
+        try:
+            return self.structured_sequence_service.reorder_slides(topic_id, slide_order_mapping)
+        except Exception as e:
+            logging.error(f"Error reordenando diapositivas: {str(e)}")
+            return False, f"Error interno: {str(e)}"
+    
+    def get_topic_sequence_statistics(self, topic_id: str) -> Dict:
+        """
+        Obtiene estadísticas de la secuencia estructurada de un tema.
+        
+        Args:
+            topic_id: ID del tema
+            
+        Returns:
+            Dict con estadísticas de la secuencia
+        """
+        try:
+            return self.structured_sequence_service.get_sequence_statistics(topic_id)
+        except Exception as e:
+            logging.error(f"Error obteniendo estadísticas de secuencia: {str(e)}")
+            return {}
+    
     def generate_slide_template(self, palette_name: str = None, font_family: str = None, custom_colors: Dict = None) -> Dict:
         """
         Genera un slide_template usando el servicio de estilo de diapositivas.
@@ -267,6 +345,116 @@ class ContentService(VerificationBaseService):
         except Exception as e:
             logging.error(f"Error obteniendo contenido interactivo: {str(e)}")
             return []
+
+    def get_template_recommendations(self, topic_id: str, student_id: str = None) -> Dict:
+        """
+        Obtiene recomendaciones de plantillas para cada diapositiva de un tema.
+        
+        Args:
+            topic_id: ID del tema
+            student_id: ID del estudiante (para personalización futura)
+            
+        Returns:
+            Dict con recomendaciones por diapositiva
+        """
+        try:
+            return self.template_recommendation_service.get_topic_recommendations(
+                topic_id=topic_id,
+                student_id=student_id
+            )
+        except Exception as e:
+            logging.error(f"Error obteniendo recomendaciones de plantillas: {str(e)}")
+            return {}
+    
+    def apply_template_recommendations(self, topic_id: str, recommendations: Dict) -> Tuple[bool, str]:
+        """
+        Aplica recomendaciones de plantillas a las diapositivas de un tema.
+        
+        Args:
+            topic_id: ID del tema
+            recommendations: Dict con recomendaciones {slide_id: template_id}
+            
+        Returns:
+            Tuple[bool, str]: (éxito, mensaje)
+        """
+        try:
+            return self.template_recommendation_service.apply_recommendations(
+                topic_id=topic_id,
+                recommendations=recommendations
+            )
+        except Exception as e:
+            logging.error(f"Error aplicando recomendaciones de plantillas: {str(e)}")
+            return False, f"Error interno: {str(e)}"
+    
+    def get_slide_template_compatibility(self, slide_id: str, template_id: str) -> Dict:
+        """
+        Analiza la compatibilidad entre una diapositiva y una plantilla.
+        
+        Args:
+            slide_id: ID de la diapositiva
+            template_id: ID de la plantilla
+            
+        Returns:
+            Dict con análisis de compatibilidad
+        """
+        try:
+            return self.template_recommendation_service.analyze_slide_template_compatibility(
+                slide_id=slide_id,
+                template_id=template_id
+            )
+        except Exception as e:
+            logging.error(f"Error analizando compatibilidad de plantilla: {str(e)}")
+            return {}
+    
+    def submit_template_feedback(self, student_id: str, topic_id: str, slide_id: str,
+                               template_id: str, feedback_data: Dict) -> Tuple[bool, str]:
+        """
+        Envía feedback sobre el uso de una plantilla al sistema RL.
+        
+        Args:
+            student_id: ID del estudiante
+            topic_id: ID del tema
+            slide_id: ID de la diapositiva
+            template_id: ID de la plantilla utilizada
+            feedback_data: Datos de feedback
+            
+        Returns:
+            Tuple[bool, str]: (éxito, mensaje)
+        """
+        return self.template_recommendation_service.submit_template_feedback(
+            student_id, topic_id, slide_id, template_id, feedback_data
+        )
+    
+    # Métodos para contenido embebido vs separado
+    def analyze_content_embedding_strategy(self, slide_id: str, content_id: str):
+        """
+        Analiza si un contenido debe ser embebido o separado de una diapositiva.
+        """
+        return self.embedded_content_service.analyze_content_embedding_strategy(slide_id, content_id)
+    
+    def embed_content_in_slide(self, slide_id: str, content_id: str, embed_position: str = 'bottom'):
+        """
+        Embebe un contenido dentro de una diapositiva.
+        """
+        return self.embedded_content_service.embed_content_in_slide(slide_id, content_id, embed_position)
+    
+    def extract_embedded_content(self, slide_id: str, content_id: str):
+        """
+        Extrae un contenido embebido y lo convierte en contenido separado.
+        """
+        return self.embedded_content_service.extract_embedded_content(slide_id, content_id)
+    
+    def get_embedding_recommendations(self, topic_id: str):
+        """
+        Obtiene recomendaciones de embedding para todos los contenidos de un tema.
+        """
+        return self.embedded_content_service.get_embedding_recommendations(topic_id)
+    
+    def get_embedding_statistics(self, topic_id: str):
+        """
+        Obtiene estadísticas de embedding para un tema.
+        """
+        return self.embedded_content_service.get_embedding_statistics(topic_id)
 
     def update_content(self, content_id: str, update_data: Dict) -> Tuple[bool, str]:
         """

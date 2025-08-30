@@ -800,6 +800,106 @@ def migrate_content_to_template(content_id):
             status_code=500,
         )
 
+# ============================================
+# ENDPOINTS DE RECOMENDACIONES DE PLANTILLAS
+# ============================================
+
+@content_bp.route('/topic/<topic_id>/template-recommendations', methods=['GET'])
+@APIRoute.standard(auth_required_flag=True)
+def get_template_recommendations(topic_id):
+    """
+    Obtiene recomendaciones de plantillas para cada diapositiva de un tema.
+    
+    Query params:
+        student_id: ID del estudiante (opcional, para personalización futura)
+    """
+    try:
+        student_id = request.args.get('student_id')
+        
+        recommendations = content_service.get_template_recommendations(
+            topic_id=topic_id,
+            student_id=student_id
+        )
+        
+        return APIRoute.success(data={
+            "recommendations": recommendations,
+            "topic_id": topic_id
+        })
+        
+    except Exception as e:
+        logging.error(f"Error obteniendo recomendaciones de plantillas: {str(e)}")
+        return APIRoute.error(
+            ErrorCodes.SERVER_ERROR,
+            "Error interno del servidor",
+            status_code=500,
+        )
+
+@content_bp.route('/topic/<topic_id>/apply-template-recommendations', methods=['POST'])
+@APIRoute.standard(auth_required_flag=True, roles=[ROLES["TEACHER"], ROLES["ADMIN"]])
+def apply_template_recommendations(topic_id):
+    """
+    Aplica recomendaciones de plantillas a las diapositivas de un tema.
+    
+    Body:
+    {
+        "recommendations": {
+            "slide_id_1": "template_id_1",
+            "slide_id_2": "template_id_2"
+        }
+    }
+    """
+    try:
+        data = request.get_json()
+        
+        if not data or "recommendations" not in data:
+            return APIRoute.error(ErrorCodes.VALIDATION_ERROR, "Campo 'recommendations' requerido")
+        
+        recommendations = data["recommendations"]
+        
+        success, message = content_service.apply_template_recommendations(
+            topic_id=topic_id,
+            recommendations=recommendations
+        )
+        
+        if success:
+            return APIRoute.success(message=message)
+        else:
+            return APIRoute.error(ErrorCodes.BUSINESS_LOGIC_ERROR, message)
+            
+    except Exception as e:
+        logging.error(f"Error aplicando recomendaciones de plantillas: {str(e)}")
+        return APIRoute.error(
+            ErrorCodes.SERVER_ERROR,
+            "Error interno del servidor",
+            status_code=500,
+        )
+
+@content_bp.route('/slide/<slide_id>/template-compatibility/<template_id>', methods=['GET'])
+@APIRoute.standard(auth_required_flag=True)
+def get_slide_template_compatibility(slide_id, template_id):
+    """
+    Analiza la compatibilidad entre una diapositiva y una plantilla específica.
+    """
+    try:
+        compatibility = content_service.get_slide_template_compatibility(
+            slide_id=slide_id,
+            template_id=template_id
+        )
+        
+        return APIRoute.success(data={
+            "compatibility": compatibility,
+            "slide_id": slide_id,
+            "template_id": template_id
+        })
+        
+    except Exception as e:
+        logging.error(f"Error analizando compatibilidad de plantilla: {str(e)}")
+        return APIRoute.error(
+            ErrorCodes.SERVER_ERROR,
+            "Error interno del servidor",
+            status_code=500,
+        )
+
 @content_bp.route('/<virtual_content_id>/complete-auto', methods=['POST'])
 @APIRoute.standard(auth_required_flag=True)
 def mark_content_complete_auto(virtual_content_id):
@@ -874,6 +974,167 @@ def mark_content_complete_auto(virtual_content_id):
 
     except Exception as e:
         logging.error(f"Error marcando contenido como completado: {str(e)}")
+        return APIRoute.error(
+            ErrorCodes.SERVER_ERROR,
+            "Error interno del servidor",
+            status_code=500,
+        )
+
+@content_bp.route('/template-feedback', methods=['POST'])
+@APIRoute.standard(auth_required_flag=True)
+def submit_template_feedback():
+    """
+    Envía feedback sobre el uso de plantillas al sistema de RL.
+    """
+    try:
+        data = request.get_json()
+        
+        # Validar campos requeridos
+        required_fields = ['student_id', 'topic_id', 'slide_id', 'template_id', 
+                          'engagement_score', 'completion_score', 'satisfaction_score']
+        
+        for field in required_fields:
+            if field not in data:
+                return APIRoute.error(ErrorCodes.VALIDATION_ERROR, f"Campo requerido faltante: {field}")
+        
+        # Validar rangos de scores (0.0 - 1.0)
+        score_fields = ['engagement_score', 'completion_score', 'satisfaction_score']
+        for field in score_fields:
+            if not (0.0 <= data[field] <= 1.0):
+                return APIRoute.error(ErrorCodes.VALIDATION_ERROR, f"{field} debe estar entre 0.0 y 1.0")
+        
+        success = content_service.submit_template_feedback(
+            data['student_id'], data['topic_id'], data['slide_id'],
+            data['template_id'], data['engagement_score'],
+            data['completion_score'], data['satisfaction_score']
+        )
+        
+        if success:
+            return APIRoute.success(message="Feedback enviado exitosamente al sistema de RL")
+        else:
+            return APIRoute.error(ErrorCodes.BUSINESS_LOGIC_ERROR, "Error al enviar feedback al sistema de RL")
+            
+    except Exception as e:
+        logging.error(f"Error submitting template feedback: {str(e)}")
+        return APIRoute.error(
+            ErrorCodes.SERVER_ERROR,
+            "Error interno del servidor",
+            status_code=500,
+        )
+
+# Rutas para contenido embebido vs separado
+@content_bp.route('/embedding/analyze', methods=['POST'])
+@APIRoute.standard(auth_required_flag=True)
+def analyze_embedding_strategy():
+    """
+    Analiza si un contenido debe ser embebido o separado de una diapositiva.
+    """
+    try:
+        data = request.get_json()
+        
+        if 'slide_id' not in data or 'content_id' not in data:
+            return APIRoute.error(ErrorCodes.VALIDATION_ERROR, "slide_id y content_id son requeridos")
+        
+        analysis = content_service.analyze_content_embedding_strategy(
+            data['slide_id'], data['content_id']
+        )
+        
+        return APIRoute.success(data={"analysis": analysis})
+        
+    except Exception as e:
+        logging.error(f"Error analyzing embedding strategy: {str(e)}")
+        return APIRoute.error(
+            ErrorCodes.SERVER_ERROR,
+            "Error interno del servidor",
+            status_code=500,
+        )
+
+@content_bp.route('/embedding/embed', methods=['POST'])
+@APIRoute.standard(auth_required_flag=True, roles=[ROLES["TEACHER"], ROLES["ADMIN"]])
+def embed_content():
+    """
+    Embebe un contenido dentro de una diapositiva.
+    """
+    try:
+        data = request.get_json()
+        
+        if 'slide_id' not in data or 'content_id' not in data:
+            return APIRoute.error(ErrorCodes.VALIDATION_ERROR, "slide_id y content_id son requeridos")
+        
+        embed_position = data.get('embed_position', 'bottom')
+        
+        result = content_service.embed_content_in_slide(
+            data['slide_id'], data['content_id'], embed_position
+        )
+        
+        return APIRoute.success(data={"result": result})
+        
+    except Exception as e:
+        logging.error(f"Error embedding content: {str(e)}")
+        return APIRoute.error(
+            ErrorCodes.SERVER_ERROR,
+            "Error interno del servidor",
+            status_code=500,
+        )
+
+@content_bp.route('/embedding/extract', methods=['POST'])
+@APIRoute.standard(auth_required_flag=True, roles=[ROLES["TEACHER"], ROLES["ADMIN"]])
+def extract_embedded_content():
+    """
+    Extrae un contenido embebido y lo convierte en contenido separado.
+    """
+    try:
+        data = request.get_json()
+        
+        if 'slide_id' not in data or 'content_id' not in data:
+            return APIRoute.error(ErrorCodes.VALIDATION_ERROR, "slide_id y content_id son requeridos")
+        
+        result = content_service.extract_embedded_content(
+            data['slide_id'], data['content_id']
+        )
+        
+        return APIRoute.success(data={"result": result})
+        
+    except Exception as e:
+        logging.error(f"Error extracting embedded content: {str(e)}")
+        return APIRoute.error(
+            ErrorCodes.SERVER_ERROR,
+            "Error interno del servidor",
+            status_code=500,
+        )
+
+@content_bp.route('/embedding/recommendations/<topic_id>', methods=['GET'])
+@APIRoute.standard(auth_required_flag=True)
+def get_embedding_recommendations(topic_id):
+    """
+    Obtiene recomendaciones de embedding para todos los contenidos de un tema.
+    """
+    try:
+        recommendations = content_service.get_embedding_recommendations(topic_id)
+        
+        return APIRoute.success(data={"recommendations": recommendations})
+        
+    except Exception as e:
+        logging.error(f"Error getting embedding recommendations: {str(e)}")
+        return APIRoute.error(
+            ErrorCodes.SERVER_ERROR,
+            "Error interno del servidor",
+            status_code=500,
+        )
+
+@content_bp.route('/embedding/statistics/<topic_id>', methods=['GET'])
+@APIRoute.standard(auth_required_flag=True)
+def get_embedding_statistics(topic_id):
+    """
+    Obtiene estadísticas de embedding para un tema.
+    """
+    try:
+        statistics = content_service.get_embedding_statistics(topic_id)
+        
+        return APIRoute.success(data={"statistics": statistics})
+        
+    except Exception as e:
+        logging.error(f"Error getting embedding statistics: {str(e)}")
         return APIRoute.error(
             ErrorCodes.SERVER_ERROR,
             "Error interno del servidor",

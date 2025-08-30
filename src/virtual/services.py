@@ -1388,13 +1388,28 @@ class FastVirtualModuleGenerator(VerificationBaseService):
                 # Como fallback, usar los primeros 3 contenidos disponibles
                 selected_contents = original_contents[:3]
 
-            # Aplicar intercalación dinámica basada en historial del estudiante
+            # Aplicar secuencia estructurada en lugar de intercalación aleatoria
             try:
-                selected_contents = self.apply_dynamic_intercalation(selected_contents, student_id, topic_id)
-                logging.info(f"Intercalación dinámica aplicada exitosamente para tema {topic_id}")
+                from src.content.structured_sequence_service import StructuredSequenceService
+                structured_service = StructuredSequenceService(self.db)
+                
+                # Obtener secuencia estructurada: diapositivas → contenidos opcionales → evaluación
+                structured_contents = structured_service.get_structured_content_sequence(topic_id, student_id)
+                
+                if structured_contents:
+                    # Filtrar solo los contenidos que están en selected_contents
+                    selected_content_ids = {str(c["_id"]) for c in selected_contents}
+                    selected_contents = [
+                        content for content in structured_contents 
+                        if str(content["_id"]) in selected_content_ids
+                    ]
+                    logging.info(f"Secuencia estructurada aplicada exitosamente para tema {topic_id}: {len(selected_contents)} contenidos")
+                else:
+                    logging.warning(f"No se pudo obtener secuencia estructurada para tema {topic_id}, usando orden original")
+                    
             except Exception as e:
-                logging.error(f"Error aplicando intercalación dinámica para tema {topic_id}: {str(e)}")
-                # Continuar con los contenidos seleccionados sin intercalación
+                logging.error(f"Error aplicando secuencia estructurada para tema {topic_id}: {str(e)}")
+                # Continuar con los contenidos seleccionados sin reordenamiento
 
             # Verificar si usar generación paralela
             # Usar solo generación tradicional (sistema paralelo eliminado)
@@ -1823,227 +1838,18 @@ class FastVirtualModuleGenerator(VerificationBaseService):
             logging.warning(f"Usando fallback con {len(fallback_contents)} contenidos")
             return fallback_contents
 
-    def apply_dynamic_intercalation(self, selected_contents: List[Dict], student_id: str, topic_id: str) -> List[Dict]:
-        """
-        Aplica intercalación dinámica de tipos de contenido basada en el historial del estudiante.
+    # DEPRECATED: apply_dynamic_intercalation ha sido reemplazado por StructuredSequenceService
+    # El nuevo sistema usa secuencia estructurada: diapositivas → contenidos opcionales → evaluación
 
-        Esta función analiza:
-        1. Historial de interacciones del estudiante
-        2. Tasa de completitud por tipo de contenido
-        3. Tiempo de engagement por tipo
-        4. Preferencias aprendidas dinámicamente
-        5. Progreso actual en el tema
+    # DEPRECATED: Métodos auxiliares de intercalación eliminados - usar StructuredSequenceService
 
-        Args:
-            selected_contents: Lista de contenidos ya seleccionados por perfil cognitivo
-            student_id: ID del estudiante
-            topic_id: ID del tema actual
+    # _calculate_content_performance eliminado - funcionalidad movida a StructuredSequenceService
 
-        Returns:
-            Lista de contenidos con intercalación optimizada
-        """
-        try:
-            if len(selected_contents) <= 1:
-                # Si hay 1 o menos contenidos, no hay nada que intercalar
-                return selected_contents
+    # _get_topic_progress eliminado - funcionalidad movida a StructuredSequenceService
 
-            # 1. Obtener historial de interacciones del estudiante
-            interaction_history = self._get_student_interaction_history(student_id)
+    # _apply_intercalation_algorithm eliminado - funcionalidad movida a StructuredSequenceService
 
-            # 2. Calcular métricas de rendimiento por tipo de contenido
-            content_performance = self._calculate_content_performance(interaction_history)
-
-            # 3. Obtener progreso actual en el tema
-            topic_progress = self._get_topic_progress(student_id, topic_id)
-
-            # 4. Aplicar algoritmo de intercalación
-            intercalated_contents = self._apply_intercalation_algorithm(
-                selected_contents,
-                content_performance,
-                topic_progress,
-                interaction_history
-            )
-
-            logging.info(f"Intercalación dinámica aplicada: {len(intercalated_contents)} contenidos optimizados")
-            return intercalated_contents
-
-        except Exception as e:
-            logging.error(f"Error aplicando intercalación dinámica: {str(e)}")
-            # Fallback: devolver contenidos sin modificación
-            return selected_contents
-
-    def _get_student_interaction_history(self, student_id: str) -> List[Dict]:
-        """
-        Obtiene el historial de interacciones del estudiante con contenidos.
-        """
-        try:
-            # Buscar todas las interacciones del estudiante en los últimos 30 días
-            thirty_days_ago = datetime.now() - timedelta(days=30)
-
-            interactions = list(self.db.content_results.find({
-                "student_id": ObjectId(student_id),
-                "recorded_at": {"$gte": thirty_days_ago}
-            }).sort("recorded_at", -1).limit(100))
-
-            return interactions
-
-        except Exception as e:
-            logging.error(f"Error obteniendo historial de interacciones: {str(e)}")
-            return []
-
-    def _calculate_content_performance(self, interaction_history: List[Dict]) -> Dict[str, Dict]:
-        """
-        Calcula métricas de rendimiento por tipo de contenido basado en el historial.
-        """
-        performance = {}
-
-        for interaction in interaction_history:
-            content_type = interaction.get("content_type", "unknown")
-
-            if content_type not in performance:
-                performance[content_type] = {
-                    "total_interactions": 0,
-                    "completed_count": 0,
-                    "avg_score": 0,
-                    "avg_completion_time": 0,
-                    "scores": []
-                }
-
-            perf = performance[content_type]
-            perf["total_interactions"] += 1
-
-            # Contar como completado si score >= 70%
-            score = interaction.get("score", 0)
-            if score >= 70:
-                perf["completed_count"] += 1
-
-            perf["scores"].append(score)
-
-        # Calcular promedios
-        for content_type, perf in performance.items():
-            if perf["scores"]:
-                perf["avg_score"] = sum(perf["scores"]) / len(perf["scores"])
-
-        return performance
-
-    def _get_topic_progress(self, student_id: str, topic_id: str) -> Dict:
-        """
-        Obtiene el progreso actual del estudiante en el tema específico.
-        """
-        try:
-            # Buscar progreso en virtual_topic_contents
-            progress_data = self.db.virtual_topic_contents.find_one({
-                "student_id": ObjectId(student_id),
-                "topic_id": ObjectId(topic_id)
-            })
-
-            if progress_data:
-                interaction_tracking = progress_data.get("interaction_tracking", {})
-                return {
-                    "completion_percentage": interaction_tracking.get("completion_percentage", 0),
-                    "completed_items": interaction_tracking.get("completed_items", 0),
-                    "total_items": interaction_tracking.get("total_items", 0)
-                }
-
-            return {"completion_percentage": 0, "completed_items": 0, "total_items": 0}
-
-        except Exception as e:
-            logging.error(f"Error obteniendo progreso del tema: {str(e)}")
-            return {"completion_percentage": 0, "completed_items": 0, "total_items": 0}
-
-    def _apply_intercalation_algorithm(self, contents: List[Dict], performance: Dict,
-                                     progress: Dict, history: List[Dict]) -> List[Dict]:
-        """
-        Aplica el algoritmo de intercalación inteligente.
-        """
-        try:
-            if len(contents) <= 1:
-                return contents
-
-            # Estrategia de intercalación basada en múltiples factores:
-
-            # 1. FACTOR DE RENDIMIENTO: Priorizar tipos con buen rendimiento histórico
-            high_performance_types = []
-            for content_type, perf in performance.items():
-                completion_rate = perf["completed_count"] / perf["total_interactions"] if perf["total_interactions"] > 0 else 0
-                avg_score = perf["avg_score"]
-                if completion_rate > 0.7 and avg_score > 75:
-                    high_performance_types.append(content_type)
-
-            # 2. FACTOR DE VARIEDAD: Evitar secuencias monótonas
-            content_types = [c.get("content_type", "") for c in contents]
-            type_counts = {}
-            for ct in content_types:
-                type_counts[ct] = type_counts.get(ct, 0) + 1
-
-            # 3. FACTOR DE ENGAGEMENT: Intercalar tipos que mantengan el interés
-            engagement_sequence = self._calculate_optimal_sequence(
-                contents, progress, high_performance_types, type_counts
-            )
-
-            # 4. FACTOR DE PROGRESO: Ajustar según el avance actual
-            progress_factor = progress.get("completion_percentage", 0) / 100.0
-
-            # Aplicar la secuencia optimizada
-            optimized_contents = []
-            for idx, content in enumerate(contents):
-                if idx < len(engagement_sequence):
-                    # Intercalar según la secuencia óptima
-                    optimal_type = engagement_sequence[idx]
-                    matching_content = next(
-                        (c for c in contents if c.get("content_type") == optimal_type and c not in optimized_contents),
-                        None
-                    )
-                    if matching_content:
-                        optimized_contents.append(matching_content)
-                        continue
-
-                # Si no hay contenido óptimo disponible, usar el original
-                if content not in optimized_contents:
-                    optimized_contents.append(content)
-
-            return optimized_contents[:len(contents)]  # Mantener la misma cantidad
-
-        except Exception as e:
-            logging.error(f"Error en algoritmo de intercalación: {str(e)}")
-            return contents
-
-    def _calculate_optimal_sequence(self, contents: List[Dict], progress: Dict,
-                                   high_perf_types: List[str], type_counts: Dict) -> List[str]:
-        """
-        Calcula la secuencia óptima de tipos de contenido.
-        """
-        try:
-            progress_factor = progress.get("completion_percentage", 0) / 100.0
-
-            # Estrategias de intercalación según el progreso:
-
-            # INICIO (0-25%): Enfoque en contenido motivacional y fácil
-            if progress_factor < 0.25:
-                sequence = ["video", "text", "quiz", "game"]
-            # MITAD (25-75%): Mezcla equilibrada
-            elif progress_factor < 0.75:
-                sequence = ["text", "diagram", "simulation", "quiz"]
-            # FINAL (75-100%): Enfoque en consolidación y evaluación
-            else:
-                sequence = ["summary", "quiz", "project", "exam"]
-
-            # Priorizar tipos de alto rendimiento
-            if high_perf_types:
-                # Mover tipos de alto rendimiento al principio
-                prioritized_sequence = []
-                for high_perf_type in high_perf_types:
-                    if high_perf_type in sequence:
-                        prioritized_sequence.append(high_perf_type)
-                        sequence.remove(high_perf_type)
-                prioritized_sequence.extend(sequence)
-                sequence = prioritized_sequence
-
-            return sequence
-
-        except Exception as e:
-            logging.error(f"Error calculando secuencia óptima: {str(e)}")
-            return ["text", "video", "quiz", "game"]  # Secuencia por defecto
+    # _calculate_optimal_sequence eliminado - funcionalidad movida a StructuredSequenceService
 
     def _select_by_vak_preference(self, contents: List[Dict], visual: float, auditory: float, reading: float, kinesthetic: float) -> Optional[Dict]:
         """
