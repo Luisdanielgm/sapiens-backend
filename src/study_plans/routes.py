@@ -8,7 +8,6 @@ from .services import (
     StudyPlanService, 
     StudyPlanAssignmentService,
     ModuleService, 
-    EvaluationService, 
     TopicService,
     ContentTypeService,
     LearningMethodologyService,
@@ -17,6 +16,7 @@ from .services import (
     TopicReadinessService,
     AutomaticGradingService
 )
+from src.evaluations.services import EvaluationService
 from src.resources.services import ResourceService, ResourceFolderService
 import logging
 from src.shared.constants import ROLES

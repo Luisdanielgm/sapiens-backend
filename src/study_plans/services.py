@@ -11,8 +11,10 @@ from src.shared.exceptions import AppException
 from src.shared.database import get_db
 from src.classes.services import ClassService
 from src.study_plans.models import (
-    StudyPlanPerSubject, StudyPlanAssignment, Module, Topic, Evaluation, 
-    EvaluationResource, EvaluationRubric, EvaluationSubmission
+    StudyPlanPerSubject, StudyPlanAssignment, Module, Topic
+)
+from src.evaluations.models import (
+    Evaluation, EvaluationResource, EvaluationRubric, EvaluationSubmission
 )
 from src.content.models import (
     TopicContent, ContentType, ContentTypes

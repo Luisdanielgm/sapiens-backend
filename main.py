@@ -48,6 +48,7 @@ from src.correction.routes import correction_bp
 from src.workspaces.routes import workspaces_bp
 from src.personalization.routes import personalization_bp  # Sistema de personalización adaptativa
 from src.marketplace.routes import marketplace_bp # Sistema de marketplace
+from src.evaluations.routes import evaluation_routes  # Sistema de evaluaciones flexible
 # Sistema de plantillas
 from src.content.template_routes import template_bp, instance_bp, preview_bp
 
@@ -222,6 +223,7 @@ def create_app(config_object=active_config):
     app.register_blueprint(resources_bp, url_prefix='/api/resources')
     app.register_blueprint(deep_research_bp, url_prefix='/api/deep-research')
     app.register_blueprint(topic_resources_bp, url_prefix='/api/topic-resources')
+    app.register_blueprint(evaluation_routes)  # Ya incluye url_prefix='/api/evaluations'
     
     # Sistema de monitoreo de IA
     app.register_blueprint(ai_monitoring_bp, url_prefix='/api/ai-monitoring')
