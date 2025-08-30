@@ -96,7 +96,13 @@ Estas integraciones conllevarán crear nuevos servicios en backend (por ejemplo,
 GitHub
 , por lo que adaptaremos esa planificación cambiando Stripe por Binance.
 
-**✅ IMPLEMENTADO** - `WebhookService` completo en `src/marketplace/webhook_service.py` para manejo de webhooks de PayPal y Binance, incluyendo activación de suscripciones y confirmación de pagos. `PaymentTransaction` y `UserSubscription` modelos implementados para registro de transacciones y gestión de suscripciones
+**✅ COMPLETAMENTE IMPLEMENTADO** - Sistema de pagos operativo:
+- ✅ `WebhookService` completo en `src/marketplace/webhook_service.py`
+- ✅ `PayPalService` con creación de órdenes, suscripciones y webhooks
+- ✅ `BinancePayService` con integración completa de Binance Pay
+- ✅ `PaymentTransaction` y `UserSubscription` modelos implementados
+- ✅ Verificación de límites por plan y gestión de suscripciones
+- ✅ Endpoints administrativos para transacciones y suscripciones
 
 En resumen, se trata de una restructuración mayor pero alineada con la visión original del sistema, enfocada en usar las presentaciones generadas por IA como eje central, enriquecer cada parte con actividades interactivas personalizadas mediante plantillas, flexibilizar evaluaciones y mejorar la personalización por IA, todo ello soportado por un modelo de negocio más adecuado al contexto local.
 
@@ -187,11 +193,11 @@ GitHub
 La interfaz front-end también tiene una sección “Mis Plantillas” para el profesor, con editor de código (Monaco), previsualización en vivo en iframe sandbox, clonación (fork) de plantillas, etc., según el backlog
 GitHub
 GitHub
-. También estaba planificado un Marketplace público de plantillas (aún no implementado)
+. También estaba planificado un Marketplace público de plantillas (**❌ NO IMPLEMENTADO** - el marketplace actual solo maneja planes de estudio públicos, no plantillas)
 GitHub
 .
 
-Seguimiento de Resultados (ContentResult): Previamente había un bug donde ContentResult no se asociaba correctamente al contenido virtual del estudiante, pero fue corregido para vincularlo vía content_id al modelo VirtualTopicContent correspondiente
+Seguimiento de Resultados (ContentResult): **✅ CORREGIDO** - El modelo ContentResult ahora soporta correctamente tanto `content_id` como `virtual_content_id` para asociación con VirtualTopicContent (verificado en src/content/models.py líneas 196-250)
 GitHub
 . Esto es importante, ya que con múltiples diapositivas y actividades por tema, habrá muchos ContentResult por tema/estudiante. Ahora está garantizado que cada registro de resultado apunta al ítem específico (ya sea una diapositiva vista, un quiz resuelto, etc.). Además, el sistema de ContentResult deberá capturar métricas más granulares: se sugiere llevar registro de tiempo de visualización, intentos, engagement en cada contenido, y analizar efectividad por tipo de plantilla y estilo de aprendizaje
 GitHub
@@ -252,7 +258,13 @@ Existe un módulo marketplace en backend, quizás relacionado con compra/venta d
 GitHub
 . Es probable que la integración Stripe no se completara (dado el cambio de estrategia), o esté muy básica. No se observan referencias a PayPal/Binance aún, lo cual confirma que debemos implementarlas desde cero.
 
-**✅ IMPLEMENTADO** - Módulo marketplace completo en `src/marketplace/` con rutas para planes públicos, suscripciones, webhooks de PayPal y Binance, y endpoints administrativos para transacciones y suscripciones en `src/marketplace/routes.py`
+**✅ IMPLEMENTADO** - Módulo marketplace completo en `src/marketplace/` con:
+- ✅ PayPalService completo en `src/marketplace/paypal_service.py`
+- ✅ BinancePayService completo en `src/marketplace/binance_service.py` 
+- ✅ WebhookService completo en `src/marketplace/webhook_service.py`
+- ✅ Rutas para planes públicos, suscripciones, webhooks y endpoints administrativos en `src/marketplace/routes.py`
+- ✅ Sistema de planes (Free, Premium, Enterprise) con límites y verificaciones
+- ❌ Marketplace público de plantillas NO IMPLEMENTADO (solo planes de estudio)
 
 No se han encontrado definiciones explícitas de planes (p. ej. plan gratis vs premium) en el repositorio, así que actualmente puede que cualquier usuario tenga acceso pleno sin restricciones. Esto habrá que añadirlo con cuidado para no romper flujos existentes.
 
@@ -689,7 +701,7 @@ Testing: Simular pagos en entorno de prueba (PayPal sandbox, Binance testnet if 
 
 8. Otros Ajustes Menores y Compatibilidad
 
-Eliminación y Actualización en Cascada: Dado que vamos a crear más objetos relacionados (más TopicContents, TemplateInstances, etc.), es importante reforzar la eliminación en cascada. Por ejemplo, si un profesor regenera el contenido teórico de un tema, debería eliminar las diapositivas viejas y sus TemplateInstances asociadas antes de crear las nuevas. Ya estaba identificado como necesario implementar cascada completo (StudyPlan -> Modules -> Topics -> Contents -> Instances, VirtualTopicContents)
+**✅ IMPLEMENTADO** - Eliminación y Actualización en Cascada: El sistema `CascadeDeletionService` está completamente implementado en `src/shared/cascade_deletion_service.py` con soporte completo para StudyPlan -> Modules -> Topics -> Contents -> Instances, VirtualTopicContents. Incluye definición de dependencias para todas las colecciones y método `delete_with_cascade` que previene datos huérfanos y mantiene integridad referencial
 GitHub
 . Nos aseguraremos de incluirlo en tareas.
 
@@ -1022,7 +1034,7 @@ Para cada eval existente con topic_id, convertirlo a topic_ids [topic_id].
 
 Este script puede ser manual o en código a ejecutar una vez.
 
-**⚠️ PARCIALMENTE IMPLEMENTADO** - Migración de datos legacy pendiente
+**❌ NO IMPLEMENTADO** - Script de migración de datos legacy para formato "slides" pendiente
 
 (B) Endpoints Evaluations:
 
@@ -1207,7 +1219,7 @@ Al eliminar Module o StudyPlan: borrar subdocumentos incluyendo VirtualTopics, e
 
 Probar que no queden huérfanos (por ejemplo, Template de usuario se mantienen aunque se borre la instancia de un topic).
 
-**⚠️ PARCIALMENTE IMPLEMENTADO** - `TemplateIntegrationService.delete_instance` existe, pero eliminación en cascada completa para StudyPlan -> Modules -> Topics -> Contents pendiente de implementación completa
+**✅ COMPLETAMENTE IMPLEMENTADO** - `CascadeDeletionService` completo en `src/shared/cascade_deletion_service.py` con soporte completo para StudyPlan -> Modules -> Topics -> Contents y todas las dependencias. Incluye método `delete_with_cascade` y rutas en `src/shared/cascade_routes.py`
 
 (B) Migración de datos viejos: Escribir script para migrar contenidos tipo "slides" únicos:
 
