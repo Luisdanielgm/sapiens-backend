@@ -29,6 +29,26 @@ Este documento consolida todos los requerimientos, funcionalidades y políticas 
 
 ---
 
+## 🔴 TAREAS EN PROGRESO (Parcialmente Implementadas)
+
+### Sistema de Pagos y Suscripciones
+- **Estado**: Existe módulo marketplace básico con Stripe, pero no implementado PayPal/Binance
+- **Pendiente**:
+  - Integración completa de PayPal API
+  - Integración de Binance Pay
+  - Sistema de planes (Free, Premium, Enterprise)
+  - PlanService para verificación de límites
+  - Webhooks de confirmación de pagos
+
+### Sistema de Corrección Automática
+- **Estado**: Existe CorrectionService y AutomaticGradingService básicos
+- **Pendiente**:
+  - Implementación completa de rúbricas inteligentes
+  - Mejora del sistema de evaluación automática
+  - Integración con resultados de IA del frontend
+
+---
+
 ## 1. Sistema de Contenido en Diapositivas y Plantillas por Subtema
 
 ### 1.1 Arquitectura de Contenido en Diapositivas

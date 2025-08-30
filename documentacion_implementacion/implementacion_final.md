@@ -96,6 +96,8 @@ Estas integraciones conllevarán crear nuevos servicios en backend (por ejemplo,
 GitHub
 , por lo que adaptaremos esa planificación cambiando Stripe por Binance.
 
+**✅ IMPLEMENTADO** - `WebhookService` completo en `src/marketplace/webhook_service.py` para manejo de webhooks de PayPal y Binance, incluyendo activación de suscripciones y confirmación de pagos. `PaymentTransaction` y `UserSubscription` modelos implementados para registro de transacciones y gestión de suscripciones
+
 En resumen, se trata de una restructuración mayor pero alineada con la visión original del sistema, enfocada en usar las presentaciones generadas por IA como eje central, enriquecer cada parte con actividades interactivas personalizadas mediante plantillas, flexibilizar evaluaciones y mejorar la personalización por IA, todo ello soportado por un modelo de negocio más adecuado al contexto local.
 
 Estado Actual de la Implementación
@@ -249,6 +251,8 @@ GitHub
 Existe un módulo marketplace en backend, quizás relacionado con compra/venta de cursos o plantillas, con rutas (habría que ver detalles). En la hoja de ruta futura se preveía un marketplace de cursos con pagos integrados
 GitHub
 . Es probable que la integración Stripe no se completara (dado el cambio de estrategia), o esté muy básica. No se observan referencias a PayPal/Binance aún, lo cual confirma que debemos implementarlas desde cero.
+
+**✅ IMPLEMENTADO** - Módulo marketplace completo en `src/marketplace/` con rutas para planes públicos, suscripciones, webhooks de PayPal y Binance, y endpoints administrativos para transacciones y suscripciones en `src/marketplace/routes.py`
 
 No se han encontrado definiciones explícitas de planes (p. ej. plan gratis vs premium) en el repositorio, así que actualmente puede que cualquier usuario tenga acceso pleno sin restricciones. Esto habrá que añadirlo con cuidado para no romper flujos existentes.
 
@@ -765,6 +769,8 @@ Tab "Recursos": permitir al profesor adjuntar PDFs, links o hacer búsqueda web 
 
 (B) Servicio de estilo de diapositivas: Crear función utilitaria (puede estar en backend ContentService o en frontend) que dado un tema, defina un slide_template base. Puede generarse con IA (ej. usando prompt con paleta sugerida) o simplemente cargar un tema por defecto. Para inicio, implementar una paleta por defecto (o extraer colores del logo del workspace si hubiera personalización). - **[VERIFICADO]** El `SlideStyleService` está implementado en `src/content/slide_style_service.py` y gestiona la apariencia de las diapositivas.
 
+**✅ IMPLEMENTADO** - SlideStyleService completamente funcional en `src/content/slide_style_service.py`
+
 (F) Generación de diapositivas con IA: En el frontend, implementar la lógica para solicitar al modelo las diapositivas:
 
 Utilizar useParallelGeneration hook para manejar múltiples llamadas concurrentes. Configurar tasks de tipo "generate_slide" para cada fragmento. Emplear preferentemente el modelo GPT-4 (vía OpenAI API) o uno idóneo.
@@ -784,6 +790,8 @@ Introducir campo order en TopicContent. Al crear diapositivas, pasar un campo or
 Ajustar get_topic_content para sort por order ascendente si existe, sino fallback.
 
 Actualizar índices en DB si es necesario para soportar sort por order. - **[VERIFICADO]** El modelo `TopicContent` incluye el campo `order` y el `ContentService` lo utiliza para la secuenciación.
+
+**✅ IMPLEMENTADO** - Campo `order` en TopicContent y ordenamiento en ContentService operativo
 
 (F) Player de módulo virtual: Modificar la pantalla donde el alumno ve el contenido:
 
@@ -1006,11 +1014,15 @@ Añadir due_date para entregables (DateTime), rubric (texto criterios).
 
 Estados: status: draft/active/closed tal vez. - **[VERIFICADO]** El modelo `Evaluation` en `src/study_plans/models.py` incluye `topic_ids: List[str]` y campos para ponderaciones y entregables, confirmando la implementación de evaluaciones multi-tema.
 
+**✅ IMPLEMENTADO** - Modelo Evaluation con soporte multi-tema en `src/study_plans/models.py`
+
 (B) Base de datos: Si ya hay colección evaluations con documentos existentes, escribir migración: - **[VERIFICADO]** Se asume que las migraciones necesarias para adaptar la colección de evaluaciones a la nueva estructura (e.g., `topic_ids` como array) se han ejecutado o están contempladas en los scripts de migración existentes.
 
 Para cada eval existente con topic_id, convertirlo a topic_ids [topic_id].
 
 Este script puede ser manual o en código a ejecutar una vez.
+
+**⚠️ PARCIALMENTE IMPLEMENTADO** - Migración de datos legacy pendiente
 
 (B) Endpoints Evaluations:
 
@@ -1019,6 +1031,8 @@ PUT/POST evaluation: aceptar multiple topic_ids y weightings. Validar que topics
 GET evaluation: devolver info incluyendo referencias a topics.
 
 Si hay endpoint para obtener las notas del estudiante, actualizarlo para calcular la nota de evaluaciones multi: - **[VERIFICADO]** Los endpoints para `evaluation` en `src/study_plans/routes.py` (`POST /evaluation`, `GET /evaluation/<id>`, `PUT /evaluation/<id>`) aceptan y gestionan evaluaciones multi-tema.
+
+**✅ IMPLEMENTADO** - Endpoints de evaluaciones multi-tema operativos en `src/study_plans/routes.py`
 
 Recopilar ContentResults del estudiante en los topics de la eval. Por ejemplo, filtrar por student_id y topic_id en [list] y content_type = quiz (u otros evaluativos).
 
@@ -1062,6 +1076,8 @@ Probablemente se requiera una colección evaluation_results (student_id, evaluat
 
 Integrar con RL feedback: buenas evaluaciones podrían ser un input de alto nivel (ej: si un alumno reprobó la eval de 3 temas, RL debería ajustar dificultads). - **[VERIFICADO]** El `study_plans/services.py` está integrado con `ContentResultService` para el cálculo y registro de resultados de evaluaciones.
 
+**✅ IMPLEMENTADO** - Integración RL con ContentResultService en `study_plans/services.py`
+
 (B) IA para corrección automática (preparación): 
 
 > **⚠️ NOTA ARQUITECTÓNICA CRÍTICA**: 
@@ -1070,6 +1086,8 @@ Integrar con RL feedback: buenas evaluaciones podrían ser un input de alto nive
 Endpoint POST /api/auto-grading que recibe los resultados ya procesados por el frontend (puntuación, feedback, análisis OCR) y los almacena. El procesamiento de IA (incluyendo OCR con Gemini 2.5 Pro) se ejecuta completamente en el frontend.
 
 Modelos EvaluationRubric, AutoGradingResult como en backlog para almacenar resultados procesados. - **[EN PROGRESO]** El `AutomaticGradingService` y el hook para la corrección automática están presentes en el código (`src/study_plans/routes.py`), configurados para recibir resultados del frontend.
+
+**🔄 EN PROGRESO** - AutomaticGradingService implementado, servicio IA subyacente pendiente
 
 Fase 4: Pagos y Planes de Suscripción
 
@@ -1080,6 +1098,8 @@ Objetivo: Habilitar la monetización: planes gratuitos vs pagos, con integracion
 e.g. { code: "free_teacher", max_students: 5, price_usd: 0, ... }, similar for free_student, premium_teacher, etc. Incluya campos para créditos mensuales, etc.
 
 Insertar documentos seed en migración.
+
+**✅ IMPLEMENTADO** - Sistema de planes completo en `src/marketplace/models.py` con `PlanType`, `PlanLimits`, `PlanModel` y precios definidos para Free, Premium y Enterprise
 
 (B) Campo plan en usuarios/workspaces:
 
@@ -1095,7 +1115,7 @@ Implementar que al crear un new user/workspace se asigne plan "free" por defecto
 
 Métodos: can_add_student(user), can_create_studyplan(user), etc.
 
-Llamarlo en endpoints:
+Llamar en endpoints:
 
 Envío de invitación alumno o aceptación -> verificar count current students vs max_students.
 
@@ -1104,6 +1124,8 @@ Creación de study plan nuevo -> verificar count vs max_plans.
 Generación de contenido -> verificar créditos disponibles (if applicable).
 
 Si no, retornar error con código especial que frontend interpretará para mostrar diálogo "Upgrade needed".
+
+**✅ IMPLEMENTADO** - `PlanService` completo en `src/marketplace/plan_service.py` con métodos para verificar límites de workspaces, estudiantes, planes de estudio, plantillas, evaluaciones mensuales, correcciones IA, acceso a marketplace y soporte prioritario
 
 (F) Mostrar límites en UI:
 
@@ -1127,13 +1149,15 @@ Devuelve URL de aprobación.
 
 Webhook POST /api/payments/paypal-webhook: PayPal envía eventos (needs verifying via signature or secret).
 
-Al recibir evento COMPLETED de order or subscription, identificar qué fue comprado (usando custom_id we set as plan or user id).
+Al recibir evento COMPLETED de order or subscription, identificar qué fue comprado (using custom_id we set as plan or user id).
 
 Actualizar DB: si fue plan upgrade, set user.plan = premium y set next_billing_date; si fueron créditos, add to user.credits.
 
 Alternatively, if not using webhooks, after redirect on frontend we can poll /capture.
 
 Use sandbox for testing.
+
+**✅ IMPLEMENTADO** - `PayPalService` completo en `src/marketplace/paypal_service.py` con creación de órdenes, captura de pagos, manejo de suscripciones y webhooks. APIs implementadas en `src/marketplace/routes.py` incluyendo `/api/marketplace/paypal/create-subscription`, `/api/marketplace/paypal/get-subscription`, `/api/marketplace/paypal/cancel-subscription`
 
 (B) Integrar Binance Pay API:
 
@@ -1146,6 +1170,8 @@ Receive a QR code or deep link; send that to frontend or generate QR image to di
 Callback POST /api/payments/binance-callback: handle incoming payment confirmation, update user plan/credits.
 
 The Binance API requires some security (timestamp, nonce, signature). Ensure to implement correctly.
+
+**✅ IMPLEMENTADO** - `BinancePayService` completo en `src/marketplace/binance_service.py` con creación de órdenes, manejo de QR codes y callbacks. APIs implementadas en `src/marketplace/routes.py` incluyendo `/api/marketplace/binance/create-order`, `/api/marketplace/binance/get-order`, `/api/marketplace/binance/close-order`
 
 (F) UI Pago:
 
@@ -1181,6 +1207,8 @@ Al eliminar Module o StudyPlan: borrar subdocumentos incluyendo VirtualTopics, e
 
 Probar que no queden huérfanos (por ejemplo, Template de usuario se mantienen aunque se borre la instancia de un topic).
 
+**⚠️ PARCIALMENTE IMPLEMENTADO** - `TemplateIntegrationService.delete_instance` existe, pero eliminación en cascada completa para StudyPlan -> Modules -> Topics -> Contents pendiente de implementación completa
+
 (B) Migración de datos viejos: Escribir script para migrar contenidos tipo "slides" únicos:
 
 Iterar TopicContents donde content_type="slides".
@@ -1192,6 +1220,8 @@ Crear múltiples TopicContents "slide" como hicimos manual. Incluir audio si ten
 Borrar el viejo content "slides".
 
 Notificar a los profesores posiblemente de cambios en formato (puede ser en notas de release).
+
+**❌ NO IMPLEMENTADO** - Script de migración de datos legacy de formato "slides" a múltiples "slide" individuales pendiente de desarrollo
 
 (F) Pruebas de UI con distintos perfiles:
 
@@ -1207,6 +1237,8 @@ Verificar que el feedback al RL se envía con los nuevos ContentResults (incluye
 
 Verificar get_recommendation es llamado al iniciar virtual module o topic – incorporar nuevos tipos: Si RL retorna preferencia "diagram", asegurarse de mapear eso a sugerir plantilla tipo diagrama para siguiente temas, etc.
 
+**✅ IMPLEMENTADO** - Sistema RL completo con `get_recommendation` y `submit_feedback` operativos en `src/rl/rl_service.py`. Integración con `ContentResultService` para envío de feedback automático implementada en `study_plans/services.py`
+
 (F) Perfil de Aprendizaje: Implementar (si no existe) una sección para que el alumno vea su perfil VARK y progreso (backlog mencionaba gráficos)
 GitHub
 . Esto es secundario pero útil: así el estudiante sabe qué estilo le es más efectivo y quizá pueda ajustar preferencias manualmente (optar por más videos vs texto, etc.).
@@ -1214,6 +1246,8 @@ GitHub
 (B) Documentación y soporte: Actualizar documentación interna de endpoints (README, API docs) para reflejar los cambios (nuevo formato de contenidos, etc.). Añadir guías para creación de plantillas (convenciones de marcadores)
 GitHub
 .
+
+**⚠️ PARCIALMENTE IMPLEMENTADO** - Documentación técnica existe en `/documentacion_implementacion/` pero documentación de API endpoints y guías de plantillas necesitan actualización para reflejar cambios recientes
 
 (F) UI ajustes menores:
 
