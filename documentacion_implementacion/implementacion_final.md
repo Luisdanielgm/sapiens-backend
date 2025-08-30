@@ -1363,7 +1363,11 @@ Verificar que el feedback al RL se envía con los nuevos ContentResults (incluye
 
 Verificar get_recommendation es llamado al iniciar virtual module o topic – incorporar nuevos tipos: Si RL retorna preferencia "diagram", asegurarse de mapear eso a sugerir plantilla tipo diagrama para siguiente temas, etc.
 
-**✅ IMPLEMENTADO** - Sistema RL completo con `get_recommendation` y `submit_feedback` operativos en `src/rl/rl_service.py`. Integración con `ContentResultService` para envío de feedback automático implementada en `study_plans/services.py`
+**✅ IMPLEMENTADO** - Sistema RL completo con personalización adaptativa operativo en `src/personalization/`. Incluye:
+- `AdaptivePersonalizationService` en `src/personalization/services.py` con API externa (`http://149.50.139.104:8000/api/tools/msp/execute`)
+- Modelos `RLModelRequest` y `RLModelResponse` en `src/personalization/models.py`
+- Endpoints operativos: `POST /api/personalization/adaptive` (recomendaciones), `POST /api/personalization/feedback` (feedback), `GET /api/personalization/analytics/vakr/<student_id>` (estadísticas VAKR)
+- Integración con `ContentResultService` para envío de feedback automático implementada en `study_plans/services.py`
 
 (F) Perfil de Aprendizaje: Implementar (si no existe) una sección para que el alumno vea su perfil VARK y progreso (backlog mencionaba gráficos)
 GitHub
