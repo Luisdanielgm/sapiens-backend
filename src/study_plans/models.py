@@ -155,6 +155,8 @@ class Topic:
         }
 
 class Evaluation:
+    """Represents an evaluation that can span multiple topics."""
+
     def __init__(self,
                  topic_ids: List[str],
                  title: str,
@@ -165,7 +167,13 @@ class Evaluation:
                  use_quiz_score: bool = False,
                  requires_submission: bool = False,
                  linked_quiz_id: Optional[str] = None,
-                 auto_grading: bool = False):
+                 auto_grading: bool = False,
+                 weightings: Optional[Dict[str, float]] = None,
+                 rubric: Optional[Dict] = None,
+                 _id: Optional[ObjectId] = None,
+                 created_at: Optional[datetime] = None,
+                 status: str = "pending"):
+        self._id = _id or ObjectId()
         self.topic_ids = [ObjectId(tid) for tid in topic_ids]
         self.title = title
         self.description = description
@@ -176,23 +184,28 @@ class Evaluation:
         self.requires_submission = requires_submission
         self.linked_quiz_id = ObjectId(linked_quiz_id) if linked_quiz_id else None
         self.auto_grading = auto_grading
-        self.created_at = datetime.now()
-        self.status = "pending"
+        self.weightings = weightings or {}  # Dict[topic_id: weight] for multi-topic evaluations
+        self.rubric = rubric or {}  # Rubric configuration or reference
+        self.created_at = created_at or datetime.now()
+        self.status = status
 
     def to_dict(self) -> dict:
         return {
+            "_id": self._id,
             "topic_ids": self.topic_ids,
             "title": self.title,
             "description": self.description,
             "weight": self.weight,
             "criteria": self.criteria,
             "due_date": self.due_date,
-            "created_at": self.created_at,
-            "status": self.status,
             "use_quiz_score": self.use_quiz_score,
             "requires_submission": self.requires_submission,
             "linked_quiz_id": self.linked_quiz_id,
-            "auto_grading": self.auto_grading
+            "auto_grading": self.auto_grading,
+            "weightings": self.weightings,
+            "rubric": self.rubric,
+            "created_at": self.created_at,
+            "status": self.status
         }
 
 # DEPRECATED: Usar ContentResult en su lugar.
@@ -416,4 +429,4 @@ class EvaluationRubric:
         elif percentage >= 60:
             return "D"
         else:
-            return "F" 
+            return "F"

@@ -1265,6 +1265,22 @@ class EvaluationService(VerificationBaseService):
                 if not get_db().topics.find_one({"_id": ObjectId(tid)}):
                     return False, f"El tema con ID {tid} no fue encontrado"
             
+            # Validar y procesar weightings para evaluaciones multi-temáticas
+            weightings = evaluation_data.get('weightings', {})
+            if weightings:
+                # Validar que los topic_ids en weightings coincidan con topic_ids
+                for topic_id in weightings.keys():
+                    if topic_id not in topic_ids:
+                        return False, f"El topic_id {topic_id} en weightings no está en topic_ids"
+                # Validar que la suma de pesos sea 1.0 (100%)
+                total_weight = sum(weightings.values())
+                if abs(total_weight - 1.0) > 0.01:  # Tolerancia para errores de punto flotante
+                    return False, f"La suma de weightings debe ser 1.0, actual: {total_weight}"
+            else:
+                # Si no se proporcionan weightings, distribuir equitativamente
+                weight_per_topic = 1.0 / len(topic_ids)
+                weightings = {tid: weight_per_topic for tid in topic_ids}
+            
             # Crear una copia con los datos necesarios para el constructor
             evaluation_dict = {
                 "topic_ids": topic_ids,
@@ -1272,6 +1288,8 @@ class EvaluationService(VerificationBaseService):
                 "description": evaluation_data.get("description", ""),
                 "weight": evaluation_data.get("weight", 0),
                 "criteria": evaluation_data.get("criteria", []),
+                "weightings": weightings,
+                "rubric": evaluation_data.get("rubric", {}),
                 # due_date se manejará a continuación
             }
             
@@ -1326,6 +1344,24 @@ class EvaluationService(VerificationBaseService):
                     if not get_db().topics.find_one({"_id": ObjectId(tid)}):
                         return False, f"El tema con ID {tid} no fue encontrado"
                 update_data['topic_ids'] = [ObjectId(tid) for tid in topic_ids]
+            
+            # Validar weightings si se actualiza
+            if 'weightings' in update_data:
+                weightings = update_data.get('weightings')
+                # Obtener topic_ids actuales si no se están actualizando
+                current_topic_ids = update_data.get('topic_ids', evaluation.get('topic_ids', []))
+                if isinstance(current_topic_ids[0], ObjectId):
+                    current_topic_ids = [str(tid) for tid in current_topic_ids]
+                
+                if weightings:
+                    # Validar que los topic_ids en weightings coincidan
+                    for topic_id in weightings.keys():
+                        if topic_id not in current_topic_ids:
+                            return False, f"El topic_id {topic_id} en weightings no está en topic_ids"
+                    # Validar que la suma de pesos sea 1.0 (100%)
+                    total_weight = sum(weightings.values())
+                    if abs(total_weight - 1.0) > 0.01:
+                        return False, f"La suma de weightings debe ser 1.0, actual: {total_weight}"
             
             # Manejo de linked_quiz_id para actualización de evaluación
             if 'linked_quiz_id' in update_data and isinstance(update_data['linked_quiz_id'], str):
