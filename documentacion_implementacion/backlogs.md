@@ -1,5 +1,15 @@
 # Backlog Consolidado de Requerimientos - SapiensIA
 
+## ⚠️ RESTRICCIÓN ARQUITECTÓNICA CRÍTICA
+
+**LIMITACIÓN VERCEL SERVERLESS:** El backend NUNCA debe generar contenido con LLMs debido a la limitación de 1 minuto máximo en funciones serverless de Vercel. La generación de contenido es responsabilidad exclusiva del frontend.
+
+**Responsabilidades:**
+- **Frontend**: Llamadas directas a LLMs, generación en tiempo real
+- **Backend**: Solo procesamiento de resultados, almacenamiento, gestión de estados
+
+---
+
 ## Resumen Ejecutivo
 
 Este documento consolida todos los requerimientos, funcionalidades y políticas del sistema SapiensIA, unificando la información de los tres backlogs principales del proyecto. Representa la visión completa y actualizada de todas las características que debe tener el sistema para cumplir con los objetivos educativos y técnicos establecidos.

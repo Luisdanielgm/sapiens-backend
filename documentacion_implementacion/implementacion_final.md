@@ -111,17 +111,43 @@ GitHub
 GitHub
 .
 
-Generación Actual de Contenido: La aplicación ya implementa generación con IA para contenidos teóricos y algunos tipos especiales. Por ejemplo, probablemente al crear un tema el backend invoca (vía frontend) prompts para generar:
+## ⚠️ ARQUITECTURA CRÍTICA: LIMITACIONES DE LLMs EN BACKEND
 
-Un resumen o explicación teórica (posiblemente llamado tipo "text").
+**RESTRICCIÓN FUNDAMENTAL DE VERCEL SERVERLESS:**
 
-Explicaciones estilo Feynman (contenido más sencillo o de pensamiento crítico).
+El backend de SapiensAI está desplegado en Vercel, que tiene una **limitación estricta de 1 minuto máximo** para funciones serverless. Debido a que las llamadas a APIs de LLM (como OpenAI, Gemini, Claude) pueden tomar varios minutos para generar contenido completo, **el backend NUNCA debe realizar generación de contenido con LLMs**.
 
-Quiz de evaluación del tema (preguntas de opción múltiple).
+**RESPONSABILIDADES ARQUITECTÓNICAS CLARIFICADAS:**
 
-Juegos o simulaciones simples (si correspondía, usando plantillas).
+### Frontend (Responsable de Generación LLM)
+- ✅ **Llamadas directas a APIs de LLM** (Gemini, OpenAI, Claude)
+- ✅ **Generación de contenido en tiempo real** (diapositivas, quizzes, actividades)
+- ✅ **Manejo de estados de generación** (progreso, errores, reintentos)
+- ✅ **Gestión de timeouts largos** (sin limitaciones de tiempo)
+- ✅ **Uso de API keys del usuario** (configuradas en frontend)
 
-Diagramas (ej. organigramas o gráficos explicativos del tema).
+### Backend (Solo Procesamiento y Almacenamiento)
+- ✅ **Procesamiento de resultados generados** (validación, formateo)
+- ✅ **Almacenamiento de contenido** (base de datos, archivos)
+- ✅ **Gestión de colas y estados** (progreso, metadatos)
+- ✅ **APIs de consulta y actualización** (CRUD operations)
+- ❌ **PROHIBIDO: Generación directa con LLMs** (violación de límites Vercel)
+
+**IMPLICACIONES TÉCNICAS:**
+- Todos los endpoints de generación deben ser **asíncronos desde el frontend**
+- El backend solo recibe y almacena el **contenido ya generado**
+- Los servicios de IA en backend deben limitarse a **procesamiento rápido** (<30 segundos)
+- La personalización adaptativa se maneja en **frontend con resultados almacenados**
+
+---
+
+Generación Actual de Contenido: La aplicación implementa generación con IA completamente en el frontend. El frontend genera directamente:
+
+Un resumen o explicación teórica (tipo "text")
+Explicaciones estilo Feynman (contenido de pensamiento crítico)
+Quiz de evaluación del tema (preguntas de opción múltiple)
+Juegos o simulaciones simples (usando plantillas)
+Diagramas (organigramas o gráficos explicativos del tema)
 Según la documentación, el sistema estaba diseñado para producir ~6 contenidos por tema: al menos uno completo (que cubre todo el material) y varios interactivos para partes específicas
 GitHub
 . De hecho se menciona un “Sistema de Intercalación Dinámica de Contenidos” ya implementado que alterna diapositivas con juegos y diagramas

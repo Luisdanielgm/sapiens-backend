@@ -2,6 +2,14 @@
 
 ## Estado Actual del Sistema
 
+### ⚠️ ARQUITECTURA CRÍTICA: GENERACIÓN DE CONTENIDO
+
+**IMPORTANTE**: El backend NUNCA debe generar contenido con LLMs debido a las limitaciones de Vercel serverless (tiempo máximo de 1 minuto). La generación de contenido es responsabilidad exclusiva del frontend.
+
+**Responsabilidades por Capa:**
+- **Frontend**: Realiza todas las llamadas a APIs de LLM (Gemini), genera contenido en tiempo real, maneja estados de generación
+- **Backend**: Solo procesa resultados, almacena contenido generado, gestiona colas y estados, NO genera contenido
+
 ### ✅ Sistemas Implementados y Funcionales
 
 #### 1. Sistema de Contenido en Diapositivas y Plantillas por Subtema

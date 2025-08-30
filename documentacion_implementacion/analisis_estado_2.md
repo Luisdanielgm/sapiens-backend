@@ -127,6 +127,14 @@ El sistema SapiensAI ha alcanzado un **estado de implementación completa** en e
 - ✅ **Sistema de workspaces completo** - gestión, roles, invitaciones
 - ✅ **Servicio RL completamente funcional** - recomendaciones adaptativas reales
 
+**ARQUITECTURA CRÍTICA: GENERACIÓN DE CONTENIDO**
+
+**⚠️ IMPORTANTE**: El backend NUNCA debe generar contenido con LLMs debido a limitaciones de Vercel serverless (máximo 1 minuto). La generación es responsabilidad exclusiva del frontend usando Gemini.
+
+**Responsabilidades Clarificadas:**
+- **Frontend**: Llamadas directas a LLMs, generación en tiempo real, manejo de estados
+- **Backend**: Solo procesamiento de resultados, almacenamiento, gestión de colas
+
 **Frontend: 95% IMPLEMENTADO** 🔄
 El workspace unificado y las vistas clave de estudiante (/student/learning, /student/study-plan, /student/progress) están implementados y funcionando correctamente. Se corrigió el bug del sidebar del alumno para mostrar la opción de iniciar generación cuando no hay módulos virtuales.
 
