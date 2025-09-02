@@ -3230,8 +3230,9 @@ class TopicReadinessService(VerificationBaseService):
 
     def check_readiness(self, topic_id: str) -> Dict[str, Any]:
         """
-        Verifica si un tema cumple con los requisitos mínimos para ser publicado,
-        asegurando una rica variedad de contenidos para diferentes estilos de aprendizaje.
+        Verifica si un tema cumple con los requisitos mínimos para ser publicado.
+        Según la documentación técnica, solo las diapositivas individuales (slide) y 
+        el quiz son obligatorios para la virtualización de un tema.
 
         Args:
             topic_id: ID del tema a verificar.
@@ -3247,45 +3248,30 @@ class TopicReadinessService(VerificationBaseService):
             contents = self.content_service.get_topic_content(topic_id)
             content_types_present = {c.get('content_type') for c in contents}
 
-            # --- Reglas de Validación Multisensorial ---
+            # --- Nuevas Reglas de Validación (Solo Quiz y Slide Obligatorios) ---
             missing_requirements = []
             
-            # 1. Requisito Teórico (Base fundamental)
+            # Verificar contenidos obligatorios
+            required_content_types = ['quiz', 'slide']  # Solo estos son obligatorios
+            
+            for content_type in required_content_types:
+                if content_type not in content_types_present:
+                    if content_type == 'quiz':
+                        message = "Falta una evaluación tipo quiz."
+                    elif content_type == 'slide':
+                        message = "Falta una diapositiva individual."
+                    missing_requirements.append(message)
+
+            # Verificar contenidos opcionales (para información del frontend)
             type_map = ContentTypes.get_categories()
             theoretical_types = set(type_map.get("theoretical", []))
             has_theoretical = any(ct in theoretical_types for ct in content_types_present)
-            if not has_theoretical:
-                types_str = ", ".join(theoretical_types)
-                message = f"Falta un contenido teórico base. Puedes crear uno de los siguientes tipos: {types_str}."
-                missing_requirements.append(message)
-
-            # 2. Requisitos Específicos por Estilo de Aprendizaje
-            checks = {
-                "quiz": ("evaluación", "quiz"),
-                "slides": ("lecto-escritura/visual", "slides"),
-                "diagram": ("visual", "diagram"),
-                "video": ("auditivo/visual", "video"),
-            }
-
-            for content_key, (style, type_name) in checks.items():
-                if content_key not in content_types_present:
-                    message = f"Falta un contenido de tipo {style}. Se requiere un '{type_name}'."
-                    missing_requirements.append(message)
-            
-            # 3. Requisito Kinestésico (Juego o Simulación)
             has_kinesthetic = ("game" in content_types_present) or ("simulation" in content_types_present)
-            if not has_kinesthetic:
-                message = "Falta un contenido kinestésico/interactivo. Se requiere un 'game' o 'simulation'."
-                missing_requirements.append(message)
-
-            # 4. Requisito de Pensamiento Crítico
             has_critical_thinking = "guided_questions" in content_types_present
-            if not has_critical_thinking:
-                message = "Falta un contenido de pensamiento crítico. Se requiere 'guided_questions' para promover análisis y reflexión."
-                missing_requirements.append(message)
 
             # --- Construir Respuesta ---
-            is_ready = not missing_requirements
+            # Un tema está listo SOLO si tiene quiz Y diapositivas individuales
+            is_ready = "quiz" in content_types_present and "slide" in content_types_present
             
             return {
                 "ready": is_ready,
@@ -3293,14 +3279,14 @@ class TopicReadinessService(VerificationBaseService):
                 "checks": {
                     "has_theoretical": has_theoretical,
                     "has_quiz": "quiz" in content_types_present,
-                    "has_slides": "slides" in content_types_present,
+                    "has_slide": "slide" in content_types_present,  # Nomenclatura actualizada
                     "has_diagram": "diagram" in content_types_present,
                     "has_video": "video" in content_types_present,
                     "has_kinesthetic": has_kinesthetic,
                     "has_critical_thinking": has_critical_thinking,
                     "found_content_types": list(content_types_present)
                 },
-                "missing_requirements": missing_requirements
+                "missing_requirements": missing_requirements  # Solo incluye quiz y slide si faltan
             }
 
         except AppException as e:
