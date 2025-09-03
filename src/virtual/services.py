@@ -1442,12 +1442,27 @@ class FastVirtualModuleGenerator(VerificationBaseService):
             # Generar adaptaciones específicas para este contenido
             personalization_data = self._generate_content_personalization(content, cognitive_profile)
             
+            # Obtener datos del estudiante para personalización de markers
+            student = self.db.users.find_one({"_id": ObjectId(student_id)})
+            
+            # Aplicar personalización de markers al contenido
+            personalized_content = content.get("content", "")
+            if student and personalized_content:
+                try:
+                    from src.content.services import ContentPersonalizationService
+                    personalization_service = ContentPersonalizationService()
+                    personalized_content = personalization_service.apply_markers(personalized_content, student)
+                    logging.debug(f"Markers aplicados al contenido {content.get('_id')} para estudiante {student_id}")
+                except Exception as e:
+                    logging.error(f"Error aplicando markers al contenido {content.get('_id')}: {str(e)}")
+                    # Continuar con el contenido original si falla la personalización
+            
             virtual_content_data = {
                 "virtual_topic_id": ObjectId(virtual_topic_id),
                 "content_id": content["_id"],
                 "student_id": ObjectId(student_id),
                 "content_type": content.get("content_type", "unknown"),
-                "content": content.get("content", ""),
+                "content": personalized_content,
                 "personalization_data": personalization_data,
                 "interaction_tracking": {
                     "access_count": 0,
