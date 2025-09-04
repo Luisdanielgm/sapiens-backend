@@ -1,5 +1,6 @@
 import os
 import base64
+import binascii
 from cryptography.fernet import Fernet
 from typing import Optional, Dict, Any
 import logging
@@ -93,8 +94,14 @@ class EncryptionService:
             api_key = decrypted_bytes.decode('utf-8')
             return api_key
             
+        except binascii.Error as e:
+            logging.error(f"Error decodificando base64 en API key: {e}")
+            return None
         except Exception as e:
             logging.error(f"Error desencriptando API key: {e}")
+            logging.error(f"Tipo de error: {type(e).__name__}")
+            if "InvalidToken" in str(type(e)):
+                logging.error("La clave de encriptación ha cambiado o los datos fueron encriptados con otra clave")
             return None
     
     def encrypt_api_keys_dict(self, api_keys: Dict[str, str]) -> Dict[str, str]:
@@ -144,6 +151,44 @@ class EncryptionService:
                     logging.warning(f"No se pudo desencriptar API key para {provider}")
             
         return decrypted_keys
+    
+    def re_encrypt_with_new_key(self, old_encrypted_data: str, old_key: str) -> Optional[str]:
+        """
+        Re-encripta datos que fueron encriptados con una clave anterior.
+        
+        Args:
+            old_encrypted_data: Datos encriptados con la clave anterior
+            old_key: La clave de encriptación anterior
+            
+        Returns:
+            Los datos re-encriptados con la clave actual, o None si hay error
+        """
+        try:
+            # Crear instancia temporal con la clave anterior
+            old_fernet = Fernet(old_key.encode())
+            
+            # Desencriptar con la clave anterior
+            encrypted_bytes = base64.b64decode(old_encrypted_data.encode('utf-8'))
+            decrypted_bytes = old_fernet.decrypt(encrypted_bytes)
+            plain_text = decrypted_bytes.decode('utf-8')
+            
+            # Re-encriptar con la clave actual
+            return self.encrypt_api_key(plain_text)
+            
+        except Exception as e:
+            logging.error(f"Error re-encriptando datos: {e}")
+            return None
+    
+    def get_current_key(self) -> str:
+        """
+        Obtiene la clave de encriptación actual.
+        
+        Returns:
+            La clave de encriptación actual en formato string
+        """
+        if hasattr(self._fernet, '_encryption_key'):
+            return base64.urlsafe_b64encode(self._fernet._encryption_key).decode()
+        return ""
 
 # Instancia global del servicio
 encryption_service = EncryptionService()
