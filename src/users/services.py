@@ -314,7 +314,7 @@ class UserService(VerificationBaseService):
             processed_data = update_data.copy()
             
             # Si se están actualizando API keys, encriptarlas
-            if "api_keys" in processed_data and processed_data["api_keys"]:
+            if "api_keys" in processed_data:
                 try:
                     encrypted_keys = encryption_service.encrypt_api_keys_dict(processed_data["api_keys"])
                     processed_data["api_keys"] = encrypted_keys
