@@ -53,6 +53,8 @@ from src.evaluations.routes import evaluation_routes  # Sistema de evaluaciones 
 from src.content.template_routes import template_bp, instance_bp, preview_bp
 # Sistema de eliminación en cascada
 from src.shared.cascade_routes import cascade_bp
+# Sistema de validación de LLM
+from src.llm.routes import llm_bp
 
 def create_app(config_object=active_config):
     """
@@ -241,6 +243,9 @@ def create_app(config_object=active_config):
     
     # Sistema de eliminación en cascada
     app.register_blueprint(cascade_bp, url_prefix='/api/cascade')
+    
+    # Sistema de validación de LLM
+    app.register_blueprint(llm_bp, url_prefix='/api/llm')
 
     # Alias para rutas de módulos (virtualización) bajo /api/modules para compatibilidad con frontend
     from src.study_plans.routes import get_virtualization_readiness
