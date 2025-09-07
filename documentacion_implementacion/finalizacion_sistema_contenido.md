@@ -61,7 +61,7 @@ Fase 5: Generación del Quiz (Oportunista)
 (Frontend) Generación del Quiz: Una vez que un worker se desocupa y no quedan tareas de generación de diapositivas o textos narrativos, puede tomar la tarea de generar la evaluación (quiz) para el tema. Esto asegura que el quiz se genere en paralelo tan pronto como haya recursos disponibles, pero siempre después de que el contenido teórico base esté listo.
 4. Visualización de Diapositivas y Módulo Virtual
 (Frontend) Visor en Generación de Contenido (Profesor):
-Mostrar lista de diapositivas generadas: Corregir el componente TopicContentViewer.tsx para que itere sobre topic.contents y renderice cada contenido de tipo 'slide' como una entrada individual. La causa probable del error actual ("las diapositivas actuales ni siquiera se muestran") es que el visor espera un único contenido de tipo 'slides'.
+Mostrar lista de diapositivas generadas: Corregir el componente TopicContentViewer.tsx para que itere sobre topic.contents y renderice cada contenido de tipo 'slide' como una entrada individual. La causa probable del error actual ("las diapositivas actuales ni siquiera se muestran") es que el visor espera un único contenido de tipo 'slide'. Revisar y corregir cualquier componente relacionado con diapositivas que pueda estar causando problemas de renderizado o funcionalidad.
 Implementar un visor de carrusel: Agrupar todas las TopicContent de tipo 'slide' y mostrarlas en un visor secuencial con botones de Siguiente/Anterior.
 Incluir texto narrativo: En el visor del profesor, mostrar el texto narrativo de cada diapositiva en una sección designada.
 (Frontend) Módulo Virtual (Estudiante):

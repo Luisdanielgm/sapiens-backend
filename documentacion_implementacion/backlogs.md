@@ -16,39 +16,6 @@ Este documento consolida todos los requerimientos, funcionalidades y políticas 
 
 ---
 
-## 🟡 SISTEMAS COMPLETAMENTE IMPLEMENTADOS (No requieren trabajo)
-
-✅ **Sistema de Plantillas y Templates**: Completamente funcional  
-✅ **Sistema Many-to-Many de Evaluaciones**: Implementado con topic_ids  
-✅ **Sistema de Personalización con RL**: Integrado con servicio externo  
-✅ **Sistema de Workspaces**: Completamente operativo  
-✅ **Sistema de Contenido Virtual**: Funcional con tracking  
-✅ **WeightedGradingService**: Implementado para cálculo automático  
-
-> **NOTA IMPORTANTE**: Los sistemas listados arriba están completamente implementados y operativos. No requieren desarrollo adicional y deben considerarse como funcionalidades base ya disponibles en el sistema.
-
----
-
-## 🔴 TAREAS EN PROGRESO (Parcialmente Implementadas)
-
-### Sistema de Pagos y Suscripciones
-- **Estado**: Existe módulo marketplace básico con Stripe, pero no implementado PayPal/Binance
-- **Pendiente**:
-  - Integración completa de PayPal API
-  - Integración de Binance Pay
-  - Sistema de planes (Free, Premium, Enterprise)
-  - PlanService para verificación de límites
-  - Webhooks de confirmación de pagos
-
-### Sistema de Corrección Automática
-- **Estado**: Existe CorrectionService y AutomaticGradingService básicos
-- **Pendiente**:
-  - Implementación completa de rúbricas inteligentes
-  - Mejora del sistema de evaluación automática
-  - Integración con resultados de IA del frontend
-
----
-
 ## 1. Sistema de Contenido en Diapositivas y Plantillas por Subtema
 
 ### 1.1 Arquitectura de Contenido en Diapositivas
@@ -194,46 +161,43 @@ Este documento consolida todos los requerimientos, funcionalidades y políticas 
 
 ## 4. Sistema de Corrección Automática con IA
 
-> **⚠️ NOTA ARQUITECTÓNICA IMPORTANTE**: 
-> Las llamadas a LLMs para corrección de evaluaciones se realizan en el **FRONTEND**, no en el backend, debido a las limitaciones de Vercel serverless (timeout de 1 minuto). El OCR se realiza usando **Gemini 2.5 Pro** (modelo multimodal capaz de interpretar imágenes con alta precisión). El backend solo recibe y almacena los resultados ya procesados.
-
 ### 4.1 Procesamiento de Exámenes
 - **Prioridad**: Alta
 - **Estado**: Nuevo módulo
 - **Descripción**: Sistema completo de corrección automática usando IA
 - **Requerimientos**:
-  - **Reconocimiento OCR**: Procesamiento de imágenes de exámenes escritos (Frontend: Gemini 2.5 Pro)
-  - **Extracción de Texto**: Conversión automática de documentos a texto procesable (Frontend)
-  - **Análisis de Contenido**: Evaluación automática usando modelos de IA (Frontend)
+  - **Reconocimiento OCR**: Procesamiento de imágenes de exámenes escritos
+  - **Extracción de Texto**: Conversión automática de documentos a texto procesable
+  - **Análisis de Contenido**: Evaluación automática usando modelos de IA
 
 ### 4.2 Sistema de Rúbricas Inteligentes
 - **Prioridad**: Alta
 - **Estado**: Nuevo módulo
 - **Descripción**: Rúbricas personalizables con criterios específicos
 - **Requerimientos**:
-  - **Rúbricas Personalizables**: Criterios de evaluación específicos por examen (Backend: almacenamiento)
-  - **Criterios Granulares**: Penalizaciones por errores ortográficos, falta de pensamiento crítico, etc. (Frontend: procesamiento IA)
-  - **Evaluación Contextual**: Análisis de respuestas considerando el contexto específico (Frontend: Gemini 2.5 Pro)
+  - **Rúbricas Personalizables**: Criterios de evaluación específicos por examen
+  - **Criterios Granulares**: Penalizaciones por errores ortográficos, falta de pensamiento crítico, etc.
+  - **Evaluación Contextual**: Análisis de respuestas considerando el contexto específico
 
 ### 4.3 Modalidades de Corrección
 - **Prioridad**: Alta
 - **Estado**: Nuevo módulo
 - **Descripción**: Múltiples formas de procesamiento de evaluaciones
 - **Requerimientos**:
-  - **Corrección de Imágenes**: Procesamiento de fotos de exámenes físicos (Frontend: Gemini 2.5 Pro OCR)
-  - **Corrección de Documentos**: Evaluación de archivos digitales (PDF, Word, etc.) (Frontend: procesamiento IA)
-  - **Evaluación de Código**: Corrección automática de ejercicios de programación (Frontend: análisis IA)
-  - **Sandbox de Ejecución**: Entorno seguro para ejecutar y evaluar código (Frontend: ejecución local)
+  - **Corrección de Imágenes**: Procesamiento de fotos de exámenes físicos
+  - **Corrección de Documentos**: Evaluación de archivos digitales (PDF, Word, etc.)
+  - **Evaluación de Código**: Corrección automática de ejercicios de programación
+  - **Sandbox de Ejecución**: Entorno seguro para ejecutar y evaluar código
 
 ### 4.4 Flujo de Revisión Híbrida
 - **Prioridad**: Media
 - **Estado**: Nuevo módulo
 - **Descripción**: Combinación de corrección automática y revisión manual
 - **Requerimientos**:
-  - **Corrección Automática**: Primera evaluación completamente automatizada (Frontend: procesamiento IA)
-  - **Revisión Manual**: Opción para que el profesor revise y ajuste calificaciones (Backend: almacenamiento)
-  - **Feedback Detallado**: Comentarios específicos generados por IA (Frontend: Gemini 2.5 Pro)
-  - **Historial de Correcciones**: Seguimiento de cambios entre corrección automática y manual (Backend: persistencia)
+  - **Corrección Automática**: Primera evaluación completamente automatizada
+  - **Revisión Manual**: Opción para que el profesor revise y ajuste calificaciones
+  - **Feedback Detallado**: Comentarios específicos generados por IA
+  - **Historial de Correcciones**: Seguimiento de cambios entre corrección automática y manual
 
 ---
 

@@ -140,11 +140,11 @@ Antes de planificar los cambios, es importante evaluar cómo está construido el
 Modelos y Servicios de Contenido: Existe un modelo TopicContent que representa un contenido asociado a un tema, con campos para tipo (content_type), el contenido en sí (texto o estructura), datos interactivos (ej. preguntas de un quiz), recursos asociados, etc. Ya se habían previsto campos para la integración de plantillas: por ejemplo TopicContent.render_engine (que puede ser "legacy" o "html_template"), instance_id y template_id para vincular a una plantilla instanciada, y slide_template para datos de estilo de diapositivas
 GitHub
 GitHub
-. Actualmente, el tipo de contenido “slides” existe en la base de datos y se usa para representar una presentación completa de un tema. En el servicio de contenido, de hecho, hay validaciones especiales si el content_type es "slides": se exige un campo slide_template con al menos fondo y estilos
+. Actualmente, el tipo de contenido "slide" existe en la base de datos y se usa para representar una presentación completa de un tema. En el servicio de contenido, de hecho, hay validaciones especiales si el content_type es "slide": se exige un campo slide_template con al menos fondo y estilos
 GitHub
 . Esto indica que en la implementación actual se maneja las diapositivas como un único objeto con varias láminas dentro, usando slide_template para guardar quizás la configuración visual global
 GitHub
-. También se define un catálogo de tipos de contenido inicial, probablemente incluyendo códigos como "text", "diagram", "quiz", "feynman", "slides", etc., aunque esos tipos se almacenan en colección content_types con sus nombres y compatibilidad (existe un ContentTypeService para consultarlos)
+. También se define un catálogo de tipos de contenido inicial, probablemente incluyendo códigos como "text", "diagram", "quiz", "feynman", "slide", etc., aunque esos tipos se almacenan en colección content_types con sus nombres y compatibilidad (existe un ContentTypeService para consultarlos)
 GitHub
 .
 
@@ -313,9 +313,9 @@ A continuación, se detalla cómo abordar cada requerimiento dentro de la arquit
 
 Dividir Contenido en Subtemas: Mantendremos la generación del contenido teórico completo del tema como primer paso (prompt principal). Una vez obtenido el texto (que usualmente estará estructurado con títulos y subtítulos), el frontend o backend lo dividirá en secciones lógicas por subtítulo. Esta división puede hacerse detectando encabezados (e.g. Markdown/HTML headings si el prompt devolvió formato, o usando separadores que la IA incluyó). Cada sección resultante se convertirá en una diapositiva individual.
 
-Modelo de Datos – TopicContent: En lugar de tener un solo TopicContent con content_type="slides", crearemos múltiples instancias. Propuesta:
+Modelo de Datos – TopicContent: En lugar de tener un solo TopicContent con content_type="slide", crearemos múltiples instancias. Propuesta:
 
-Definir un nuevo código de tipo de contenido, por ejemplo "slide" (singular) o "presentation_slide", para representar cada diapositiva. Alternativamente, podríamos reutilizar el tipo "slides" para todos, pero semánticamente es mejor distinguir uno solo vs uno de varios.
+Definir un nuevo código de tipo de contenido, por ejemplo "slide" (singular) o "presentation_slide", para representar cada diapositiva. Alternativamente, podríamos reutilizar el tipo "slide" para todos, pero semánticamente es mejor distinguir uno solo vs uno de varios.
 
 Cada diapositiva-TopicContent contendrá en su campo content un objeto JSON con la información de esa lámina: por ejemplo:
 
@@ -739,9 +739,9 @@ GitHub
 **✅ COMPATIBILIDAD LEGACY - 100% IMPLEMENTADO**
 Compatibilidad con Contenido Legacy: Durante la transición, puede haber temas ya creados con el esquema viejo (un slides content global, etc.). Debemos migrarlos o al menos soportar ambos formatos: **COMPLETAMENTE SOPORTADO**
 
-ContentService.get_topic_content podría detectar si existe un content de tipo "slides" (antiguo) y no diapositivas individuales, para seguir mostrándolo como antes. Los nuevos temas usarán el nuevo formato.
+ContentService.get_topic_content podría detectar si existe un content de tipo "slide" legacy (antiguo) y no diapositivas individuales, para seguir mostrándolo como antes. Los nuevos temas usarán el nuevo formato.
 
-Eventualmente, podríamos migrar los antiguos: convertir ese slides content en múltiples contenidos. Esto se podría hacer automáticamente: leer su content (que quizás es una lista de slides en JSON) y para cada entry crear nuevos TopicContent.
+Eventualmente, podríamos migrar los antiguos: convertir ese contenido slide legacy en múltiples contenidos. Esto se podría hacer automáticamente: leer su content (que quizás es una lista de diapositivas en JSON) y para cada entry crear nuevos TopicContent.
 
 Por simplicidad, podríamos requerir que los temas existentes sean regenerados manualmente por el profesor para adoptar el nuevo formato.
 
@@ -760,7 +760,7 @@ Dado que no hay una fecha límite inmediata pero se desea priorizar la nueva ló
 *Análisis del código fuente confirma que los puntos descritos en esta sección están implementados y funcionales.*
 
 **📋 DOCUMENTACIÓN ADICIONAL DISPONIBLE:**
-- **Script de Migración**: `scripts/migrate_slides_to_individual.py` - Script completo para migrar contenido legacy de formato "slides" a múltiples "slide" individuales
+- **Script de Migración**: `scripts/migrate_slides_to_individual.py` - Script completo para migrar contenido legacy de formato "slide" único a múltiples "slide" individuales
 - **Documentación de API**: `documentacion_implementacion/api_documentation.md` - Documentación completa de todos los endpoints del backend
 - **Guías de Plantillas**: `documentacion_implementacion/guias_plantillas.md` - Guía exhaustiva del sistema de plantillas con ejemplos prácticos
 
@@ -848,9 +848,9 @@ Actualizar índices en DB si es necesario para soportar sort por order. - **[VER
 **✅ PLAYER DE MÓDULO VIRTUAL - 100% IMPLEMENTADO Y OPERATIVO**
 (F) Player de módulo virtual: Modificar la pantalla donde el alumno ve el contenido: **COMPLETAMENTE FUNCIONAL**
 
-En lugar de tratar un TopicContent "slides" de forma especial, iterar sobre la lista de contenidos en el orden ya proveído. **IMPLEMENTADO**
+En lugar de tratar un TopicContent "slide" único de forma especial, iterar sobre la lista de contenidos en el orden ya proveído. **IMPLEMENTADO**
 
-Mostrar cada diapositiva individualmente (puede ser en un visor tipo carrusel). Se puede reutilizar el componente actual que mostraba todas las slides pero limitando a una. **VISOR CARRUSEL OPERATIVO**
+Mostrar cada diapositiva individualmente (puede ser en un visor tipo carrusel). Se puede reutilizar el componente actual que mostraba todas las diapositivas pero limitando a una. **VISOR CARRUSEL OPERATIVO**
 
 Implementar auto-avance: si autoplay activado, tras reproducir audio de una diapositiva o tras X segundos, avanzar a la siguiente. **AUTO-AVANCE FUNCIONAL**
 
@@ -1278,19 +1278,19 @@ Probar que no queden huérfanos (por ejemplo, Template de usuario se mantienen a
 
 **✅ COMPLETAMENTE IMPLEMENTADO** - `CascadeDeletionService` completo en `src/shared/cascade_deletion_service.py` con soporte completo para StudyPlan -> Modules -> Topics -> Contents y todas las dependencias. Incluye método `delete_with_cascade` y rutas en `src/shared/cascade_routes.py`
 
-(B) Migración de datos viejos: Escribir script para migrar contenidos tipo "slides" únicos:
+(B) Migración de datos viejos: Escribir script para migrar contenidos tipo "slide" legacy únicos:
 
-Iterar TopicContents donde content_type="slides".
+Iterar TopicContents donde content_type="slide" legacy.
 
-Extraer su contenido (si almacenaba una lista de slides, parsearlo).
+Extraer su contenido (si almacenaba una lista de diapositivas, parsearlo).
 
 Crear múltiples TopicContents "slide" como hicimos manual. Incluir audio si tenía.
 
-Borrar el viejo content "slides".
+Borrar el viejo content "slide" legacy.
 
 Notificar a los profesores posiblemente de cambios en formato (puede ser en notas de release).
 
-**✅ COMPLETAMENTE IMPLEMENTADO** - Script de migración completo disponible en `scripts/migrate_slides_to_individual.py` con funcionalidad para convertir contenido legacy
+**✅ COMPLETAMENTE IMPLEMENTADO** - Script de migración completo disponible en `scripts/migrate_slides_to_individual.py` con funcionalidad para convertir contenido slide legacy
 
 (F) Pruebas de UI con distintos perfiles:
 
@@ -1313,8 +1313,8 @@ Profesor generando tema con diversas opciones – verificar que no hay contenido
 ## 📋 DOCUMENTACIÓN COMPLETA GENERADA
 
 ### 🔧 Scripts y Herramientas
-- **`scripts/migrate_slides_to_individual.py`** - Script completo para migración de contenido legacy
-  - Convierte formato "slides" único a múltiples "slide" individuales
+- **`scripts/migrate_slides_to_individual.py`** - Script completo para migración de contenido slide legacy
+  - Convierte formato "slide" legacy único a múltiples "slide" individuales
   - Preserva metadatos, audio y orden original
   - Incluye validación y logging detallado
 

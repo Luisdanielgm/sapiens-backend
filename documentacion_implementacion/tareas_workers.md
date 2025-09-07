@@ -10,12 +10,12 @@ GitHub
 GitHub
 .
 
-Fase 2 – Plan o “Skeleton” de Diapositivas: A partir del contenido teórico y la estructura calculada, se determinan las diapositivas necesarias (por ejemplo, títulos, puntos clave por diapositiva). Actualmente, esta fase también opera de forma secuencial por sección: el código recorre cada sección del contenido y genera las diapositivas correspondientes una por una
+Fase 2 – Plan o "Skeleton" de Diapositivas: A partir del contenido teórico y la estructura calculada, se determinan las diapositivas necesarias (por ejemplo, títulos, puntos clave por diapositiva). Actualmente, esta fase también opera de forma secuencial por sección: el código recorre cada sección del contenido y genera las diapositivas correspondientes una por una
 GitHub
 GitHub
 . Para cada sección se llega incluso a crear un pool de 1 worker y procesar la tarea secuencialmente
 GitHub
-, lo que significa que no se están aprovechando múltiples workers en paralelo durante esta etapa (se genera sección 1, luego sección 2, etc., en orden). Al final de esta fase se obtiene la lista de diapositivas “esqueleto” con sus títulos, tipo (introducción, contenido, conclusión, etc.) y puntos clave.
+, lo que significa que no se están aprovechando múltiples workers en paralelo durante esta etapa (se genera sección 1, luego sección 2, etc., en orden). Al final de esta fase se obtiene la lista de diapositivas "esqueleto" con sus títulos, tipo (introducción, contenido, conclusión, etc.) y puntos clave.
 
 Fase 3 – Contenido Visual (Imágenes/Diagrams): Para cada diapositiva planificada, se genera contenido visual (diagramas, imágenes ilustrativas, etc.). Esta fase sí utiliza concurrencia, pero fuera del sistema de workers; en el código actual se lanza una promesa por cada diapositiva usando Promise.allSettled, generando todos los visuales en paralelo de forma nativa
 GitHub
@@ -47,7 +47,7 @@ GitHub
 Un modo paralelo por tareas (gestionado por ParallelGenerationService y usado en ParallelGenerationControls.tsx) que encola de golpe varias tareas de diferentes tipos en el pool de workers. En este modo “batch”, por ejemplo, para un tema se pueden encolar tareas de tipo slide, diagram y quiz simultáneamente
 GitHub
 GitHub
-. Cada tarea lleva un tipo de contenido y una prioridad; el dispatcher las va asignando según disponibilidad y peso de prioridad. Importante: En esta configuración actual, se definió que las tareas slide tienen mayor peso/prioridad que quiz (ver más adelante), lo que intenta asegurar que los slides se atiendan primero
+. Cada tarea lleva un tipo de contenido y una prioridad; el dispatcher las va asignando según disponibilidad y peso de prioridad. Importante: En esta configuración actual, se definió que las tareas slide tienen mayor peso/prioridad que quiz (ver más adelante), lo que intenta asegurar que las diapositivas se atiendan primero
 GitHub
 . Sin embargo, todas las tareas (incluyendo el quiz) están en la cola desde el inicio.
 
@@ -55,7 +55,7 @@ Prioridades de Tareas: En la cola paralela, las prioridades están definidas med
 GitHub
 . Además, se asigna prioridad 'high', 'medium' o 'low' según ciertos criterios; para contenido, internamente se da prioridad más baja al quiz
 GitHub
-. En conjunto, esto implica que el algoritmo de getNextTask() ordena las tareas pendientes de manera que los slides y contenidos visuales se consideren antes que los quizzes
+. En conjunto, esto implica que el algoritmo de getNextTask() ordena las tareas pendientes de manera que las diapositivas y contenidos visuales se consideren antes que los quizzes
 GitHub
 . En principio, el quiz quedaría al final de la cola por tener el menor peso.
 
@@ -88,7 +88,7 @@ GitHub
 . Por tanto, actualmente podría violarse el requisito si se usa la generación paralela sin control adicional, ya que la evaluación puede empezar conjuntamente hacia el final de la generación de diapositivas en lugar de estrictamente después.
 
 Orden correcto de las fases de generación: primero contenido teórico, luego planificación/estilos, luego generación de diapositivas.
-🔸 Estado actual: La implementación secuencial sigue exactamente este orden: Contenido teórico → Estilo de presentación → Estructura → Slides → (visual/narrativo) → Quiz
+🔸 Estado actual: La implementación secuencial sigue exactamente este orden: Contenido teórico → Estilo de presentación → Estructura → Diapositivas → (visual/narrativo) → Quiz
 GitHub
 GitHub
 . El contenido teórico se genera antes de cualquier diapositiva, y la planificación (estructura de secciones) también se completa antes de empezar a generar las diapositivas en sí
@@ -154,15 +154,15 @@ Frontend
 Asegurar que la generación del Quiz inicia solo tras las diapositivas:
 Modificar la lógica de generación en modo paralelo para introducir una dependencia o postergación explícita de la tarea de quiz. Algunas opciones:
 
-No encolar inmediatamente el quiz: Cambiar ParallelGenerationService para que cree las tareas de slide (y diagram) y comience a procesarlas, y recién cuando esas estén asignadas o casi terminadas, agregar la tarea de quiz. Por ejemplo, se podría dividir el startJob en dos etapas: primero encolar slides/diagrams; al recibir un evento de que quedan X tareas (o al completar la asignación de todas las de tipo slide), entonces encolar el quiz. De esta forma, el quiz no compite por workers hasta el final.
+No encolar inmediatamente el quiz: Cambiar ParallelGenerationService para que cree las tareas de slide (y diagram) y comience a procesarlas, y recién cuando esas estén asignadas o casi terminadas, agregar la tarea de quiz. Por ejemplo, se podría dividir el startJob en dos etapas: primero encolar diapositivas/diagrams; al recibir un evento de que quedan pocas tareas (o al completar la asignación de todas las de tipo slide), entonces encolar el quiz. De esta forma, el quiz no compite por workers hasta el final.
 
-Implementar “dependencia” en el dispatcher: Alternativamente, introducir una bandera en la tarea de quiz o en el dispatcher para que, mientras existan tareas de tipo diapositiva en curso, no se asigne la tarea de quiz aunque esté en cola. Esto podría hacerse comprobando dentro de getNextTask() o getNextAvailableWorker() si el siguiente en cola es quiz y aún hay slides corriendo, saltarlo momentáneamente. Si bien es más complejo, garantizaría que “en paralelo pero al final” se cumpla exactamente: el quiz arrancaría solo cuando ya no quede ninguna diapositiva pendiente de asignar ni encolada (es decir, cuando la cola de slides esté vacía).
-Cualquiera de las dos estrategias lograría que el quiz no se genere prematuramente. Esto resuelve el problema observado de quiz simultáneo con diapositivas. Se deberá probar con casos de pocas diapositivas y muchos workers para validar que el quiz realmente espera.
+Implementar "dependencia" en el dispatcher: Alternativamente, introducir una bandera en la tarea de quiz o en el dispatcher para que, mientras existan tareas de tipo diapositiva en curso, no se asigne la tarea de quiz aunque esté en cola. Esto podría hacerse comprobando dentro de getNextTask() o getNextAvailableWorker() si el siguiente en cola es quiz y aún hay diapositivas en ejecución, omitirlo temporalmente. Si bien es más complejo, garantizaría que "en paralelo pero al final" se cumpla exactamente: el quiz arrancaría únicamente cuando ya no quede ninguna diapositiva pendiente de asignar ni encolada (es decir, cuando la cola de diapositivas esté completamente vacía).
+Cualquiera de las dos estrategias lograría que el quiz no se genere prematuramente. Esto solucionaría el problema observado de quiz ejecutándose simultáneamente con diapositivas. Se deberá probar con casos de pocas diapositivas y muchos workers para validar que el quiz realmente espera.
 
 Incrementar la utilización del pool de 5 workers en generación de diapositivas:
 Para acortar tiempos y cumplir con la expectativa:
 
-Paralelizar la fase de “Skeleton Slides”: En vez de generar sección por sección secuencialmente
+Paralelizar la fase de "Esqueleto de Diapositivas": En lugar de generar sección por sección de manera secuencial
 GitHub
 , se puede aprovechar los 5 workers. Por ejemplo, si hay 5 secciones, lanzar 5 tareas en paralelo (una por sección) usando workerPoolService.processTasksWithFlexibleConcurrency con maxConcurrent acorde. Ya que cada sección es independiente en cuanto a generación de su set de diapositivas, esto es viable. Requerirá recopilar luego los resultados de cada tarea para construir el sectionsMap y navigationFlow. Esta modificación permitiría generar múltiples diapositivas en simultáneo (hasta 5) desde el principio.
 
@@ -170,9 +170,9 @@ Revisar configuración de concurrencia del pool global: Si mantenemos maxWorkers
 GitHub
 , lo que limita la cantidad de workers efectivos corriendo a la vez. Aumentarlo a 5 hará que el dispatcher pueda asignar tareas a los 5 workers en intervalos de ~1s sin restricción artificial. Esto debe acompañarse de pruebas de rendimiento, pero alineará el sistema con la intención de usar los “5 en paralelo”.
 
-Distribución de tareas de slides en el pool: En el modo paralelo, cerciorarse de que si hay muchas diapositivas (ej. 10), el pool las reparte entre los 5 workers de manera balanceada. Dado que el dispatcher ya asigna al primer libre, esto ocurrirá automáticamente si no hay otras restricciones. El cambio principal aquí es evitar colas secuenciales internas como la de sección por sección.
+Distribución de tareas de diapositivas en el pool: En el modo paralelo, cerciorarse de que si hay muchas diapositivas (ej. 10), el pool las reparte entre los 5 workers de manera balanceada. Dado que el dispatcher ya asigna al primer libre, esto ocurrirá automáticamente si no hay otras restricciones. El cambio principal aquí es evitar colas secuenciales internas como la de sección por sección.
 
-Con estos cambios, sí estarían “trabajando los 5 workers” durante la generación de diapositivas cuando haya 5 o más tareas de slide. Esto acelerará la generación y cumple el requerimiento de paralelismo.
+Con estos cambios, sí estarían "trabajando los 5 workers" durante la generación de diapositivas cuando haya 5 o más tareas de slide. Esto acelerará la generación y cumple el requerimiento de paralelismo.
 
 Corrección de la actualización de estado y toasts en la UI:
 Implementar manejadores de eventos y lógica de interfaz para reflejar inmediatamente el progreso:
@@ -181,7 +181,7 @@ Suscribirse a eventos del servicio de generación: En el componente que inicia l
 
 Ocultar cualquier toast de “Generando…” aún visible (o cambiar su estado a éxito).
 
-Marcar los estados en GenerationStatusPanel como completados (por ejemplo, establecer quizStatus: 'success', slidesStatus: 'success', etc., cuando correspondan)
+Marcar los estados en GenerationStatusPanel como completados (por ejemplo, establecer quizStatus: 'success', slideStatus: 'success', etc., cuando correspondan)
 GitHub
 .
 
@@ -225,19 +225,19 @@ En cualquiera de los casos, eliminar código duplicado o rutas de código altern
 Backend
 
 Modelo de datos para contenido en diapositivas (subcontenido):
-Introducir/enabled en el backend la noción de diapositivas como unidades de contenido asociadas a un tema. Actualmente, es probable que exista una colección virtual_topic_contents donde cada registro corresponde a un contenido (antes podía ser todo el tema como un único contenido). Con la nueva arquitectura:
+Introducir/habilitar en el backend la noción de diapositivas como unidades de contenido asociadas a un tema. Actualmente, es probable que exista una colección virtual_topic_contents donde cada registro corresponde a un contenido (antes podía ser todo el tema como un único contenido). Con la nueva arquitectura:
 
 Asegurarse de que el modelo de VirtualTopicContent (o equivalente) tiene campo para parent_content_id o parent_topic_id para vincular diapositivas a su tema principal
 GitHub
 . Si no existe, extender el esquema. Este campo permitirá relacionar varias piezas (diapositivas, quiz) bajo un mismo tema.
 
-Cuando el frontend envíe las diapositivas generadas, crear múltiples entries en la base de datos: una por diapositiva, cada una con su título, contenido (texto narrativo quizás combinado con puntos clave), tipo, etc., y con un campo parent_content_id apuntando al contenido teórico principal o un campo virtual_topic_id apuntando directamente al tema. Se debe definir qué es el “padre”: podría ser el contenido teórico como tal (si se guarda el texto teórico como un Content separado), o simplemente todos comparten el mismo virtual_topic_id.
+Cuando el frontend envíe las diapositivas generadas, crear múltiples entries en la base de datos: una por diapositiva, cada una con su título, contenido (texto narrativo quizás combinado con puntos clave), tipo, etc., y con un campo parent_content_id apuntando al contenido teórico principal o un campo virtual_topic_id apuntando directamente al tema., y con un campo parent_content_id apuntando al contenido teórico principal o un campo virtual_topic_id apuntando directamente al tema. Se debe definir qué es el “padre”: podría ser el contenido teórico como tal (si se guarda el texto teórico como un Content separado), o simplemente todos comparten el mismo virtual_topic_id.
 
-Guardar el orden de las diapositivas (campo order o similar) para mantener la secuencia original en la presentación. Esto probablemente ya esté contemplado en el campo order del contenido (muchos sistemas de contenido tienen orden para items).
+Guardar el orden de las diapositivas (campo order o similar) para mantener la secuencia original en la presentación. Esto probablemente ya esté contemplado en el campo order del contenido (muchos sistemas de contenido tienen orden para items). Esto probablemente ya esté contemplado en el campo order del contenido (muchos sistemas de contenido tienen orden para items).
 
-Ejemplo: Al finalizar la generación, el frontend podría hacer una llamada POST enviando { topicId: X, contents: [ {type: "text", title: "...", content: "texto teórico completo"}, {type: "slide", title: "Slide 1", content: "...", order: 1}, ..., {type: "quiz", content: {...quiz JSON...}} ] }. El backend recibiría esto y haría inserciones múltiples en virtual_topic_contents: uno para el texto, varios para slides con parent al texto o al topic, y uno para quiz.
+Ejemplo: Al finalizar la generación, el frontend podría hacer una llamada POST enviando { topicId: X, contents: [ {type: "text", title: "...", content: "texto teórico completo"}, {type: "slide", title: "Diapositiva 1", content: "...", order: 1}, ..., {type: "quiz", content: {...quiz JSON...}} ] }. El backend recibiría esto y haría inserciones múltiples en virtual_topic_contents: uno para el texto, varios para diapositivas con parent al texto o al topic, y uno para quiz. El backend recibiría esto y haría inserciones múltiples en virtual_topic_contents: uno para el texto, varios para diapositivas con parent al texto o al topic, y uno para quiz.
 
-No duplicar contenido teórico en cada slide: Las diapositivas no necesitan almacenar todo el texto teórico, solo su propio contenido. El campo parent_content_id servirá para que se pueda reconstruir el contexto si se necesita (por ejemplo, al mostrar todo junto).
+No duplicar contenido teórico en cada slide: Las diapositivas no necesitan almacenar todo el texto teórico, solo su propio contenido. El campo parent_content_id servirá para que se pueda reconstruir el contexto si se necesita (por ejemplo, al mostrar todo junto). El campo parent_content_id servirá para que se pueda reconstruir el contexto si se necesita (por ejemplo, al mostrar todo junto).
 
 Almacenamiento del Quiz como contenido interactivo:
 Según el comentario en el código, ya no hay una colección separada para quizzes, sino que estos se tratan como otro tipo de TopicContent (content_type = "quiz")
@@ -280,7 +280,7 @@ Nota: si ya existe un endpoint para crear un contenido individual, se podría ll
 Manejar también actualizaciones: si un profesor regenera el contenido de un tema que ya tenía algo, podría querer sobreescribir. En tal caso, considerar si primero borrar contenidos antiguos de ese tema (excepto los manuales quizás) antes de insertar los nuevos generados. Esto es un detalle de UX/negocio a definir (quizás se versiona o se reemplaza completamente el contenido del tema al regenerar).
 
 Tracking de progreso y completitud con contenidos múltiples:
-Con la introducción de múltiples contenidos por tema (slides, quiz, etc.), el backend debe asegurar que el sistema de progreso del estudiante se ajusta:
+Con la introducción de múltiples contenidos por tema (diapositivas, quiz, etc.), el backend debe asegurar que el sistema de progreso del estudiante se ajusta:
 
 ContentResultService: verificar cómo calcula completitud. Probablemente antes un tema tenía un ContentResult cuando el estudiante lo terminaba. Ahora, ¿habrá un ContentResult por cada diapositiva? Lo más práctico es seguir teniendo un ContentResult unificado por tema, pero entonces la lógica de marcar completado un tema debería considerar todos sus subcontenidos completados. Por ejemplo, el estudiante debe ver todas las diapositivas y completar el quiz para marcar el tema al 100%.
 
