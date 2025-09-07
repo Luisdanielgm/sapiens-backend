@@ -65,16 +65,10 @@ def create_app(config_object=active_config):
     # Aplicar configuración
     app.config.from_object(config_object)
     
-    # Configurar CORS
-    CORS(app, resources={
-        r"/api/*": {
-            "origins": app.config["CORS_ORIGINS"],
-            "methods": ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
-            "allow_headers": ["Content-Type", "Authorization"],
-            "supports_credentials": True,
-            "automatic_options": True
-        }
-    })
+    # Configure CORS
+    CORS(app, resources={r"/api/*": {"origins": app.config["CORS_ORIGINS"]}}, 
+         supports_credentials=False, 
+         allow_headers=["Content-Type", "Authorization"])
 
     # Desactivar modo estricto para slashes en URLs
     app.url_map.strict_slashes = False

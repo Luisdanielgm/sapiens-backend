@@ -40,6 +40,7 @@ class Config:
     JWT_HEADER_NAME = "Authorization"
     JWT_HEADER_TYPE = "Bearer"
     JWT_ACCESS_TOKEN_EXPIRES = int(os.getenv('JWT_EXPIRATION_HOURS', 24)) * 3600  # En segundos
+    JWT_DECODE_LEEWAY = int(os.getenv("JWT_DECODE_LEEWAY", 10))  # seconds
     
     # Servidor
     DEBUG = os.getenv('FLASK_DEBUG', '0') == '1'

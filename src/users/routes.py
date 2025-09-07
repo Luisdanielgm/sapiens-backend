@@ -38,12 +38,13 @@ def register():
             if workspaces:
                 first_ws = workspaces[0]
                 claims = {
+                    "email": data.get("email"),
                     "workspace_id": first_ws["_id"],
                     "institute_id": first_ws["institute_id"],
                     "role": normalize_role(first_ws["role"])
                 }
             else:
-                claims = None
+                claims = {"email": data.get("email")}
             access_token = create_access_token(identity=user_id_or_error, additional_claims=claims)
             user_info = user_service.get_user_info(data['email'])
             if user_info and user_info.get("role"):
@@ -129,12 +130,13 @@ def login():
             if workspaces:
                 first_ws = workspaces[0]
                 claims = {
+                    "email": user_info.get("email"),
                     "workspace_id": first_ws["_id"],
                     "institute_id": first_ws["institute_id"],
                     "role": normalize_role(first_ws["role"])
                 }
             else:
-                claims = None
+                claims = {"email": user_info.get("email")}
             access_token = create_access_token(identity=user_info['id'], additional_claims=claims)
             if user_info.get("role"):
                 user_info["role"] = normalize_role(user_info["role"])
@@ -272,7 +274,13 @@ def reset_password():
 @users_bp.route('/verify-token', methods=['GET'])
 @APIRoute.standard(auth_required_flag=True)
 def verify_token():
-    return APIRoute.success()
+    return APIRoute.success(message="Token is valid")
+
+@users_bp.route('/verify-token-debug', methods=['GET'])
+@APIRoute.standard(auth_required_flag=True)
+def verify_token_debug():
+    from flask_jwt_extended import get_jwt
+    return APIRoute.success(data={"claims": get_jwt()})
 
 @users_bp.route('/me', methods=['GET'])
 @APIRoute.standard(auth_required_flag=True)
