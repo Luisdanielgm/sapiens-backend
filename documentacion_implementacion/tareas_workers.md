@@ -181,7 +181,7 @@ Suscribirse a eventos del servicio de generación: En el componente que inicia l
 
 Ocultar cualquier toast de “Generando…” aún visible (o cambiar su estado a éxito).
 
-Marcar los estados en GenerationStatusPanel como completados (por ejemplo, establecer quizStatus: 'success', slideStatus: 'success', etc., cuando correspondan)
+Marcar los estados en GenerationStatusPanel como completados (por ejemplo, establecer quizStatus: 'success', etc., cuando correspondan)
 GitHub
 .
 

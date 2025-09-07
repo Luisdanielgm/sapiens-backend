@@ -1499,7 +1499,7 @@ class FastVirtualModuleGenerator(VerificationBaseService):
         """
         priority_map = {
             "text": 1,           # Alta prioridad - contenido textual base
-            "slides": 1,         # Alta prioridad - presentaciones
+            "slide": 1,          # Alta prioridad - presentaciones
             "video": 2,          # Media-alta prioridad - contenido multimedia
             "quiz": 2,           # Media-alta prioridad - evaluaciones
             "exam": 2,           # Media-alta prioridad - exámenes
@@ -1600,7 +1600,7 @@ class FastVirtualModuleGenerator(VerificationBaseService):
                 content_type = content.get("content_type", "")
                 
                 # Contenidos completos (cubren todo el tema)
-                if content_type in ["text", "slides", "video", "feynman", "story", "summary", "narrated_presentation"]:
+                if content_type in ["text", "slide", "video", "feynman", "story", "summary", "narrated_presentation"]:
                     complete_contents.append(content)
                 # Contenidos evaluativos
                 elif content_type in ["quiz", "exam", "formative_test", "project"]:
@@ -1722,7 +1722,7 @@ class FastVirtualModuleGenerator(VerificationBaseService):
                 # Filtrar contenidos de solo texto si hay alternativas suficientes
                 if len(preferred_specific) >= 2:
                     # Verificar si hay otros contenidos completos además de texto
-                    complete_types = ["text", "slides", "video", "feynman", "story", "summary", "narrated_presentation"]
+                    complete_types = ["text", "slide", "video", "feynman", "story", "summary", "narrated_presentation"]
                     non_text_complete = [c for c in selected_contents 
                                        if c.get("content_type") in complete_types and c.get("content_type") != "text"]
                     
@@ -1802,7 +1802,7 @@ class FastVirtualModuleGenerator(VerificationBaseService):
             # PASO 12: Validación final del balance
             final_types = [c.get('content_type') for c in selected_contents]
             complete_types_in_selection = [ct for ct in final_types 
-                                         if ct in ["text", "slides", "video", "feynman", "story", "summary", "narrated_presentation"]]
+                                         if ct in ["text", "slide", "video", "feynman", "story", "summary", "narrated_presentation"]]
             
             if not complete_types_in_selection and len(selected_contents) > 1:
                 logging.warning("ADVERTENCIA: Selección sin contenidos completos. Balance puede estar comprometido.")
@@ -1888,7 +1888,7 @@ class FastVirtualModuleGenerator(VerificationBaseService):
             score = 0
             
             # Calcular score según tipo de contenido y preferencias
-            if content_type in ["video", "slides"] and visual > 0.5:
+            if content_type in ["video", "slide"] and visual > 0.5:
                 score += visual * 2
             elif content_type in ["audio", "narrated_presentation"] and auditory > 0.5:
                 score += auditory * 2
@@ -2015,7 +2015,7 @@ class FastVirtualModuleGenerator(VerificationBaseService):
             
             # Tiempos base por tipo de contenido (en minutos)
             base_times = {
-                "text": 10, "feynman": 15, "slides": 12, "video": 8,
+                "text": 10, "feynman": 15, "slide": 12, "video": 8,
                 "diagram": 5, "infographic": 7, "mindmap": 6,
                 "game": 15, "simulation": 20, "quiz": 10,
                 "audio": 8, "interactive_exercise": 12
@@ -2035,7 +2035,7 @@ class FastVirtualModuleGenerator(VerificationBaseService):
             learning_disabilities = profile_data.get("learning_disabilities", {})
             
             # Aumentar tiempo si hay dificultades
-            if learning_disabilities.get("dyslexia") and content_type in ["text", "slides"]:
+            if learning_disabilities.get("dyslexia") and content_type in ["text", "slide"]:
                 base_time *= 1.5
             if learning_disabilities.get("adhd") and content_type in ["text", "video"]:
                 base_time *= 1.3
@@ -2070,7 +2070,7 @@ class FastVirtualModuleGenerator(VerificationBaseService):
             selected_types = [c.get('content_type', 'unknown') for c in selected_contents]
             
             # Categorizar contenidos
-            complete_types = ["text", "slides", "video", "feynman", "story", "summary", "narrated_presentation"]
+            complete_types = ["text", "slide", "video", "feynman", "story", "summary", "narrated_presentation"]
             evaluative_types = ["quiz", "exam", "formative_test", "project"]
             
             complete_count = sum(1 for t in selected_types if t in complete_types)
@@ -2249,7 +2249,7 @@ class VirtualContentProgressService(VerificationBaseService):
         auto_scores = {
             # Contenidos de solo visualización/lectura
             "text": 1.0,
-            "slides": 1.0, 
+            "slide": 1.0, 
             "video": 1.0,
             "audio": 1.0,
             "document": 1.0,

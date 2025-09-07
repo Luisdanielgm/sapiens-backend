@@ -69,7 +69,7 @@ class TestVirtualPersonalization(unittest.TestCase):
         # Contenidos de ejemplo
         self.sample_contents = [
             {"_id": ObjectId(), "content_type": "text", "content": "Texto educativo"},
-            {"_id": ObjectId(), "content_type": "slides", "content": "Presentación"},
+            {"_id": ObjectId(), "content_type": "slide", "content": "Presentación"},
             {"_id": ObjectId(), "content_type": "video", "content": "Video explicativo"},
             {"_id": ObjectId(), "content_type": "diagram", "content": "Diagrama conceptual"},
             {"_id": ObjectId(), "content_type": "game", "content": "Juego educativo"},
@@ -89,13 +89,13 @@ class TestVirtualPersonalization(unittest.TestCase):
         self.assertLessEqual(len(selected), 6)
         
         # Verificar que hay al menos un contenido completo
-        complete_types = ["text", "slides", "video", "feynman", "story", "summary", "narrated_presentation"]
+        complete_types = ["text", "slide", "video", "feynman", "story", "summary", "narrated_presentation"]
         has_complete = any(c.get("content_type") in complete_types for c in selected)
         self.assertTrue(has_complete, "Debe haber al menos un contenido completo")
         
         # Para dislexia, debe priorizar contenidos visuales y evitar solo texto
         content_types = [c.get("content_type") for c in selected]
-        visual_content_count = sum(1 for ct in content_types if ct in ["diagram", "video", "slides"])
+        visual_content_count = sum(1 for ct in content_types if ct in ["diagram", "video", "slide"])
         self.assertGreater(visual_content_count, 0, "Debe incluir contenidos visuales para estudiantes con dislexia")
     
     def test_select_personalized_contents_kinesthetic_adhd(self):
@@ -223,4 +223,4 @@ class TestVirtualPersonalization(unittest.TestCase):
         self.assertLessEqual(len(selected), 6)
 
 if __name__ == '__main__':
-    unittest.main() 
+    unittest.main()

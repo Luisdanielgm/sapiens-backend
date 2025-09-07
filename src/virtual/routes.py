@@ -2031,7 +2031,7 @@ def auto_complete_content(virtual_content_id):
 @APIRoute.standard(auth_required_flag=True, roles=[ROLES["STUDENT"]])
 def auto_complete_reading_content(virtual_content_id):
     """
-    Completa automáticamente contenidos de lectura (texto, slides, videos).
+    Completa automáticamente contenidos de lectura (texto, slide, videos).
     Optimizado para contenidos que solo requieren visualización.
     """
     try:
@@ -2377,7 +2377,7 @@ def bulk_complete_reading_contents(student_id):
         
         # Obtener filtros opcionales
         virtual_module_id = data.get("virtual_module_id")
-        content_types = data.get("content_types", ["text", "slides", "video", "audio", "diagram"])
+        content_types = data.get("content_types", ["text", "slide", "video", "audio", "diagram"])
         
         # Construir filtro
         content_filter = {

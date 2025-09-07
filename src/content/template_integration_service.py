@@ -342,8 +342,8 @@ class TemplateIntegrationService:
             return "diagram"
         elif "game" in style_tags or "interactive" in style_tags:
             return "simulation"  # Usar simulation como tipo genérico para contenido interactivo
-        elif "presentation" in style_tags or "slides" in style_tags:
-            return "slides"
+        elif "presentation" in style_tags or "slide" in style_tags:
+            return "slide"
         elif "exercise" in style_tags or "practice" in style_tags:
             return "completion_exercise"
         else:

@@ -760,7 +760,7 @@ Dado que no hay una fecha límite inmediata pero se desea priorizar la nueva ló
 *Análisis del código fuente confirma que los puntos descritos en esta sección están implementados y funcionales.*
 
 **📋 DOCUMENTACIÓN ADICIONAL DISPONIBLE:**
-- **Script de Migración**: `scripts/migrate_slides_to_individual.py` - Script completo para migrar contenido legacy de formato "slide" único a múltiples "slide" individuales
+
 - **Documentación de API**: `documentacion_implementacion/api_documentation.md` - Documentación completa de todos los endpoints del backend
 - **Guías de Plantillas**: `documentacion_implementacion/guias_plantillas.md` - Guía exhaustiva del sistema de plantillas con ejemplos prácticos
 
@@ -1083,7 +1083,7 @@ Para cada eval existente con topic_id, convertirlo a topic_ids [topic_id].
 
 Este script puede ser manual o en código a ejecutar una vez.
 
-**✅ COMPLETAMENTE IMPLEMENTADO** - Script de migración disponible en `scripts/migrate_slides_to_individual.py`
+**✅ COMPLETAMENTE IMPLEMENTADO**
 
 (B) Endpoints Evaluations:
 
@@ -1290,7 +1290,7 @@ Borrar el viejo content "slide" legacy.
 
 Notificar a los profesores posiblemente de cambios en formato (puede ser en notas de release).
 
-**✅ COMPLETAMENTE IMPLEMENTADO** - Script de migración completo disponible en `scripts/migrate_slides_to_individual.py` con funcionalidad para convertir contenido slide legacy
+**✅ COMPLETAMENTE IMPLEMENTADO**
 
 (F) Pruebas de UI con distintos perfiles:
 
@@ -1313,7 +1313,7 @@ Profesor generando tema con diversas opciones – verificar que no hay contenido
 ## 📋 DOCUMENTACIÓN COMPLETA GENERADA
 
 ### 🔧 Scripts y Herramientas
-- **`scripts/migrate_slides_to_individual.py`** - Script completo para migración de contenido slide legacy
+
   - Convierte formato "slide" legacy único a múltiples "slide" individuales
   - Preserva metadatos, audio y orden original
   - Incluye validación y logging detallado
@@ -1491,7 +1491,7 @@ GitHub
 - `api_documentation.md` - Documentación completa de API con todos los endpoints
 - `guias_plantillas.md` - Guía exhaustiva del sistema de plantillas con convenciones de marcadores
 - `marketplace_plantillas_futuro.md` - Análisis del marketplace público
-- Scripts de migración documentados en `scripts/migrate_slides_to_individual.py`
+
 
 (F) UI ajustes menores: **✅ 100% IMPLEMENTADO Y OPERATIVO**
 

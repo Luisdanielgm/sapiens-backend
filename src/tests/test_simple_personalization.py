@@ -25,7 +25,7 @@ class MockPersonalizationLogic:
             content_type = content.get("content_type", "")
             score = 0
             
-            if content_type in ["video", "slides"] and visual > 0.5:
+            if content_type in ["video", "slide"] and visual > 0.5:
                 score += visual * 2
             elif content_type in ["audio", "narrated_presentation"] and auditory > 0.5:
                 score += auditory * 2
@@ -123,7 +123,7 @@ def test_content_categorization():
     
     sample_contents = [
         {"content_type": "text", "name": "Texto educativo"},
-        {"content_type": "slides", "name": "Presentación"},
+        {"content_type": "slide", "name": "Presentación"},
         {"content_type": "video", "name": "Video explicativo"},
         {"content_type": "diagram", "name": "Diagrama conceptual"},
         {"content_type": "game", "name": "Juego educativo"},
@@ -138,7 +138,7 @@ def test_content_categorization():
     for content in sample_contents:
         content_type = content.get("content_type", "")
         
-        if content_type in ["text", "slides", "video", "feynman", "story", "summary"]:
+        if content_type in ["text", "slide", "video", "feynman", "story", "summary"]:
             complete_contents.append(content)
         elif content_type in ["quiz", "exam", "formative_test", "project"]:
             evaluative_contents.append(content)
@@ -179,4 +179,4 @@ if __name__ == "__main__":
     test_logic = MockPersonalizationLogic()
     test_logic.run_tests()
     print("✅ Tests de lógica de personalización ejecutados con éxito.")
-    sys.exit(0 if success else 1) 
+    sys.exit(0 if success else 1)

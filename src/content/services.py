@@ -121,8 +121,8 @@ class ContentService(VerificationBaseService):
             if not content_type_def:
                 return False, f"Tipo de contenido '{content_type}' no válido"
 
-            # Validaciones específicas para diapositivas (tanto 'slides' como 'slide')
-            if content_type in ["slides", "slide"]:
+            # Validaciones específicas para diapositivas
+            if content_type == "slide":
                 slide_template = content_data.get("slide_template", {})
                 if not slide_template:
                     return False, f"El contenido de tipo '{content_type}' requiere un campo 'slide_template' con la plantilla de fondo"
@@ -469,7 +469,7 @@ class ContentService(VerificationBaseService):
 
             # Validaciones específicas para diapositivas
             content_type = update_data.get("content_type", current_content.get("content_type"))
-            if content_type == "slides" and "slide_template" in update_data:
+            if content_type == "slide" and "slide_template" in update_data:
                 slide_template = update_data.get("slide_template", {})
                 if slide_template:  # Solo validar si se proporciona slide_template
                     # Validar estructura básica de slide_template

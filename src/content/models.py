@@ -260,7 +260,7 @@ class ContentGenerationTask(BaseModel):
     # Tracking de sub-tareas
     subtasks: List[Dict] = []
     # Ejemplo de subtask:
-    # { "content_type": "slides", "status": "completed", "content_id": ObjectId(...) }
+    # { "content_type": "slide", "status": "completed", "content_id": ObjectId(...) }
     # { "content_type": "diagram", "status": "processing" }
 
     class Config:
@@ -282,7 +282,6 @@ class ContentTypes:
     GUIDED_QUESTIONS = "guided_questions"
     EXAMPLES = "examples"
     DOCUMENTS = "documents"
-    SLIDES = "slides"
     SLIDE = "slide"  # Diapositiva individual
     IMAGE = "image"
     LINK = "link"
@@ -332,7 +331,7 @@ class ContentTypes:
             "theoretical": [cls.TEXT, cls.FEYNMAN, cls.STORY, cls.SUMMARY, cls.GLOSSARY, 
                           cls.GUIDED_QUESTIONS, cls.EXAMPLES, cls.DOCUMENTS, cls.LINK],
             "visual": [cls.DIAGRAM, cls.INFOGRAPHIC, cls.MINDMAP, cls.TIMELINE, 
-                     cls.ILLUSTRATION, cls.CHART, cls.PICTOGRAM, cls.IMAGE, cls.SLIDES, cls.SLIDE],
+                     cls.ILLUSTRATION, cls.CHART, cls.PICTOGRAM, cls.IMAGE, cls.SLIDE],
             "multimedia": [cls.VIDEO, cls.AUDIO, cls.MUSIC, cls.ANIMATION, 
                          cls.SCREENCAST, cls.NARRATED_PRESENTATION],
             "interactive": [cls.GAME, cls.SIMULATION, cls.VIRTUAL_LAB, cls.AR, 
