@@ -130,6 +130,62 @@ def create_content():
             status_code=500,
         )
 
+@content_bp.route('/bulk', methods=['POST'])
+@APIRoute.standard(auth_required_flag=True, roles=[ROLES["TEACHER"], ROLES["ADMIN"]])
+def create_bulk_content():
+    """
+    Crea múltiples contenidos en una sola transacción.
+    
+    Body:
+    {
+        "contents": [
+            {
+                "topic_id": "ObjectId",
+                "content_type": "slide|quiz|...",
+                "title": "Título del contenido",
+                "description": "Descripción",
+                "content_data": {...},
+                "order": 1,
+                "parent_content_id": "ObjectId"
+                // ... otros campos del contenido
+            },
+            // ... más contenidos
+        ]
+    }
+    """
+    try:
+        data = request.json
+        contents_data = data.get('contents', [])
+        
+        if not contents_data:
+            return APIRoute.error(
+                ErrorCodes.VALIDATION_ERROR,
+                "Se requiere al menos un contenido en el array 'contents'"
+            )
+        
+        # Agregar creator_id a todos los contenidos
+        for content_data in contents_data:
+            content_data['creator_id'] = request.user_id
+        
+        success, result = content_service.create_bulk_content(contents_data)
+
+        if success:
+            return APIRoute.success(
+                data={"content_ids": result},
+                message=f"Se crearon {len(result)} contenidos exitosamente",
+                status_code=201,
+            )
+        else:
+            return APIRoute.error(ErrorCodes.CREATION_ERROR, result)
+            
+    except Exception as e:
+        logging.error(f"Error creando contenidos en lote: {str(e)}")
+        return APIRoute.error(
+            ErrorCodes.SERVER_ERROR,
+            "Error interno del servidor",
+            status_code=500,
+        )
+
 @content_bp.route('/topic/<topic_id>', methods=['GET'])
 @APIRoute.standard(auth_required_flag=True)
 def get_topic_content(topic_id):

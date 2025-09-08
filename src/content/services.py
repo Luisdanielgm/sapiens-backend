@@ -168,6 +168,182 @@ class ContentService(VerificationBaseService):
             logging.error(f"Error creando contenido: {str(e)}")
             return False, f"Error interno: {str(e)}"
 
+    def create_bulk_content(self, contents_data: List[Dict]) -> Tuple[bool, List[str]]:
+        """
+        Crea múltiples contenidos en una sola transacción.
+        
+        Args:
+            contents_data: Lista de datos de contenidos a crear
+            
+        Returns:
+            Tuple[bool, List[str]]: (éxito, lista_de_IDs_creados_o_mensaje_error)
+        """
+        if not contents_data:
+            return False, "No se proporcionaron contenidos para crear"
+        
+        # Iniciar sesión de transacción
+        session = self.db.client.start_session()
+        transaction_active = False
+        
+        try:
+            session.start_transaction()
+            transaction_active = True
+            
+            created_ids = []
+            content_types_usage = {}
+            
+            # Validaciones previas
+            for i, content_data in enumerate(contents_data):
+                topic_id = content_data.get("topic_id")
+                content_type = content_data.get("content_type")
+                
+                # Validar campos requeridos
+                if not topic_id:
+                    raise ValueError(f"Contenido {i+1}: topic_id es requerido")
+                if not content_type:
+                    raise ValueError(f"Contenido {i+1}: content_type es requerido")
+                
+                # Verificar que el tipo de contenido existe
+                content_type_def = self.content_type_service.get_content_type(content_type)
+                if not content_type_def:
+                    raise ValueError(f"Contenido {i+1}: Tipo de contenido '{content_type}' no válido")
+                
+                # Validaciones específicas para diapositivas
+                if content_type == "slide":
+                    slide_template = content_data.get("slide_template", {})
+                    if not slide_template:
+                        raise ValueError(f"Contenido {i+1}: El contenido de tipo 'slide' requiere un campo 'slide_template'")
+                    
+                    if not self.slide_style_service.validate_slide_template(slide_template):
+                        raise ValueError(f"Contenido {i+1}: El slide_template no tiene una estructura válida")
+                    
+                    # Validar estructura de slides en content_data
+                    slides = content_data.get("content_data", {}).get("slides", [])
+                    if slides:
+                        for j, slide in enumerate(slides):
+                            if "order" not in slide:
+                                raise ValueError(f"Contenido {i+1}, slide {j+1}: El campo 'order' es requerido en cada slide")
+                            if not isinstance(slide.get("order"), int) or slide.get("order") < 1:
+                                raise ValueError(f"Contenido {i+1}, slide {j+1}: El campo 'order' debe ser un entero positivo")
+                
+                # Contar uso de tipos de contenido
+                content_types_usage[content_type] = content_types_usage.get(content_type, 0) + 1
+            
+            # Validar orden secuencial si se proporciona
+            self._validate_sequential_order(contents_data)
+            
+            # Crear contenidos uno por uno dentro de la transacción
+            for i, content_data in enumerate(contents_data):
+                # Extraer marcadores de personalización
+                content_for_markers = content_data.get("content", "")
+                if isinstance(content_for_markers, dict):
+                    content_for_markers = json.dumps(content_for_markers, ensure_ascii=False)
+                markers = ContentPersonalizationService.extract_markers(
+                    content_for_markers or json.dumps(content_data.get("interactive_data", {}))
+                )
+                
+                # Crear objeto de contenido
+                content = TopicContent(
+                    topic_id=content_data.get("topic_id"),
+                    content_type=content_data.get("content_type"),
+                    content=content_data.get("content", ""),
+                    interactive_data=content_data.get("interactive_data"),
+                    learning_methodologies=content_data.get("learning_methodologies"),
+                    adaptation_options=content_data.get("metadata"),
+                    resources=content_data.get("resources"),
+                    web_resources=content_data.get("web_resources"),
+                    generation_prompt=content_data.get("generation_prompt"),
+                    ai_credits=content_data.get("ai_credits", True),
+                    personalization_markers=markers,
+                    slide_template=content_data.get("slide_template", {}),
+                    status=content_data.get("status", "draft"),
+                    order=content_data.get("order"),
+                    parent_content_id=content_data.get("parent_content_id")
+                )
+                
+                # Insertar en la base de datos
+                result = self.collection.insert_one(content.to_dict(), session=session)
+                created_ids.append(str(result.inserted_id))
+            
+            # Actualizar métricas de tipos de contenido
+            for content_type, count in content_types_usage.items():
+                self.content_type_service.collection.update_one(
+                    {"code": content_type},
+                    {"$inc": {"usage_count": count}},
+                    session=session
+                )
+            
+            # Confirmar transacción
+            session.commit_transaction()
+            transaction_active = False
+            
+            logging.info(f"Creados {len(created_ids)} contenidos en lote exitosamente")
+            return True, created_ids
+            
+        except Exception as e:
+            # Solo hacer rollback si la transacción está activa
+            if transaction_active:
+                try:
+                    session.abort_transaction()
+                except Exception:
+                    pass  # Ignorar errores en abort si ya fue abortada
+            
+            error_msg = str(e)
+            logging.error(f"Error en creación bulk: {error_msg}")
+            return False, error_msg
+            
+        finally:
+            session.end_session()
+    
+    def _validate_sequential_order(self, contents_data: List[Dict]) -> None:
+        """
+        Valida que el orden secuencial sea consistente si se proporciona.
+        
+        Args:
+            contents_data: Lista de datos de contenidos
+            
+        Raises:
+            ValueError: Si el orden no es válido
+        """
+        # Agrupar por topic_id y parent_content_id para validar orden
+        groups = {}
+        
+        for i, content_data in enumerate(contents_data):
+            topic_id = content_data.get("topic_id")
+            parent_id = content_data.get("parent_content_id")
+            order = content_data.get("order")
+            
+            if order is not None:
+                group_key = f"{topic_id}_{parent_id or 'root'}"
+                
+                if group_key not in groups:
+                    groups[group_key] = []
+                
+                groups[group_key].append({
+                    "index": i,
+                    "order": order,
+                    "content_type": content_data.get("content_type")
+                })
+        
+        # Validar cada grupo
+        for group_key, items in groups.items():
+            if len(items) > 1:
+                # Ordenar por order
+                items.sort(key=lambda x: x["order"])
+                
+                # Verificar que no haya duplicados
+                orders = [item["order"] for item in items]
+                if len(orders) != len(set(orders)):
+                    duplicates = [order for order in set(orders) if orders.count(order) > 1]
+                    raise ValueError(f"Orden duplicado encontrado en grupo {group_key}: {duplicates}")
+                
+                # Verificar secuencia consecutiva desde 1
+                expected_order = 1
+                for item in items:
+                    if item["order"] != expected_order:
+                        raise ValueError(f"Orden secuencial incorrecto en grupo {group_key}: esperado {expected_order}, encontrado {item['order']}")
+                    expected_order += 1
+
     def get_topic_content(self, topic_id: str, content_type: str = None) -> List[Dict]:
         """
         Obtiene contenido de un tema, opcionalmente filtrado por tipo.
