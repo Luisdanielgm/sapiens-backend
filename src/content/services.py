@@ -1,6 +1,6 @@
 from typing import Tuple, List, Dict, Optional, Any
 from bson import ObjectId
-from datetime import datetime
+from datetime import datetime, timedelta
 import json
 import logging
 
@@ -76,6 +76,13 @@ class ContentTypeService(VerificationBaseService):
         if content_type:
             content_type["_id"] = str(content_type["_id"])
         return content_type
+
+# Default status mapping by content type
+DEFAULT_STATUS_BY_TYPE = {
+    "slide": ["draft", "active", "published", "skeleton", "html_ready", "narrative_ready"],
+    "default": ["draft", "active", "published"]
+}
+
 
 class ContentService(VerificationBaseService):
     """
@@ -717,48 +724,83 @@ class ContentService(VerificationBaseService):
                     raise ValueError(f"Orden secuencial incorrecto en grupo {group_key}: esperado {expected_order}, encontrado {item['order']}")
                 expected_order += 1
 
-    def get_topic_content(self, topic_id: str, content_type: str = None) -> List[Dict]:
+    def get_topic_content(self, topic_id: str, content_type: str = None, status_filter: Optional[List[str]] = None, include_metadata: bool = True, limit: Optional[int] = None, skip: int = 0) -> List[Dict]:
         """
         Obtiene contenido de un tema, opcionalmente filtrado por tipo.
         Ordena por campo 'order' ascendente, con fallback a created_at descendente.
 
-        Args:
-            topic_id: ID del tema
-            content_type: Tipo específico de contenido (opcional)
+        Parámetros:
+            status_filter: Lista de estados a filtrar (ej: ['skeleton','html_ready'])
+            include_metadata: Si True (default) devuelve documentos completos para compatibilidad hacia atrás.
+                            Si False, devuelve solo campos mínimos para optimizar performance.
+            limit, skip: Paginación opcional
 
-        Returns:
-            Lista de contenidos ordenados
+        Compatibilidad hacia atrás: include_metadata=True (default) devuelve documentos completos como en versiones anteriores;
+                            cuando es False, se aplica una proyección mínima.
         """
         try:
-            # Definir estados según el tipo de contenido
-            if content_type == "slide":
-                status_filter = {"$in": ["draft", "active", "published", "skeleton", "html_ready", "narrative_ready"]}
-            else:
-                status_filter = {"$in": ["draft", "active", "published"]}
+            # Construir filtro de status por defecto según content_type si no se especifica
+            if status_filter is None:
+                status_filter = DEFAULT_STATUS_BY_TYPE.get(content_type, DEFAULT_STATUS_BY_TYPE["default"])
 
             query = {
                 "topic_id": ObjectId(topic_id),
-                "status": status_filter
+                "status": {"$in": status_filter}
             }
 
             if content_type:
                 query["content_type"] = content_type
 
-            # Ordenamiento: primero por 'order' ascendente (nulls last), luego por created_at descendente
-            contents = list(self.collection.find(query).sort([
-                ("order", 1),  # Ascendente, valores null van al final
-                ("created_at", -1)  # Descendente como fallback
-            ]))
+            # Proyección: por defecto (include_metadata=True) devuelve documentos completos para compatibilidad hacia atrás
+            # Solo usar proyección mínima si include_metadata es explícitamente False
+            if include_metadata:
+                # Documentos completos por defecto para mantener compatibilidad
+                projection = None
+            else:
+                # Si no se solicita metadata, usar proyección mínima
+                projection = {
+                    "content_type": 1,
+                    "order": 1,
+                    "status": 1,
+                    "parent_content_id": 1
+                }
+
+            # Usar aggregation pipeline para soportar sorting con nulls y paginación de manera consistente
+            pipeline = [
+                {"$match": query},
+                # Añadir a pipeline campo que indica si order es null para ordenar correctamente
+                {"$addFields": {"_order_null": {"$eq": [ {"$ifNull": ["$order", "__NULL__"]}, "__NULL__"] }}},
+                {"$sort": {"_order_null": 1, "order": 1, "created_at": -1}}
+            ]
+
+            # Solo añadir etapa de proyección si se especifica una
+            if projection is not None:
+                pipeline.append({"$project": projection})
+
+            if skip and skip > 0:
+                pipeline.append({"$skip": int(skip)})
+            if limit and limit > 0:
+                pipeline.append({"$limit": int(limit)})
+
+            contents_cursor = self.collection.aggregate(pipeline)
+            contents = list(contents_cursor)
 
             # Convertir ObjectIds a strings
             for content in contents:
-                content["_id"] = str(content["_id"])
-                content["topic_id"] = str(content["topic_id"])
+                if content.get("_id"):
+                    content["_id"] = str(content["_id"])
+                if content.get("topic_id"):
+                    try:
+                        content["topic_id"] = str(content["topic_id"])
+                    except Exception:
+                        pass
                 if content.get("creator_id"):
                     content["creator_id"] = str(content["creator_id"])
                 if content.get("parent_content_id"):
-                    content["parent_content_id"] = str(content["parent_content_id"])
-
+                    try:
+                        content["parent_content_id"] = str(content["parent_content_id"])
+                    except Exception:
+                        content["parent_content_id"] = content.get("parent_content_id")
             return contents
 
         except Exception as e:
@@ -990,7 +1032,7 @@ class ContentService(VerificationBaseService):
     
     def embed_content_in_slide(self, slide_id: str, content_id: str, embed_position: str = 'bottom'):
         """
-        Embebe un contenido dentro de una diapositiva.
+        Embebe uncontenido dentro de una diapositiva.
         """
         return self.embedded_content_service.embed_content_in_slide(slide_id, content_id, embed_position)
     
@@ -1223,30 +1265,158 @@ class ContentService(VerificationBaseService):
     def get_slide_generation_status(self, topic_id: str) -> Dict:
         """
         Retorna estadísticas sobre el estado de generación de las diapositivas
-        de un tema. Devuelve conteos por estado (skeleton, html_ready, narrative_ready, draft, total, otros).
+        de un tema. Utiliza aggregation pipeline para obtener métricas más detalladas:
+            - counts por estado
+            - slides_with_html, slides_with_narrative, slides_complete (ambos)
+            - completion_percentage
+            - average_generation_time (ms) basado en updated_at - created_at cuando esté disponible
+            - estimated_time_remaining (ms) = avg_gen_time * pending_count
+            - last_updated_slide (id + timestamp)
+            - progress_trend: lista de counts por día (últimos 7 días)
         """
         try:
-            query = {
-                "topic_id": ObjectId(topic_id),
-                "content_type": "slide"
+            match_stage = {
+                "$match": {
+                    "topic_id": ObjectId(topic_id),
+                    "content_type": "slide",
+                    "status": {"$ne": "deleted"}
+                }
             }
-            slides = list(self.collection.find(query, {"status": 1}))
-            stats = {
-                "skeleton": 0,
-                "html_ready": 0,
-                "narrative_ready": 0,
-                "draft": 0,
-                "other": 0,
-                "total": 0
+
+            # Pipeline para métricas agregadas
+            pipeline = [
+                match_stage,
+                {"$project": {
+                    "status": 1,
+                    "content_html": 1,
+                    "narrative_text": 1,
+                    "created_at": 1,
+                    "updated_at": 1
+                }},
+                {"$addFields": {
+                    "has_html": {"$cond": [{"$ifNull": ["$content_html", False]}, 1, 0]},
+                    "has_narrative": {"$cond": [{"$ifNull": ["$narrative_text", False]}, 1, 0]},
+                    "gen_time_ms": {
+                        "$cond": [
+                            {"$and": [{"$ifNull": ["$created_at", False]}, {"$ifNull": ["$updated_at", False]}]},
+                            {"$subtract": ["$updated_at", "$created_at"]},
+                            None
+                        ]
+                    },
+                    "updated_day": {"$dateToString": {"format": "%Y-%m-%d", "date": {"$ifNull": ["$updated_at", "$created_at"]}}}
+                }},
+                {"$group": {
+                    "_id": None,
+                    "total": {"$sum": 1},
+                    "by_status": {"$push": "$status"},
+                    "slides_with_html": {"$sum": "$has_html"},
+                    "slides_with_narrative": {"$sum": "$has_narrative"},
+                    "slides_complete": {"$sum": {"$cond": [{"$and": [{"$eq": ["$has_html", 1]}, {"$eq": ["$has_narrative", 1]}]}, 1, 0]}},
+                    "gen_times": {"$push": "$gen_time_ms"},
+                    "last_updated": {"$max": "$updated_at"},
+                    "updated_days": {"$push": "$updated_day"}
+                }},
+            ]
+
+            agg_result = list(self.collection.aggregate(pipeline))
+            if not agg_result:
+                # No slides found -> return zeros
+                return {
+                    "total": 0,
+                    "by_status": {},
+                    "slides_with_html": 0,
+                    "slides_with_narrative": 0,
+                    "slides_complete": 0,
+                    "completion_percentage": 0.0,
+                    "average_generation_time_ms": None,
+                    "estimated_time_remaining_ms": None,
+                    "last_updated_slide": None,
+                    "progress_trend": []
+                }
+
+            data = agg_result[0]
+
+            # Compute by_status counts
+            by_status_counts = {}
+            for s in data.get("by_status", []):
+                if not s:
+                    s = "unknown"
+                by_status_counts[s] = by_status_counts.get(s, 0) + 1
+
+            total = data.get("total", 0)
+            slides_with_html = int(data.get("slides_with_html", 0))
+            slides_with_narrative = int(data.get("slides_with_narrative", 0))
+            slides_complete = int(data.get("slides_complete", 0))
+
+            completion_percentage = round((slides_complete / total * 100), 2) if total > 0 else 0.0
+
+            # Average generation time (ms) ignoring nulls
+            gen_times = [g for g in data.get("gen_times", []) if isinstance(g, (int, float))]
+            avg_gen_time = None
+            if gen_times:
+                try:
+                    avg_gen_time = sum(gen_times) / len(gen_times)
+                    # ensure numeric
+                    avg_gen_time = float(avg_gen_time)
+                except Exception:
+                    avg_gen_time = None
+
+            # Estimated time remaining: avg_gen_time * pending_count (where pending = total - slides_with_html)
+            pending_count = total - slides_with_html
+            estimated_remaining = None
+            if avg_gen_time is not None and pending_count > 0:
+                estimated_remaining = int(avg_gen_time * pending_count)
+
+            last_updated_ts = data.get("last_updated")
+            last_updated_slide_info = None
+            try:
+                # Find the slide document with the last_updated timestamp to return id
+                if last_updated_ts:
+                    doc = self.collection.find_one({
+                        "topic_id": ObjectId(topic_id),
+                        "content_type": "slide",
+                        "updated_at": last_updated_ts
+                    }, {"_id": 1, "updated_at": 1})
+                    if doc:
+                        last_updated_slide_info = {
+                            "content_id": str(doc["_id"]),
+                            "updated_at": doc.get("updated_at").isoformat() if isinstance(doc.get("updated_at"), datetime) else doc.get("updated_at")
+                        }
+            except Exception:
+                last_updated_slide_info = None
+
+            # Progress trend: count of updates per day for the last 7 days
+            try:
+                # Build trend pipeline
+                from_date = datetime.utcnow() - timedelta(days=6)
+                trend_pipeline = [
+                    {"$match": {
+                        "topic_id": ObjectId(topic_id),
+                        "content_type": "slide",
+                        "updated_at": {"$gte": from_date}
+                    }},
+                    {"$project": {"day": {"$dateToString": {"format": "%Y-%m-%d", "date": {"$ifNull": ["$updated_at", "$created_at"]}}}}},
+                    {"$group": {"_id": "$day", "count": {"$sum": 1}}},
+                    {"$sort": {"_id": 1}}
+                ]
+                trend_docs = list(self.collection.aggregate(trend_pipeline))
+                progress_trend = [{ "date": t["_id"], "count": t["count"] } for t in trend_docs]
+            except Exception:
+                progress_trend = []
+
+            result = {
+                "total": total,
+                "by_status": by_status_counts,
+                "slides_with_html": slides_with_html,
+                "slides_with_narrative": slides_with_narrative,
+                "slides_complete": slides_complete,
+                "completion_percentage": completion_percentage,
+                "average_generation_time_ms": avg_gen_time,
+                "estimated_time_remaining_ms": estimated_remaining,
+                "last_updated_slide": last_updated_slide_info,
+                "progress_trend": progress_trend
             }
-            for s in slides:
-                stats["total"] += 1
-                st = s.get("status", "").lower()
-                if st in stats:
-                    stats[st] += 1
-                else:
-                    stats["other"] += 1
-            return stats
+            return result
         except Exception as e:
             logging.error(f"Error obteniendo estado de generación de slides para topic {topic_id}: {str(e)}")
             return {}
@@ -1430,6 +1600,342 @@ class ContentService(VerificationBaseService):
             logging.error(f"Error obteniendo detalles de estado para slide {content_id}: {str(e)}")
             return {}
 
+    def check_topic_slides_completeness(self, topic_id: str) -> Dict:
+        """
+        Verifica la completitud de las diapositivas de un tema:
+            - Calcula porcentajes de completitud (html + narrative)
+            - Identifica slides faltantes o incompletas con razones
+            - Valida orden secuencial correcto por parent_content_id
+            - Valida consistencia de template_snapshot entre slides (si aplica)
+        Retorna un reporte detallado.
+        """
+        try:
+            query = {
+                "topic_id": ObjectId(topic_id),
+                "content_type": "slide",
+                "status": {"$ne": "deleted"}
+            }
+            slides = list(self.collection.find(query, {
+                "_id": 1, "order": 1, "parent_content_id": 1,
+                "content_html": 1, "narrative_text": 1, "full_text": 1,
+                "template_snapshot": 1, "status": 1, "created_at": 1, "updated_at": 1
+            }).sort([("order", 1), ("created_at", 1)]))
+
+            total = len(slides)
+            if total == 0:
+                return {
+                    "total": 0,
+                    "percent_complete": 0.0,
+                    "missing_or_incomplete": [],
+                    "sequence_errors": [],
+                    "template_snapshot_issues": [],
+                    "per_parent": {}
+                }
+
+            missing_or_incomplete = []
+            template_snapshots = {}
+            per_parent = {}
+            sequence_errors = []
+
+            for s in slides:
+                sid = str(s["_id"])
+                order = s.get("order")
+                parent = s.get("parent_content_id")
+                try:
+                    parent_key = str(parent) if parent is not None else "root"
+                except Exception:
+                    parent_key = "root"
+
+                if parent_key not in per_parent:
+                    per_parent[parent_key] = {"slides": [], "orders": []}
+
+                has_html = bool(s.get("content_html"))
+                has_narrative = bool(s.get("narrative_text"))
+                has_full_text = bool(s.get("full_text"))
+                status = s.get("status", "")
+
+                # Reasons for incomplete
+                reasons = []
+                if not has_html:
+                    reasons.append("missing_html")
+                if not has_narrative:
+                    reasons.append("missing_narrative")
+                # skeleton is acceptable but still incomplete for virtualization if no html
+                if status == "skeleton" and not has_html:
+                    reasons.append("skeleton_without_html")
+                if not reasons:
+                    # complete slide
+                    pass
+                else:
+                    missing_or_incomplete.append({
+                        "content_id": sid,
+                        "order": order,
+                        "parent_content_id": parent_key,
+                        "reasons": reasons,
+                        "status": status
+                    })
+
+                # Track template_snapshot consistency: build a fingerprint of keys for simplicity
+                ts = s.get("template_snapshot")
+                if ts is None:
+                    # record missing template_snapshot
+                    template_snapshots.setdefault("missing", []).append(sid)
+                else:
+                    try:
+                        # fingerprint as sorted keys list
+                        keys = sorted(list(ts.keys())) if isinstance(ts, dict) else ["non_dict_snapshot"]
+                        key_sig = tuple(keys)
+                        template_snapshots.setdefault(key_sig, []).append(sid)
+                    except Exception:
+                        template_snapshots.setdefault("invalid", []).append(sid)
+
+                per_parent[parent_key]["slides"].append({
+                    "content_id": sid,
+                    "order": order,
+                    "has_html": has_html,
+                    "has_narrative": has_narrative,
+                    "status": status
+                })
+                if isinstance(order, int):
+                    per_parent[parent_key]["orders"].append(order)
+
+            # Validate sequence per parent: consecutive from 1
+            for parent_key, info in per_parent.items():
+                orders = sorted([o for o in info["orders"] if isinstance(o, int)])
+                if not orders:
+                    continue
+                if orders[0] != 1:
+                    sequence_errors.append({
+                        "parent_content_id": parent_key,
+                        "error": "sequence_not_starting_at_1",
+                        "orders": orders
+                    })
+                expected = 1
+                for o in orders:
+                    if o != expected:
+                        sequence_errors.append({
+                            "parent_content_id": parent_key,
+                            "error": "sequence_gap_or_mismatch",
+                            "expected": expected,
+                            "found": o,
+                            "orders": orders
+                        })
+                        break
+                    expected += 1
+
+            # Template snapshot issues: if more than one signature besides 'missing' exists -> inconsistent
+            ts_issues = []
+            sigs = [k for k in template_snapshots.keys()]
+            # Count distinct non-missing signatures
+            non_missing_sigs = [k for k in sigs if k != "missing" and k != "invalid"]
+            if len(set(non_missing_sigs)) > 1:
+                ts_issues.append({
+                    "issue": "inconsistent_template_signatures",
+                    "signatures_count": len(set(non_missing_sigs)),
+                    "details": {str(k): v for k, v in template_snapshots.items()}
+                })
+            if "missing" in template_snapshots:
+                ts_issues.append({
+                    "issue": "missing_template_snapshot",
+                    "count": len(template_snapshots.get("missing", [])),
+                    "examples": template_snapshots.get("missing", [])[:5]
+                })
+            if "invalid" in template_snapshots:
+                ts_issues.append({
+                    "issue": "invalid_template_snapshot",
+                    "count": len(template_snapshots.get("invalid", [])),
+                    "examples": template_snapshots.get("invalid", [])[:5]
+                })
+
+            complete_count = total - len(missing_or_incomplete)
+            percent_complete = round((complete_count / total * 100), 2)
+
+            report = {
+                "total": total,
+                "complete_count": complete_count,
+                "percent_complete": percent_complete,
+                "missing_or_incomplete": missing_or_incomplete,
+                "sequence_errors": sequence_errors,
+                "template_snapshot_issues": ts_issues,
+                "per_parent": per_parent
+            }
+            return report
+        except Exception as e:
+            logging.error(f"Error verificando completitud de slides para topic {topic_id}: {e}")
+            return {}
+
+    def get_topic_slides_optimized(self, topic_id: str, status_filter: Optional[List[str]] = None,
+                                   render_engine: Optional[str] = None, group_by_parent: bool = False,
+                                   include_progress: bool = True, limit: Optional[int] = None, skip: int = 0) -> Dict:
+        """
+        Método optimizado para consultas de diapositivas con filtros avanzados.
+        Soporta:
+            - filtros por status (lista),
+            - filtro por render_engine (ej: 'raw_html'),
+            - agrupamiento por parent_content_id,
+            - inclusión de metadatos de progreso (total, completed, pending),
+            - paginación (limit, skip)
+
+        Retorna:
+            {
+                "stats": { total, completed, pending, slides_with_html, slides_with_narrative },
+                "slides": [ ... ]  # lista de slides (paginada si se solicita)
+                "by_parent": { parent_id: { stats:..., slides: [...] } }  # opcional
+            }
+        """
+        try:
+            if status_filter is None:
+                status_filter = ["draft", "active", "published", "skeleton", "html_ready", "narrative_ready"]
+
+            match = {
+                "topic_id": ObjectId(topic_id),
+                "content_type": "slide",
+                "status": {"$in": status_filter}
+            }
+            if render_engine:
+                match["render_engine"] = render_engine
+
+            # Base pipeline to compute per-slide flags and generation times
+            pipeline = [
+                {"$match": match},
+                {"$project": {
+                    "_id": 1,
+                    "order": 1,
+                    "parent_content_id": 1,
+                    "status": 1,
+                    "content_html": 1,
+                    "narrative_text": 1,
+                    "created_at": 1,
+                    "updated_at": 1,
+                    "render_engine": 1,
+                    "has_html": {"$cond": [{"$ifNull": ["$content_html", False]}, 1, 0]},
+                    "has_narrative": {"$cond": [{"$ifNull": ["$narrative_text", False]}, 1, 0]},
+                    "gen_time_ms": {
+                        "$cond": [
+                            {"$and": [{"$ifNull": ["$created_at", False]}, {"$ifNull": ["$updated_at", False]}]},
+                            {"$subtract": ["$updated_at", "$created_at"]},
+                            None
+                        ]
+                    }
+                }},
+                {"$sort": {"order": 1, "created_at": 1}}
+            ]
+
+            # For pagination of slides list, create a copy of pipeline for slides retrieval
+            slides_pipeline = list(pipeline)
+            if skip and skip > 0:
+                slides_pipeline.append({"$skip": int(skip)})
+            if limit and limit > 0:
+                slides_pipeline.append({"$limit": int(limit)})
+
+            slides_cursor = self.collection.aggregate(slides_pipeline)
+            slides_list = []
+            for s in slides_cursor:
+                try:
+                    slide_item = {
+                        "content_id": str(s["_id"]),
+                        "order": s.get("order"),
+                        "parent_content_id": str(s.get("parent_content_id")) if s.get("parent_content_id") else None,
+                        "status": s.get("status"),
+                        "has_html": bool(s.get("has_html")),
+                        "has_narrative": bool(s.get("has_narrative")),
+                        "created_at": s.get("created_at").isoformat() if isinstance(s.get("created_at"), datetime) else s.get("created_at"),
+                        "updated_at": s.get("updated_at").isoformat() if isinstance(s.get("updated_at"), datetime) else s.get("updated_at"),
+                        "render_engine": s.get("render_engine")
+                    }
+                except Exception:
+                    slide_item = {"content_id": str(s.get("_id"))}
+                slides_list.append(slide_item)
+
+            # Aggregation for overall stats (single query)
+            stats_pipeline = [
+                {"$match": match},
+                {"$group": {
+                    "_id": None,
+                    "total": {"$sum": 1},
+                    "slides_with_html": {"$sum": {"$cond": [{"$ifNull": ["$content_html", False]}, 1, 0]}},
+                    "slides_with_narrative": {"$sum": {"$cond": [{"$ifNull": ["$narrative_text", False]}, 1, 0]}},
+                    "slides_complete": {"$sum": {"$cond": [{"$and": [{"$ifNull": ["$content_html", False]}, {"$ifNull": ["$narrative_text", False]}]}, 1, 0]}},
+                    "avg_gen_time_ms": {"$avg": {"$cond": [
+                        {"$and": [{"$ifNull": ["$created_at", False]}, {"$ifNull": ["$updated_at", False]}]},
+                        {"$subtract": ["$updated_at", "$created_at"]},
+                        None
+                    ]}}
+                }}
+            ]
+            stats_res = list(self.collection.aggregate(stats_pipeline))
+            if stats_res:
+                st = stats_res[0]
+                total = int(st.get("total", 0))
+                slides_with_html = int(st.get("slides_with_html", 0))
+                slides_with_narrative = int(st.get("slides_with_narrative", 0))
+                slides_complete = int(st.get("slides_complete", 0))
+                avg_gen_time = st.get("avg_gen_time_ms")
+            else:
+                total = slides_with_html = slides_with_narrative = slides_complete = 0
+                avg_gen_time = None
+
+            pending = total - slides_with_html
+            completion_percentage = round((slides_complete / total * 100), 2) if total > 0 else 0.0
+            estimated_time_remaining_ms = int(avg_gen_time * pending) if (avg_gen_time is not None and pending > 0) else None
+
+            result = {
+                "stats": {
+                    "total": total,
+                    "slides_with_html": slides_with_html,
+                    "slides_with_narrative": slides_with_narrative,
+                    "slides_complete": slides_complete,
+                    "pending": pending,
+                    "completion_percentage": completion_percentage,
+                    "average_generation_time_ms": float(avg_gen_time) if avg_gen_time is not None else None,
+                    "estimated_time_remaining_ms": estimated_time_remaining_ms
+                },
+                "slides": slides_list
+            }
+
+            if group_by_parent:
+                # Group slides by parent_content_id and compute per-parent stats
+                group_pipeline = [
+                    {"$match": match},
+                    {"$project": {
+                        "parent_content_id": {"$ifNull": ["$parent_content_id", None]},
+                        "has_html": {"$cond": [{"$ifNull": ["$content_html", False]}, 1, 0]},
+                        "has_narrative": {"$cond": [{"$ifNull": ["$narrative_text", False]}, 1, 0]},
+                        "complete": {"$cond": [{"$and": [{"$ifNull": ["$content_html", False]}, {"$ifNull": ["$narrative_text", False]}]}, 1, 0]},
+                        "order": 1
+                    }},
+                    {"$group": {
+                        "_id": {"parent": "$parent_content_id"},
+                        "total": {"$sum": 1},
+                        "with_html": {"$sum": "$has_html"},
+                        "with_narrative": {"$sum": "$has_narrative"},
+                        "complete": {"$sum": "$complete"},
+                        "orders": {"$push": "$order"}
+                    }}
+                ]
+                grouped = list(self.collection.aggregate(group_pipeline))
+                by_parent = {}
+                for g in grouped:
+                    parent_key = str(g["_id"]["parent"]) if g["_id"]["parent"] else "root"
+                    total_p = int(g.get("total", 0))
+                    with_html_p = int(g.get("with_html", 0))
+                    with_narrative_p = int(g.get("with_narrative", 0))
+                    complete_p = int(g.get("complete", 0))
+                    by_parent[parent_key] = {
+                        "total": total_p,
+                        "with_html": with_html_p,
+                        "with_narrative": with_narrative_p,
+                        "complete": complete_p,
+                        "orders": sorted([o for o in g.get("orders", []) if isinstance(o, int)])
+                    }
+                result["by_parent"] = by_parent
+
+            return result
+        except Exception as e:
+            logging.error(f"Error en get_topic_slides_optimized para topic {topic_id}: {e}")
+            return {}
+
+    
     def adapt_content_to_methodology(self, content_id: str, methodology_code: str) -> Tuple[bool, Dict]:
         """Adapta un contenido según una metodología de aprendizaje."""
         try:

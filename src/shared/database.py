@@ -230,6 +230,181 @@ def setup_database_indexes():
         indigenous_db.languages.create_index([("region", ASCENDING)])
         indigenous_db.content.create_index([("language_id", ASCENDING)])
 
+        # ------------------------------------------------------------
+        # Índices específicos para optimizar consultas de contenido/slides
+        # ------------------------------------------------------------
+        try:
+            content_coll = db.content
+            existing_indexes = content_coll.index_information()
+        except Exception as e:
+            logger.error(f"No se pudo obtener información de índices de la colección content: {str(e)}")
+            content_coll = None
+            existing_indexes = {}
+
+        def _ensure_index(coll, keys, name=None, **kwargs):
+            """
+            Helper local para crear índices con logging, medición de tiempo,
+            manejo de conflictos y recreación si es necesario.
+            - coll: colección
+            - keys: lista de tuplas para la clave del índice
+            - name: nombre explícito del índice
+            - kwargs: opciones adicionales para create_index (partialFilterExpression, unique, etc.)
+            """
+            if coll is None:
+                logger.warning("Colección no disponible para crear índices.")
+                return None
+
+            try:
+                idx_info = coll.index_information()
+            except Exception as e:
+                logger.warning(f"No se pudo leer index_information para {coll.name}: {str(e)}")
+                idx_info = {}
+
+            # Si ya existe un índice con este nombre, no intentamos recrearlo
+            if name and name in idx_info:
+                logger.debug(f"Índice '{name}' ya existe en {coll.name}.")
+                return name
+
+            # Buscar índices con las mismas keys (mismo orden)
+            keys_tuple = tuple(keys)
+            existing_same_key = None
+            for iname, info in idx_info.items():
+                # info['key'] is a list of tuples like [('topic_id', 1), ('order', 1)]
+                if 'key' in info:
+                    existing_key = tuple(info['key'])
+                    if existing_key == keys_tuple:
+                        existing_same_key = iname
+                        break
+
+            # Si existe un índice con las mismas keys pero diferente nombre, eliminarlo para unificar
+            if existing_same_key and name and existing_same_key != name:
+                try:
+                    logger.info(f"Eliminando índice existente '{existing_same_key}' en {coll.name} para recrear con nombre '{name}'")
+                    coll.drop_index(existing_same_key)
+                except Exception as e:
+                    logger.warning(f"No se pudo eliminar el índice '{existing_same_key}': {str(e)}")
+
+            # Crear el índice y medir tiempo
+            try:
+                start_ts = datetime.utcnow()
+                created_name = coll.create_index(keys, name=name, **kwargs)
+                duration = (datetime.utcnow() - start_ts).total_seconds()
+                logger.info(f"Índice '{created_name}' creado en {coll.name} en {duration:.3f}s (keys={keys}, options={kwargs})")
+                # Verificación simple
+                try:
+                    new_info = coll.index_information()
+                    if created_name not in new_info:
+                        logger.warning(f"Índice '{created_name}' no aparece en index_information() tras creación.")
+                except Exception as e:
+                    logger.warning(f"No se pudo verificar index_information tras crear índice '{created_name}': {str(e)}")
+                return created_name
+            except Exception as e:
+                # Intentar detectar conflicto por índice existente y recrearlo
+                logger.warning(f"Error creando índice {name or keys} en {coll.name}: {str(e)}. Intentando resolver conflictos...")
+                try:
+                    # Intentar eliminar índices con las mismas keys (si existen)
+                    for iname, info in idx_info.items():
+                        if 'key' in info and tuple(info['key']) == keys_tuple:
+                            try:
+                                logger.info(f"Eliminando índice conflictivo '{iname}' en {coll.name}")
+                                coll.drop_index(iname)
+                            except Exception as ex:
+                                logger.warning(f"No se pudo eliminar índice conflictivo '{iname}': {str(ex)}")
+                    # Reintentar creación
+                    start_ts = datetime.utcnow()
+                    created_name = coll.create_index(keys, name=name, **kwargs)
+                    duration = (datetime.utcnow() - start_ts).total_seconds()
+                    logger.info(f"Índice '{created_name}' creado en {coll.name} en reintento ({duration:.3f}s)")
+                    return created_name
+                except Exception as e2:
+                    logger.error(f"No se pudo crear índice {name or keys} en {coll.name} tras reintento: {str(e2)}")
+                    return None
+
+        # Definir y crear índices demandados
+        try:
+            # Índice compuesto: topic_id + content_type + order
+            _ensure_index(
+                content_coll,
+                [("topic_id", ASCENDING), ("content_type", ASCENDING), ("order", ASCENDING)],
+                name="idx_topic_content_type_order",
+                background=True
+            )
+
+            # Índice para filtros rápidos por estado: topic_id + status
+            _ensure_index(
+                content_coll,
+                [("topic_id", ASCENDING), ("status", ASCENDING)],
+                name="idx_topic_status",
+                background=True
+            )
+
+            # Índice global por content_type + status
+            _ensure_index(
+                content_coll,
+                [("content_type", ASCENDING), ("status", ASCENDING)],
+                name="idx_content_type_status",
+                background=True
+            )
+
+            # Índice compuesto completo: topic_id + content_type + status + order
+            _ensure_index(
+                content_coll,
+                [("topic_id", ASCENDING), ("content_type", ASCENDING), ("status", ASCENDING), ("order", ASCENDING)],
+                name="idx_topic_content_type_status_order",
+                background=True
+            )
+
+            # Índice para consultas agrupadas por parent_content_id + order
+            _ensure_index(
+                content_coll,
+                [("parent_content_id", ASCENDING), ("order", ASCENDING)],
+                name="idx_parent_content_order",
+                background=True
+            )
+
+            # Índices parciales dirigidos a slides (optimiza espacio y velocidad para consultas de slides)
+            _ensure_index(
+                content_coll,
+                [("topic_id", ASCENDING), ("order", ASCENDING)],
+                name="idx_slide_topic_order_partial",
+                background=True,
+                partialFilterExpression={"content_type": "slide"}
+            )
+
+            _ensure_index(
+                content_coll,
+                [("parent_content_id", ASCENDING), ("order", ASCENDING)],
+                name="idx_slide_parent_order_partial",
+                background=True,
+                partialFilterExpression={"content_type": "slide"}
+            )
+
+            # Índices de texto para búsquedas en title y full_text
+            _ensure_index(
+                content_coll,
+                [("title", TEXT), ("full_text", TEXT)],
+                name="idx_text_title_full_text",
+                background=True
+            )
+
+            # Índices temporales para consultas por progreso/tiempo
+            _ensure_index(
+                content_coll,
+                [("created_at", ASCENDING)],
+                name="idx_content_created_at",
+                background=True
+            )
+            _ensure_index(
+                content_coll,
+                [("updated_at", ASCENDING)],
+                name="idx_content_updated_at",
+                background=True
+            )
+
+            logger.info("Índices específicos para colección 'content' creados/verificados correctamente.")
+        except Exception as e:
+            logger.error(f"Error creando índices específicos para 'content': {str(e)}")
+
         logger.info("Índices de base de datos configurados correctamente")
         return True
 
