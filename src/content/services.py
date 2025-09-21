@@ -15,6 +15,7 @@ from src.ai_monitoring.services import AIMonitoringService
 from .structured_sequence_service import StructuredSequenceService
 from .template_recommendation_service import TemplateRecommendationService
 from .embedded_content_service import EmbeddedContentService
+import bleach
 
 class ContentTypeService(VerificationBaseService):
     """
@@ -97,6 +98,126 @@ class ContentService(VerificationBaseService):
         except Exception:
             return False
 
+    def validate_slide_html_content(self, html_content: str) -> Tuple[bool, str]:
+        """
+        Valida que el HTML de una diapositiva sea seguro y tenga estructura básica.
+        Reglas:
+            - Debe ser str no vacío
+            - Tamaño máximo razonable (p.ej. 15000 caracteres para slides)
+            - No debe contener etiquetas peligrosas (<script>, <iframe>, <object>, <embed>, <link>, <meta>, <base>)
+            - No debe contener atributos de evento inline (onerror=, onclick=, etc.)
+            - No debe usar esquemas 'javascript:' en href/src ni data: que pueda incrustar HTML/scripts
+            - No debe contener expresiones CSS peligrosas (expression(), url(javascript:...))
+            - Comprobación básica de equilibrio de '<' y '>' para detectar fragmentos rotos
+        Retorna (True, "") si es válido, o (False, "mensaje de error") si no.
+        """
+        try:
+            if not isinstance(html_content, str):
+                logging.debug("validate_slide_html_content: contenido no es str")
+                return False, "HTML debe ser una cadena de texto"
+            raw = html_content
+            if not raw.strip():
+                logging.debug("validate_slide_html_content: contenido vacío o solo espacios")
+                return False, "HTML no debe estar vacío"
+
+            # Tamaño razonable para una slide individual
+            max_len = 15000
+            if len(raw) > max_len:
+                logging.warning(f"validate_slide_html_content: HTML demasiado largo ({len(raw)} > {max_len})")
+                return False, f"HTML excede el tamaño máximo permitido de {max_len} caracteres"
+
+            low = raw.lower()
+
+            # Prohibir tags peligrosos explícitos
+            dangerous_tags = ["script", "iframe", "object", "embed", "link", "meta", "base"]
+            for tag in dangerous_tags:
+                if f"<{tag}" in low or f"</{tag}" in low:
+                    logging.warning(f"validate_slide_html_content: encontrado tag prohibido <{tag}>")
+                    return False, f"HTML contiene etiqueta <{tag}> prohibida"
+
+            # Prohibir eventos inline (on*)
+            if re.search(r'on[a-z]+\s*=', low):
+                logging.warning("validate_slide_html_content: encontrado atributo de evento inline (on*)")
+                return False, "HTML contiene atributos de evento inline (on*) que están prohibidos"
+
+            # Prohibir javascript: URIs
+            if "javascript:" in low:
+                logging.warning("validate_slide_html_content: encontrado javascript: URI")
+                return False, "HTML contiene URIs javascript: que están prohibidas"
+
+            # Prohibir data: URIs that could embed scripts or HTML (basic)
+            if re.search(r'data:\s*text\/html', low) or re.search(r'data:\s*text\/javascript', low):
+                logging.warning("validate_slide_html_content: encontrado data:text/html o data:text/javascript")
+                return False, "HTML contiene data: URIs potencialmente peligrosas"
+
+            # CSS expression() and javascript in url()
+            if "expression(" in low or re.search(r'url\(\s*javascript:', low):
+                logging.warning("validate_slide_html_content: encontrado expression() o url(javascript:...) en CSS")
+                return False, "HTML contiene expresiones CSS potencialmente peligrosas"
+
+            # Comprobar equilibrio básico de <> para detectar HTML truncado
+            lt_count = raw.count("<")
+            gt_count = raw.count(">")
+            if abs(lt_count - gt_count) > 5:  # allow small imbalance for fragments, but not large mismatches
+                logging.debug(f"validate_slide_html_content: desequilibrio en etiquetas (<: {lt_count}, >: {gt_count})")
+                return False, "HTML parece estar mal formado (desequilibrio de etiquetas)"
+
+            # Comprobar número de etiquetas para evitar payloads excesivos
+            tag_count = len(re.findall(r"<[a-zA-Z]+[^\>]*>", raw))
+            if tag_count > 500:
+                logging.warning(f"validate_slide_html_content: demasiadas etiquetas HTML ({tag_count})")
+                return False, "HTML contiene demasiadas etiquetas; posiblemente intento de abuso"
+
+            # Comprobar existencia de contenido significativo (texto o tags comunes)
+            if not re.search(r"[A-Za-z0-9]", raw) and tag_count == 0:
+                logging.debug("validate_slide_html_content: sin texto alfanumérico ni etiquetas detectadas")
+                return False, "HTML no contiene contenido válido"
+
+            # Es aceptable si el HTML es un fragmento ligero; registrar advertencias cuando aplica
+            if tag_count == 0:
+                logging.debug("validate_slide_html_content: HTML parece ser texto plano o fragmento sin etiquetas")
+
+            logging.debug("validate_slide_html_content: HTML validado correctamente")
+            return True, ""
+        except Exception as e:
+            logging.error(f"Error validando HTML de slide: {str(e)}")
+            return False, f"Error validando HTML: {str(e)}"
+
+    def sanitize_slide_html_content(self, html: str) -> str:
+        """
+        Sanitiza el HTML de una diapositiva removiendo tags y atributos peligrosos.
+        Usa bleach con una allowlist para limpiar el contenido.
+        """
+        try:
+            if not html or not isinstance(html, str):
+                return ""
+
+            allowed_tags = [
+                'div', 'p', 'span', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6',
+                'ul', 'ol', 'li', 'a', 'img', 'strong', 'em', 'i', 'b',
+                'br', 'hr', 'blockquote', 'code', 'pre', 'table', 'tr', 'td',
+                'th', 'thead', 'tbody', 'caption'
+            ]
+            allowed_attrs = {
+                '*': ['class', 'style'],
+                'a': ['href', 'title'],
+                'img': ['src', 'alt', 'title'],
+                'table': ['border', 'cellpadding', 'cellspacing'],
+            }
+            allowed_protocols = ['http', 'https', 'mailto']
+
+            cleaned = bleach.clean(
+                html,
+                tags=allowed_tags,
+                attributes=allowed_attrs,
+                protocols=allowed_protocols,
+                strip=True  # Remover tags no permitidos en lugar de escapar
+            )
+            return cleaned
+        except Exception as e:
+            logging.error(f"Error sanitizando HTML: {str(e)}")
+            return ""  # Retornar vacío en caso de error para evitar inyección
+
     def create_content(self, content_data: Dict) -> Tuple[bool, str]:
         """
         Crea contenido de cualquier tipo (estático o interactivo).
@@ -131,6 +252,22 @@ class ContentService(VerificationBaseService):
                 if not self.slide_style_service.validate_slide_template(slide_template):
                     return False, "El slide_template no tiene una estructura válida"
 
+                # Validar nuevos campos de diapositiva si se proporcionan
+                content_html = content_data.get("content_html")
+                narrative_text = content_data.get("narrative_text")
+                full_text = content_data.get("full_text")
+
+                if content_html is not None:
+                    valid, msg = self.validate_slide_html_content(content_html)
+                    if not valid:
+                        return False, f"content_html inválido: {msg}"
+
+                if narrative_text is not None and not isinstance(narrative_text, str):
+                    return False, "narrative_text debe ser una cadena de texto si se proporciona"
+
+                if full_text is not None and not isinstance(full_text, str):
+                    return False, "full_text debe ser una cadena de texto si se proporciona"
+
             # Crear contenido explícitamente para mapear campos
             # Convertir content a string si es dict para el extractor de marcadores
             content_for_markers = content_data.get("content", "")
@@ -139,6 +276,28 @@ class ContentService(VerificationBaseService):
             markers = ContentPersonalizationService.extract_markers(
                 content_for_markers or json.dumps(content_data.get("interactive_data", {}))
             )
+
+            # Determinar estado inicial para diapositivas en función de los campos provistos
+            # SOLO si el cliente no proporcionó un status explícito
+            initial_status = content_data.get("status", "draft")
+            if content_type == "slide":
+                # Preservar status explícito del cliente si fue proporcionado
+                if "status" in content_data:
+                    initial_status = content_data["status"]
+                else:
+                    # Derivar status automáticamente solo cuando no se proporciona explícitamente
+                    ch = content_data.get("content_html")
+                    nt = content_data.get("narrative_text")
+                    ft = content_data.get("full_text")
+                    if ch and nt:
+                        initial_status = "narrative_ready"
+                    elif ch:
+                        initial_status = "html_ready"
+                    elif ft:
+                        initial_status = "skeleton"
+                    else:
+                        initial_status = "draft"
+
             content = TopicContent(
                 topic_id=topic_id,
                 content_type=content_type,
@@ -152,10 +311,19 @@ class ContentService(VerificationBaseService):
                 ai_credits=content_data.get("ai_credits", True),
                 personalization_markers=markers,
                 slide_template=content_data.get("slide_template", {}),  # Incluir slide_template
-                status=content_data.get("status", "draft")
+                status=initial_status,
+                content_html=content_data.get("content_html"),
+                narrative_text=content_data.get("narrative_text"),
+                full_text=content_data.get("full_text"),
+                order=content_data.get("order"),
+                parent_content_id=content_data.get("parent_content_id")
             )
             result = self.collection.insert_one(content.to_dict())
             
+            # Logging específico para creación de diapositivas con nuevos campos
+            if content_type == "slide":
+                logging.info(f"Slide creado para topic {topic_id} con id {result.inserted_id}. status={initial_status}, has_html={'content_html' in content_data}, has_narrative={'narrative_text' in content_data}")
+
             # Actualizar métricas del tipo de contenido
             self.content_type_service.collection.update_one(
                 {"code": content_type},
@@ -225,6 +393,25 @@ class ContentService(VerificationBaseService):
                                 raise ValueError(f"Contenido {i+1}, slide {j+1}: El campo 'order' es requerido en cada slide")
                             if not isinstance(slide.get("order"), int) or slide.get("order") < 1:
                                 raise ValueError(f"Contenido {i+1}, slide {j+1}: El campo 'order' debe ser un entero positivo")
+                            # Validar campos de cada slide si están presentes
+                            if "content_html" in slide and slide.get("content_html") is not None:
+                                valid, msg = self.validate_slide_html_content(slide.get("content_html"))
+                                if not valid:
+                                    raise ValueError(f"Contenido {i+1}, slide {j+1}: content_html inválido: {msg}")
+                            if "narrative_text" in slide and slide.get("narrative_text") is not None and not isinstance(slide.get("narrative_text"), str):
+                                raise ValueError(f"Contenido {i+1}, slide {j+1}: narrative_text debe ser una cadena de texto")
+                            if "full_text" in slide and slide.get("full_text") is not None and not isinstance(slide.get("full_text"), str):
+                                raise ValueError(f"Contenido {i+1}, slide {j+1}: full_text debe ser una cadena de texto")
+                    
+                    # Validar campos a nivel de contenido (cuando se usan como single slide entries)
+                    if "content_html" in content_data and content_data.get("content_html") is not None:
+                        valid, msg = self.validate_slide_html_content(content_data.get("content_html"))
+                        if not valid:
+                            raise ValueError(f"Contenido {i+1}: content_html inválido: {msg}")
+                    if "narrative_text" in content_data and content_data.get("narrative_text") is not None and not isinstance(content_data.get("narrative_text"), str):
+                        raise ValueError(f"Contenido {i+1}: narrative_text debe ser una cadena de texto")
+                    if "full_text" in content_data and content_data.get("full_text") is not None and not isinstance(content_data.get("full_text"), str):
+                        raise ValueError(f"Contenido {i+1}: full_text debe ser una cadena de texto")
                 
                 # Contar uso de tipos de contenido
                 content_types_usage[content_type] = content_types_usage.get(content_type, 0) + 1
@@ -241,6 +428,27 @@ class ContentService(VerificationBaseService):
                 markers = ContentPersonalizationService.extract_markers(
                     content_for_markers or json.dumps(content_data.get("interactive_data", {}))
                 )
+
+                # Determinar estado inicial para diapositivas en función de los campos provistos
+                # SOLO si el cliente no proporcionó un status explícito
+                initial_status = content_data.get("status", "draft")
+                if content_data.get("content_type") == "slide":
+                    # Preservar status explícito del cliente si fue proporcionado
+                    if "status" in content_data:
+                        initial_status = content_data["status"]
+                    else:
+                        # Derivar status automáticamente solo cuando no se proporciona explícitamente
+                        ch = content_data.get("content_html")
+                        nt = content_data.get("narrative_text")
+                        ft = content_data.get("full_text")
+                        if ch and nt:
+                            initial_status = "narrative_ready"
+                        elif ch:
+                            initial_status = "html_ready"
+                        elif ft:
+                            initial_status = "skeleton"
+                        else:
+                            initial_status = "draft"
                 
                 # Crear objeto de contenido
                 content = TopicContent(
@@ -256,14 +464,21 @@ class ContentService(VerificationBaseService):
                     ai_credits=content_data.get("ai_credits", True),
                     personalization_markers=markers,
                     slide_template=content_data.get("slide_template", {}),
-                    status=content_data.get("status", "draft"),
+                    status=initial_status,
                     order=content_data.get("order"),
-                    parent_content_id=content_data.get("parent_content_id")
+                    parent_content_id=content_data.get("parent_content_id"),
+                    content_html=content_data.get("content_html"),
+                    narrative_text=content_data.get("narrative_text"),
+                    full_text=content_data.get("full_text")
                 )
                 
                 # Insertar en la base de datos
                 result = self.collection.insert_one(content.to_dict(), session=session)
                 created_ids.append(str(result.inserted_id))
+
+                # Logging para cada slide creado con campos HTML/narrativa
+                if content_data.get("content_type") == "slide":
+                    logging.info(f"Bulk: Slide creado para topic {content_data.get('topic_id')} con id {result.inserted_id}. status={initial_status}, has_html={'content_html' in content_data}, has_narrative={'narrative_text' in content_data}")
             
             # Actualizar métricas de tipos de contenido
             for content_type, count in content_types_usage.items():
@@ -348,29 +563,35 @@ class ContentService(VerificationBaseService):
         """
         Obtiene contenido de un tema, opcionalmente filtrado por tipo.
         Ordena por campo 'order' ascendente, con fallback a created_at descendente.
-        
+
         Args:
             topic_id: ID del tema
             content_type: Tipo específico de contenido (opcional)
-            
+
         Returns:
             Lista de contenidos ordenados
         """
         try:
+            # Definir estados según el tipo de contenido
+            if content_type == "slide":
+                status_filter = {"$in": ["draft", "active", "published", "skeleton", "html_ready", "narrative_ready"]}
+            else:
+                status_filter = {"$in": ["draft", "active", "published"]}
+
             query = {
                 "topic_id": ObjectId(topic_id),
-                "status": {"$in": ["draft", "active", "published"]}
+                "status": status_filter
             }
-            
+
             if content_type:
                 query["content_type"] = content_type
-                
+
             # Ordenamiento: primero por 'order' ascendente (nulls last), luego por created_at descendente
             contents = list(self.collection.find(query).sort([
                 ("order", 1),  # Ascendente, valores null van al final
                 ("created_at", -1)  # Descendente como fallback
             ]))
-            
+
             # Convertir ObjectIds a strings
             for content in contents:
                 content["_id"] = str(content["_id"])
@@ -379,9 +600,9 @@ class ContentService(VerificationBaseService):
                     content["creator_id"] = str(content["creator_id"])
                 if content.get("parent_content_id"):
                     content["parent_content_id"] = str(content["parent_content_id"])
-                    
+
             return contents
-            
+
         except Exception as e:
             logging.error(f"Error obteniendo contenido del tema: {str(e)}")
             return []
@@ -656,6 +877,7 @@ class ContentService(VerificationBaseService):
 
             update_data["updated_at"] = datetime.now()
 
+            # Manejo de marcadores si cambia el contenido
             if "content" in update_data or "interactive_data" in update_data:
                 # Convertir content a string si es dict para el extractor de marcadores
                 content_for_markers = update_data.get("content", "")
@@ -665,6 +887,44 @@ class ContentService(VerificationBaseService):
                     content_for_markers or json.dumps(update_data.get("interactive_data", {}))
                 )
                 update_data["personalization_markers"] = markers
+
+            # Validaciones y lógica adicional para campos de diapositivas HTML/narrativa/full_text
+            if content_type == "slide":
+                # Determine prospective values after update
+                prospective_content_html = update_data.get("content_html", current_content.get("content_html"))
+                prospective_narrative = update_data.get("narrative_text", current_content.get("narrative_text"))
+                prospective_full_text = update_data.get("full_text", current_content.get("full_text"))
+
+                # If content_html provided in update_data, validate it
+                if "content_html" in update_data and update_data.get("content_html") is not None:
+                    valid, msg = self.validate_slide_html_content(update_data.get("content_html"))
+                    if not valid:
+                        return False, f"content_html inválido: {msg}"
+                    update_data["render_engine"] = "raw_html"
+                    logging.info(f"Actualizando content_html para slide {content_id}")
+
+                # Validate narrative_text / full_text types if provided
+                if "narrative_text" in update_data and update_data.get("narrative_text") is not None and not isinstance(update_data.get("narrative_text"), str):
+                    return False, "narrative_text debe ser una cadena de texto si se proporciona"
+                if "full_text" in update_data and update_data.get("full_text") is not None and not isinstance(update_data.get("full_text"), str):
+                    return False, "full_text debe ser una cadena de texto si se proporciona"
+
+                # Update status based on presence of fields (prospective)
+                new_status = current_content.get("status", "draft")
+                if prospective_content_html and prospective_narrative:
+                    new_status = "narrative_ready"
+                elif prospective_content_html:
+                    new_status = "html_ready"
+                elif prospective_full_text and not prospective_content_html:
+                    # only full_text present -> skeleton
+                    new_status = "skeleton"
+                # If no special fields present, keep the existing status unless explicitly provided
+                # Allow explicit status override if provided
+                if "status" in update_data:
+                    new_status = update_data.get("status", new_status)
+
+                update_data["status"] = new_status
+                logging.info(f"update_content: slide {content_id} status será actualizado a '{new_status}'")
 
             result = self.collection.update_one(
                 {"_id": ObjectId(content_id)},
@@ -726,11 +986,223 @@ class ContentService(VerificationBaseService):
             content["topic_id"] = str(content["topic_id"])
             if content.get("creator_id"):
                 content["creator_id"] = str(content["creator_id"])
+            if content.get("parent_content_id"):
+                content["parent_content_id"] = str(content["parent_content_id"])
 
             return content
         except Exception as e:
             logging.error(f"Error obteniendo contenido: {str(e)}")
             return None
+
+    def get_slide_generation_status(self, topic_id: str) -> Dict:
+        """
+        Retorna estadísticas sobre el estado de generación de las diapositivas
+        de un tema. Devuelve conteos por estado (skeleton, html_ready, narrative_ready, draft, total, otros).
+        """
+        try:
+            query = {
+                "topic_id": ObjectId(topic_id),
+                "content_type": "slide"
+            }
+            slides = list(self.collection.find(query, {"status": 1}))
+            stats = {
+                "skeleton": 0,
+                "html_ready": 0,
+                "narrative_ready": 0,
+                "draft": 0,
+                "other": 0,
+                "total": 0
+            }
+            for s in slides:
+                stats["total"] += 1
+                st = s.get("status", "").lower()
+                if st in stats:
+                    stats[st] += 1
+                else:
+                    stats["other"] += 1
+            return stats
+        except Exception as e:
+            logging.error(f"Error obteniendo estado de generación de slides para topic {topic_id}: {str(e)}")
+            return {}
+
+    def update_slide_html(self, content_id: str, html_content: str, updater_id: str = None) -> Tuple[bool, str]:
+        """
+        Actualiza únicamente el campo content_html de una diapositiva.
+        - Valida existencia del contenido y que sea tipo 'slide'
+        - Valida HTML mediante validate_slide_html_content
+        - Actualiza status a 'html_ready' o 'narrative_ready' si ya existe narrativa
+        - Registra logging detallado
+        """
+        try:
+            if not isinstance(html_content, str):
+                return False, "content_html debe ser una cadena de texto"
+
+            current = self.get_content(content_id)
+            if not current:
+                logging.debug(f"update_slide_html: contenido {content_id} no encontrado")
+                return False, "Contenido no encontrado"
+            if current.get("content_type") != "slide":
+                logging.debug(f"update_slide_html: contenido {content_id} no es tipo slide")
+                return False, "El contenido no es una diapositiva"
+
+            sanitized_html = self.sanitize_slide_html_content(html_content)
+            valid, msg = self.validate_slide_html_content(sanitized_html)
+            if not valid:
+                logging.info(f"update_slide_html: validación fallida para slide {content_id}: {msg} (después de sanitización)")
+                return False, f"content_html inválido después de sanitización: {msg}"
+
+            update_data = {
+                "content_html": sanitized_html,
+                "updated_at": datetime.now(),
+                "render_engine": "raw_html"
+            }
+
+            # Determinar nuevo estado
+            existing_narrative = current.get("narrative_text")
+            if existing_narrative:
+                update_data["status"] = "narrative_ready"
+            else:
+                update_data["status"] = "html_ready"
+
+            # Registrar quien hizo la actualización si se pasa updater_id
+            if updater_id:
+                update_data["last_updated_by"] = updater_id
+
+            result = self.collection.update_one(
+                {"_id": ObjectId(content_id)},
+                {"$set": update_data}
+            )
+
+            if result.modified_count > 0:
+                logging.info(f"update_slide_html: slide {content_id} actualizado a status {update_data.get('status')} by {updater_id or 'unknown'}")
+                return True, "HTML de la diapositiva actualizado exitosamente"
+            else:
+                logging.debug(f"update_slide_html: no hubo cambios al actualizar slide {content_id}")
+                return False, "No se realizaron cambios en el contenido"
+        except Exception as e:
+            logging.error(f"Error en update_slide_html para {content_id}: {str(e)}")
+            return False, f"Error interno: {str(e)}"
+
+    def update_slide_narrative(self, content_id: str, narrative_text: str, updater_id: str = None) -> Tuple[bool, str]:
+        """
+        Actualiza únicamente el campo narrative_text de una diapositiva.
+        - Valida existencia del contenido y que sea tipo 'slide'
+        - Valida tamaño y formato del texto narrativo
+        - Actualiza status a 'narrative_ready' si la diapositiva ya tiene HTML
+        - Logging específico
+        """
+        try:
+            if not isinstance(narrative_text, str):
+                return False, "narrative_text debe ser una cadena de texto"
+
+            narrative_trim = narrative_text.strip()
+            if not narrative_trim:
+                return False, "narrative_text no debe estar vacío"
+
+            max_len = 5000
+            if len(narrative_trim) > max_len:
+                logging.warning(f"update_slide_narrative: narrative_text demasiado largo ({len(narrative_trim)} > {max_len})")
+                return False, f"narrative_text excede el tamaño máximo permitido de {max_len} caracteres"
+
+            current = self.get_content(content_id)
+            if not current:
+                logging.debug(f"update_slide_narrative: contenido {content_id} no encontrado")
+                return False, "Contenido no encontrado"
+            if current.get("content_type") != "slide":
+                logging.debug(f"update_slide_narrative: contenido {content_id} no es tipo slide")
+                return False, "El contenido no es una diapositiva"
+
+            update_data = {
+                "narrative_text": narrative_trim,
+                "updated_at": datetime.now()
+            }
+
+            # Si ya existe HTML, marcar como narrative_ready
+            existing_html = current.get("content_html")
+            if existing_html:
+                update_data["status"] = "narrative_ready"
+            else:
+                # Mantener estado actual si no hay HTML; no forzar narrative_ready
+                update_data["status"] = current.get("status", "draft")
+
+            if updater_id:
+                update_data["last_updated_by"] = updater_id
+
+            result = self.collection.update_one(
+                {"_id": ObjectId(content_id)},
+                {"$set": update_data}
+            )
+
+            if result.modified_count > 0:
+                logging.info(f"update_slide_narrative: slide {content_id} narrative actualizado. nuevo_status={update_data.get('status')}")
+                return True, "Narrativa de la diapositiva actualizada exitosamente"
+            else:
+                logging.debug(f"update_slide_narrative: no hubo cambios al actualizar narrativa slide {content_id}")
+                return False, "No se realizaron cambios en la narrativa"
+        except Exception as e:
+            logging.error(f"Error en update_slide_narrative para {content_id}: {str(e)}")
+            return False, f"Error interno: {str(e)}"
+
+    def get_slide_status_details(self, content_id: str) -> Dict:
+        """
+        Retorna detalles sobre el estado de generación de una diapositiva específica.
+        Incluye flags de presencia de campos, estado actual, timestamps y una estimación de progreso.
+        Useful para polling desde el frontend para ver avance de generación.
+        """
+        try:
+            current = self.get_content(content_id)
+            if not current:
+                logging.debug(f"get_slide_status_details: contenido {content_id} no encontrado")
+                return {}
+
+            status = current.get("status", "unknown")
+            has_html = bool(current.get("content_html"))
+            has_narrative = bool(current.get("narrative_text"))
+            has_full_text = bool(current.get("full_text"))
+
+            # Estimación simple de progreso (0-100)
+            if has_html and has_narrative:
+                progress = 100
+            elif has_html:
+                progress = 70
+            elif has_full_text:
+                progress = 40
+            else:
+                progress = 0
+
+            created_at = current.get("created_at")
+            updated_at = current.get("updated_at")
+
+            # Convertir timestamps a ISO si son datetime para serialización
+            def iso(dt):
+                try:
+                    if isinstance(dt, datetime):
+                        return dt.isoformat()
+                    return dt
+                except Exception:
+                    return None
+
+            details = {
+                "content_id": content_id,
+                "status": status,
+                "has_content_html": has_html,
+                "has_narrative_text": has_narrative,
+                "has_full_text": has_full_text,
+                "content_html_length": len(current.get("content_html") or ""),
+                "narrative_text_length": len(current.get("narrative_text") or ""),
+                "full_text_length": len(current.get("full_text") or ""),
+                "progress_estimate": progress,
+                "created_at": iso(created_at),
+                "updated_at": iso(updated_at),
+                "topic_id": current.get("topic_id"),
+                "last_updated_by": current.get("last_updated_by")
+            }
+
+            logging.debug(f"get_slide_status_details: detalles para {content_id}: {details}")
+            return details
+        except Exception as e:
+            logging.error(f"Error obteniendo detalles de estado para slide {content_id}: {str(e)}")
+            return {}
 
     def adapt_content_to_methodology(self, content_id: str, methodology_code: str) -> Tuple[bool, Dict]:
         """Adapta un contenido según una metodología de aprendizaje."""

@@ -24,3 +24,4 @@ soupsieve==2.5
 pydantic
 stripe
 cryptography==41.0.7
+bleach==6.1.0

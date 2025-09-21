@@ -317,14 +317,95 @@ def get_topic_theory():
 @study_plan_bp.route('/topic/theory', methods=['PUT'])
 @APIRoute.standard(auth_required_flag=True, roles=[ROLES["TEACHER"]], required_fields=['topic_id', 'theory_content'])
 def update_topic_theory():
-    """Actualiza el contenido teórico de un tema"""
+    """Actualiza el contenido teórico de un tema con validación robusta"""
     data = request.get_json()
     topic_id = data.get('topic_id')
-    theory_content = data.get('theory_content', '')
-    success, message = topic_service.update_theory_content(topic_id, theory_content)
-    if success:
-        return APIRoute.success(message=message)
-    return APIRoute.error(ErrorCodes.UPDATE_ERROR, message)
+    theory_content = data.get('theory_content')
+    
+    # === VALIDACIÓN Y SANITIZACIÓN ROBUSTA ===
+    try:
+        # Log del tipo de dato recibido para debugging
+        logging.info(f"update_topic_theory: Recibido tipo {type(theory_content)} para topic {topic_id}")
+        
+        # Validación inicial - verificar que no sea None
+        if theory_content is None:
+            logging.warning(f"update_topic_theory: theory_content es None para topic {topic_id}")
+            return APIRoute.error(
+                ErrorCodes.INVALID_DATA, 
+                "El campo 'theory_content' no puede ser nulo"
+            )
+        
+        # Caso ideal: ya es string
+        if isinstance(theory_content, str):
+            processed_content = theory_content
+            logging.debug(f"update_topic_theory: theory_content es string válido para topic {topic_id}")
+        
+        # Caso problemático: es un objeto/diccionario
+        elif isinstance(theory_content, dict):
+            logging.warning(f"update_topic_theory: theory_content es dict para topic {topic_id}: {theory_content}")
+            
+            # Intentar extraer contenido de patrones comunes
+            if 'content' in theory_content:
+                processed_content = str(theory_content['content'])
+                logging.info(f"update_topic_theory: Extraído contenido de campo 'content' para topic {topic_id}")
+            elif 'text' in theory_content:
+                processed_content = str(theory_content['text'])
+                logging.info(f"update_topic_theory: Extraído contenido de campo 'text' para topic {topic_id}")
+            elif 'value' in theory_content:
+                processed_content = str(theory_content['value'])
+                logging.info(f"update_topic_theory: Extraído contenido de campo 'value' para topic {topic_id}")
+            elif 'data' in theory_content:
+                processed_content = str(theory_content['data'])
+                logging.info(f"update_topic_theory: Extraído contenido de campo 'data' para topic {topic_id}")
+            else:
+                # Si no hay campos reconocidos, rechazar el objeto
+                logging.error(f"update_topic_theory: Objeto sin campos reconocidos para topic {topic_id}: {theory_content}")
+                return APIRoute.error(
+                    ErrorCodes.INVALID_DATA,
+                    "El campo 'theory_content' debe ser texto, no un objeto. Verifique que está enviando el contenido como string."
+                )
+        
+        # Caso de array/lista: rechazar
+        elif isinstance(theory_content, (list, tuple)):
+            logging.error(f"update_topic_theory: theory_content es lista/tupla para topic {topic_id}")
+            return APIRoute.error(
+                ErrorCodes.INVALID_DATA,
+                "El campo 'theory_content' debe ser texto, no una lista o array."
+            )
+        
+        # Otros tipos: intentar conversión con advertencia
+        else:
+            logging.warning(f"update_topic_theory: theory_content tipo no reconocido {type(theory_content)} para topic {topic_id}")
+            processed_content = str(theory_content)
+        
+        # Validar que el contenido procesado no sea '[object Object]' o similar
+        if processed_content in ['[object Object]', '[Object object]', 'undefined', 'null']:
+            logging.error(f"update_topic_theory: Detectado contenido inválido '{processed_content}' para topic {topic_id}")
+            return APIRoute.error(
+                ErrorCodes.INVALID_DATA,
+                f"Contenido inválido detectado: '{processed_content}'. Verifique que está enviando texto válido desde el frontend."
+            )
+        
+        # Limpiar contenido
+        processed_content = processed_content.strip()
+        
+        # Llamar al servicio con el contenido procesado
+        success, message = topic_service.update_theory_content(topic_id, processed_content)
+        
+        if success:
+            # Log exitoso con información del contenido
+            content_length = len(processed_content)
+            logging.info(f"update_topic_theory: Actualizado exitosamente topic {topic_id}, longitud: {content_length}")
+            return APIRoute.success(message=message)
+        else:
+            return APIRoute.error(ErrorCodes.UPDATE_ERROR, message)
+            
+    except Exception as e:
+        logging.error(f"update_topic_theory: Error inesperado para topic {topic_id}: {str(e)}")
+        return APIRoute.error(
+            ErrorCodes.SERVER_ERROR,
+            f"Error interno al procesar el contenido teórico: {str(e)}"
+        )
 
 
 @study_plan_bp.route('/topic/theory', methods=['DELETE'])
@@ -340,12 +421,65 @@ def delete_topic_theory():
     return APIRoute.error(ErrorCodes.DELETE_ERROR, message)
 
 
+@study_plan_bp.route('/topic/<topic_id>/content-integrity', methods=['GET'])
+@APIRoute.standard(auth_required_flag=True, roles=[ROLES["TEACHER"]])
+def check_topic_content_integrity(topic_id):
+    """Verifica la integridad de los datos de contenido teórico de un tema"""
+    try:
+        # Llamar al método de validación en TopicService
+        integrity_report = topic_service.validate_theory_content_integrity(topic_id)
+        
+        # Log del resultado para debugging
+        logging.info(f"check_topic_content_integrity: Verificación completada para topic {topic_id}")
+        
+        return APIRoute.success(
+            data=integrity_report,
+            message="Verificación de integridad completada"
+        )
+        
+    except Exception as e:
+        logging.error(f"check_topic_content_integrity: Error para topic {topic_id}: {str(e)}")
+        return APIRoute.error(
+            ErrorCodes.SERVER_ERROR,
+            f"Error al verificar integridad del contenido: {str(e)}"
+        )
+
 @study_plan_bp.route('/topic/<topic_id>/readiness-status', methods=['GET'])
 @APIRoute.standard(auth_required_flag=True)
 def get_topic_readiness_status(topic_id):
     """Verifica si un tema está listo para ser publicado"""
     result = topic_readiness_service.check_readiness(topic_id)
     return APIRoute.success(data=result)
+
+@study_plan_bp.route('/topic/<topic_id>/redundant-content', methods=['DELETE'])
+@APIRoute.standard(auth_required_flag=True, roles=[ROLES["TEACHER"]])
+def cleanup_topic_redundant_content(topic_id):
+    """Limpia contenidos redundantes de tipo 'text' para un tema"""
+    try:
+        # Verificar que el usuario tiene permisos sobre el tema
+        topic = topic_service.get_topic(topic_id)
+        if not topic:
+            return APIRoute.error(ErrorCodes.NOT_FOUND, "Tema no encontrado")
+        
+        # Llamar al método de limpieza en TopicService
+        success, message = topic_service.cleanup_redundant_text_content(topic_id)
+        
+        if success:
+            logging.info(f"cleanup_topic_redundant_content: {message} para topic {topic_id}")
+            return APIRoute.success(
+                data={"topic_id": topic_id, "cleanup_result": message},
+                message=message
+            )
+        else:
+            logging.warning(f"cleanup_topic_redundant_content: Fallo para topic {topic_id}: {message}")
+            return APIRoute.error(ErrorCodes.OPERATION_FAILED, message)
+            
+    except Exception as e:
+        logging.error(f"cleanup_topic_redundant_content: Error para topic {topic_id}: {str(e)}")
+        return APIRoute.error(
+            ErrorCodes.SERVER_ERROR,
+            f"Error al limpiar contenidos redundantes: {str(e)}"
+        )
 
 @study_plan_bp.route('/module/<module_id>/topics', methods=['GET'])
 @APIRoute.standard(auth_required_flag=True)

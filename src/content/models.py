@@ -14,7 +14,7 @@ class ContentType:
                  code: str,  # Identificador único (text, feynman, diagram, etc.)
                  name: str,
                  description: str,
-                 compatible_methodologies: List[str] = None,
+                 compatible_methodologies: Optional[List[str]] = None,
                  status: str = "active"):
         self.code = code
         self.name = name
@@ -41,8 +41,8 @@ class LearningMethodology:
                  code: str,
                  name: str,
                  description: str,
-                 compatible_content_types: List[str] = None,
-                 cognitive_profile_match: Dict = None,
+                 compatible_content_types: Optional[List[str]] = None,
+                 cognitive_profile_match: Optional[Dict] = None,
                  status: str = "active"):
         self.code = code
         self.name = name
@@ -73,13 +73,13 @@ class TopicContent:
                  content: Union[str, Dict],  # Puede ser texto o estructura compleja
                  content_type: str,  # Código del tipo de contenido (text, feynman, diagram, etc.)
                  interactive_data: Optional[Dict] = None,  # Para quizzes, simulaciones, etc.
-                 learning_methodologies: List[str] = None,
-                 adaptation_options: Dict = None,
-                 resources: List[str] = None,
-                 web_resources: List[Dict] = None,
-                 generation_prompt: str = None,
+                 learning_methodologies: Optional[List[str]] = None,
+                 adaptation_options: Optional[Dict] = None,
+                 resources: Optional[List[str]] = None,
+                 web_resources: Optional[List[Dict]] = None,
+                 generation_prompt: Optional[str] = None,
                  ai_credits: bool = True,
-                 personalization_markers: Dict = None,
+                 personalization_markers: Optional[Dict] = None,
                  slide_template: Optional[Dict] = None,  # Plantilla de fondo para diapositivas
                  # Nuevos campos para sistema de plantillas
                  render_engine: str = "legacy",  # legacy | html_template
@@ -94,6 +94,10 @@ class TopicContent:
                  _id: Optional[ObjectId] = None,
                  created_at: Optional[datetime] = None,
                  updated_at: Optional[datetime] = None,
+                 # Nuevos campos para soporte de diapositivas HTML - Fase 2A
+                 content_html: Optional[str] = None,
+                 narrative_text: Optional[str] = None,
+                 full_text: Optional[str] = None,
                  **kwargs):
         self._id = _id or ObjectId()
         self.topic_id = ObjectId(topic_id)
@@ -121,6 +125,11 @@ class TopicContent:
         self.created_at = created_at or datetime.now()
         self.updated_at = updated_at or datetime.now()
 
+        # Nuevos campos para diapositivas HTML (Fase 2A)
+        self.content_html = content_html
+        self.narrative_text = narrative_text
+        self.full_text = full_text
+
         if kwargs:
             logging.warning(f"TopicContent received unexpected arguments, which were ignored: {list(kwargs.keys())}")
         
@@ -144,7 +153,11 @@ class TopicContent:
             "order": self.order,
             "status": self.status,
             "created_at": self.created_at,
-            "updated_at": self.updated_at
+            "updated_at": self.updated_at,
+            # Campos nuevos para diapositivas HTML
+            "content_html": self.content_html,
+            "narrative_text": self.narrative_text,
+            "full_text": self.full_text,
         }
         # Campos opcionales de plantillas
         if self.instance_id:
@@ -168,7 +181,7 @@ class VirtualTopicContent:
                  content_type: str,
                  adapted_content: Optional[Dict] = None,
                  status: str = "not_started", # not_started, in_progress, completed
-                 interaction_history: List[Dict] = None,
+                 interaction_history: Optional[List[Dict]] = None,
                  _id: Optional[ObjectId] = None,
                  created_at: Optional[datetime] = None):
         self._id = _id or ObjectId()

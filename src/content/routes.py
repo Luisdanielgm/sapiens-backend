@@ -313,6 +313,177 @@ def delete_content(content_id):
         )
 
 # ============================================
+# ENDPOINTS ESPECÍFICOS PARA ACTUALIZACIÓN PROGRESIVA DE DIAPOSITIVAS
+# (PUT /api/content/{id}/html, PUT /api/content/{id}/narrative, GET /api/content/{id}/status)
+# ============================================
+
+@content_bp.route('/<content_id>/html', methods=['PUT'])
+@APIRoute.standard(auth_required_flag=True, roles=[ROLES["TEACHER"], ROLES["ADMIN"]])
+def update_slide_html(content_id):
+    """
+    Actualiza únicamente el campo content_html de una diapositiva.
+    Body:
+    {
+        "content_html": "<div>...</div>"
+    }
+    Requisitos:
+    - Autorización TEACHER/ADMIN
+    - Valida existencia del contenido y que sea tipo 'slide'
+    - Valida que content_html sea string y no vacío
+    - Usa ContentService.update_slide_html para la actualización
+    - Retorna detalles de estado tras la actualización
+    """
+    try:
+        # Validar formato de ID
+        if not ObjectId.is_valid(content_id):
+            return APIRoute.error(ErrorCodes.VALIDATION_ERROR, "ID de contenido inválido")
+
+        data = request.get_json() or {}
+        content_html = data.get('content_html')
+
+        if content_html is None:
+            return APIRoute.error(ErrorCodes.VALIDATION_ERROR, "Campo 'content_html' requerido")
+        if not isinstance(content_html, str):
+            return APIRoute.error(ErrorCodes.VALIDATION_ERROR, "content_html debe ser una cadena de texto")
+
+        # Comprobar existencia y tipo antes de intentar actualizar para mejorar mensajes de error
+        current = content_service.get_content(content_id)
+        if not current:
+            return APIRoute.error(ErrorCodes.NOT_FOUND, "Contenido no encontrado", status_code=404)
+        if current.get("content_type") != "slide":
+            return APIRoute.error(ErrorCodes.VALIDATION_ERROR, "Solo se puede actualizar HTML para contenidos de tipo 'slide'")
+
+        # Determinar updater_id (preferir request.user_id si existe)
+        updater_id = getattr(request, 'user_id', None) or get_jwt_identity()
+
+        success, message = content_service.update_slide_html(content_id, content_html, updater_id=updater_id)
+
+        if success:
+            # Obtener detalles de estado actualizados
+            details = content_service.get_slide_status_details(content_id)
+            return APIRoute.success(
+                data={"status_details": details},
+                message="HTML actualizado exitosamente"
+            )
+        else:
+            # Mapear errores a códigos apropiados
+            msg_lower = (message or "").lower()
+            if "inválido" in msg_lower or "prohibida" in msg_lower or "mal formado" in msg_lower or "excede" in msg_lower or "demasiadas" in msg_lower or "vacío" in msg_lower or "uri" in msg_lower or "atributo" in msg_lower:
+                return APIRoute.error(ErrorCodes.VALIDATION_ERROR, message)
+            if "no encontrado" in msg_lower:
+                return APIRoute.error(ErrorCodes.NOT_FOUND, message, status_code=404)
+            # Fallback a error de actualización
+            return APIRoute.error(ErrorCodes.UPDATE_ERROR, message)
+
+    except Exception as e:
+        logging.error(f"Error en endpoint update_slide_html para {content_id}: {str(e)}")
+        return APIRoute.error(
+            ErrorCodes.SERVER_ERROR,
+            "Error interno del servidor",
+            status_code=500,
+        )
+
+@content_bp.route('/<content_id>/narrative', methods=['PUT'])
+@APIRoute.standard(auth_required_flag=True, roles=[ROLES["TEACHER"], ROLES["ADMIN"]])
+def update_slide_narrative(content_id):
+    """
+    Actualiza únicamente el campo narrative_text de una diapositiva.
+    Body:
+    {
+        "narrative_text": "Texto narrativo..."
+    }
+    Requisitos:
+    - Autorización TEACHER/ADMIN
+    - Valida existencia del contenido y que sea tipo 'slide'
+    - Valida que narrative_text sea string y no vacío y dentro de límites de tamaño
+    - Usa ContentService.update_slide_narrative para la actualización
+    - Retorna detalles de estado tras la actualización
+    """
+    try:
+        if not ObjectId.is_valid(content_id):
+            return APIRoute.error(ErrorCodes.VALIDATION_ERROR, "ID de contenido inválido")
+
+        data = request.get_json() or {}
+        narrative_text = data.get('narrative_text')
+
+        if narrative_text is None:
+            return APIRoute.error(ErrorCodes.VALIDATION_ERROR, "Campo 'narrative_text' requerido")
+        if not isinstance(narrative_text, str):
+            return APIRoute.error(ErrorCodes.VALIDATION_ERROR, "narrative_text debe ser una cadena de texto")
+
+        # Comprobar existencia y tipo
+        current = content_service.get_content(content_id)
+        if not current:
+            return APIRoute.error(ErrorCodes.NOT_FOUND, "Contenido no encontrado", status_code=404)
+        if current.get("content_type") != "slide":
+            return APIRoute.error(ErrorCodes.VALIDATION_ERROR, "Solo se puede actualizar narrativa para contenidos de tipo 'slide'")
+
+        updater_id = getattr(request, 'user_id', None) or get_jwt_identity()
+
+        success, message = content_service.update_slide_narrative(content_id, narrative_text, updater_id=updater_id)
+
+        if success:
+            details = content_service.get_slide_status_details(content_id)
+            return APIRoute.success(
+                data={"status_details": details},
+                message="Narrativa actualizada exitosamente"
+            )
+        else:
+            msg_lower = (message or "").lower()
+            if "inválido" in msg_lower or "demasiado largo" in msg_lower or "vacío" in msg_lower:
+                return APIRoute.error(ErrorCodes.VALIDATION_ERROR, message)
+            if "no encontrado" in msg_lower:
+                return APIRoute.error(ErrorCodes.NOT_FOUND, message, status_code=404)
+            return APIRoute.error(ErrorCodes.UPDATE_ERROR, message)
+
+    except Exception as e:
+        logging.error(f"Error en endpoint update_slide_narrative para {content_id}: {str(e)}")
+        return APIRoute.error(
+            ErrorCodes.SERVER_ERROR,
+            "Error interno del servidor",
+            status_code=500,
+        )
+
+@content_bp.route('/<content_id>/status', methods=['GET'])
+@APIRoute.standard(auth_required_flag=True)
+def get_slide_status(content_id):
+    """
+    Consulta el estado actual de generación de una diapositiva específica.
+    Retorna:
+    {
+        "content_id": "...",
+        "status": "skeleton|html_ready|narrative_ready|draft|...",
+        "has_content_html": bool,
+        "has_narrative_text": bool,
+        "has_full_text": bool,
+        "content_html_length": int,
+        "narrative_text_length": int,
+        "full_text_length": int,
+        "progress_estimate": 0-100,
+        "created_at": "...",
+        "updated_at": "...",
+        "topic_id": "...",
+        "last_updated_by": "..."
+    }
+    """
+    try:
+        if not ObjectId.is_valid(content_id):
+            return APIRoute.error(ErrorCodes.VALIDATION_ERROR, "ID de contenido inválido")
+
+        details = content_service.get_slide_status_details(content_id)
+        if not details:
+            return APIRoute.error(ErrorCodes.NOT_FOUND, "Contenido no encontrado", status_code=404)
+
+        return APIRoute.success(data={"status_details": details})
+    except Exception as e:
+        logging.error(f"Error obteniendo estado de slide {content_id}: {str(e)}")
+        return APIRoute.error(
+            ErrorCodes.SERVER_ERROR,
+            "Error interno del servidor",
+            status_code=500,
+        )
+
+# ============================================
 # ENDPOINTS DE CONTENIDO PERSONALIZADO
 # ============================================
 
@@ -416,10 +587,6 @@ def track_interaction():
             status_code=500,
         )
 
-# ============================================
-# ENDPOINTS DE RESULTADOS UNIFICADOS
-# ============================================
-
 @content_bp.route('/results', methods=['POST'])
 @APIRoute.standard(auth_required_flag=True)
 def record_result():
@@ -480,7 +647,7 @@ def get_student_results(student_id):
     try:
         # Verificar permisos: solo el mismo estudiante o profesores/admin
         current_user = get_jwt_identity()
-        if current_user != student_id and not g.user.get('role') in [ROLES["TEACHER"], ROLES["ADMIN"]]:
+        if current_user != student_id and g.user.get('role') not in [ROLES["TEACHER"], ROLES["ADMIN"]]:
             return APIRoute.error(
                 ErrorCodes.PERMISSION_DENIED,
                 "No autorizado para ver estos resultados",
