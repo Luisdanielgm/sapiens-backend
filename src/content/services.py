@@ -252,6 +252,13 @@ class ContentService(VerificationBaseService):
                 if not self.slide_style_service.validate_slide_template(slide_template):
                     return False, "El slide_template no tiene una estructura válida"
 
+                # If client provided template_snapshot (new field), validate it too
+                template_snapshot = content_data.get("template_snapshot")
+                if template_snapshot is not None:
+                    valid_ts, ts_msg = self.validate_template_snapshot(template_snapshot)
+                    if not valid_ts:
+                        return False, f"template_snapshot inválido: {ts_msg}"
+
                 # Validar nuevos campos de diapositiva si se proporcionan
                 content_html = content_data.get("content_html")
                 narrative_text = content_data.get("narrative_text")
@@ -278,25 +285,31 @@ class ContentService(VerificationBaseService):
             )
 
             # Determinar estado inicial para diapositivas en función de los campos provistos
-            # SOLO si el cliente no proporcionó un status explícito
+            # SOLO si el cliente no proporcionó un status explícito, salvo que el caso sea skeleton
             initial_status = content_data.get("status", "draft")
             if content_type == "slide":
-                # Preservar status explícito del cliente si fue proporcionado
-                if "status" in content_data:
-                    initial_status = content_data["status"]
+                # Derivar status automáticamente
+                ch = content_data.get("content_html")
+                nt = content_data.get("narrative_text")
+                ft = content_data.get("full_text")
+
+                # If it's clearly a skeleton (only full_text present and no html/narrative),
+                # force status to 'skeleton' regardless of client-provided status.
+                if ft and not ch and not nt:
+                    initial_status = "skeleton"
                 else:
-                    # Derivar status automáticamente solo cuando no se proporciona explícitamente
-                    ch = content_data.get("content_html")
-                    nt = content_data.get("narrative_text")
-                    ft = content_data.get("full_text")
-                    if ch and nt:
-                        initial_status = "narrative_ready"
-                    elif ch:
-                        initial_status = "html_ready"
-                    elif ft:
-                        initial_status = "skeleton"
+                    # Preserve explicit status if provided; otherwise derive
+                    if "status" in content_data:
+                        initial_status = content_data["status"]
                     else:
-                        initial_status = "draft"
+                        if ch and nt:
+                            initial_status = "narrative_ready"
+                        elif ch:
+                            initial_status = "html_ready"
+                        elif ft:
+                            initial_status = "skeleton"
+                        else:
+                            initial_status = "draft"
 
             content = TopicContent(
                 topic_id=topic_id,
@@ -315,6 +328,7 @@ class ContentService(VerificationBaseService):
                 content_html=content_data.get("content_html"),
                 narrative_text=content_data.get("narrative_text"),
                 full_text=content_data.get("full_text"),
+                template_snapshot=content_data.get("template_snapshot"),  # Incluir template_snapshot
                 order=content_data.get("order"),
                 parent_content_id=content_data.get("parent_content_id")
             )
@@ -381,10 +395,34 @@ class ContentService(VerificationBaseService):
                     slide_template = content_data.get("slide_template", {})
                     if not slide_template:
                         raise ValueError(f"Contenido {i+1}: El contenido de tipo 'slide' requiere un campo 'slide_template'")
-                    
+
                     if not self.slide_style_service.validate_slide_template(slide_template):
                         raise ValueError(f"Contenido {i+1}: El slide_template no tiene una estructura válida")
-                    
+
+                    # Detectar caso skeleton: full_text presente sin content_html ni narrative_text
+                    ft = content_data.get("full_text")
+                    ch = content_data.get("content_html")
+                    nt = content_data.get("narrative_text")
+
+                    is_skeleton = ft and not ch and not nt
+
+                    # Validar template_snapshot según el tipo de slide
+                    template_snapshot = content_data.get("template_snapshot")
+                    if is_skeleton:
+                        # Para skeleton slides, template_snapshot es obligatorio
+                        if template_snapshot is None:
+                            raise ValueError(f"Contenido {i+1}: Las diapositivas skeleton requieren 'template_snapshot'. Use /api/content/bulk/slides para creación optimizada de skeleton slides.")
+
+                        valid_ts, ts_msg = self.validate_template_snapshot(template_snapshot)
+                        if not valid_ts:
+                            raise ValueError(f"Contenido {i+1}: template_snapshot inválido: {ts_msg}")
+                    else:
+                        # Para non-skeleton slides, template_snapshot es opcional pero se valida si se proporciona
+                        if template_snapshot is not None:
+                            valid_ts, ts_msg = self.validate_template_snapshot(template_snapshot)
+                            if not valid_ts:
+                                raise ValueError(f"Contenido {i+1}: template_snapshot inválido: {ts_msg}")
+
                     # Validar estructura de slides en content_data
                     slides = content_data.get("content_data", {}).get("slides", [])
                     if slides:
@@ -402,7 +440,7 @@ class ContentService(VerificationBaseService):
                                 raise ValueError(f"Contenido {i+1}, slide {j+1}: narrative_text debe ser una cadena de texto")
                             if "full_text" in slide and slide.get("full_text") is not None and not isinstance(slide.get("full_text"), str):
                                 raise ValueError(f"Contenido {i+1}, slide {j+1}: full_text debe ser una cadena de texto")
-                    
+
                     # Validar campos a nivel de contenido (cuando se usan como single slide entries)
                     if "content_html" in content_data and content_data.get("content_html") is not None:
                         valid, msg = self.validate_slide_html_content(content_data.get("content_html"))
@@ -430,25 +468,28 @@ class ContentService(VerificationBaseService):
                 )
 
                 # Determinar estado inicial para diapositivas en función de los campos provistos
-                # SOLO si el cliente no proporcionó un status explícito
+                # SOLO si el cliente no proporcionó un status explícito, salvo que el caso sea skeleton
                 initial_status = content_data.get("status", "draft")
                 if content_data.get("content_type") == "slide":
-                    # Preservar status explícito del cliente si fue proporcionado
-                    if "status" in content_data:
-                        initial_status = content_data["status"]
+                    ch = content_data.get("content_html")
+                    nt = content_data.get("narrative_text")
+                    ft = content_data.get("full_text")
+
+                    # If clearly skeleton -> force skeleton regardless of provided status
+                    if ft and not ch and not nt:
+                        initial_status = "skeleton"
                     else:
-                        # Derivar status automáticamente solo cuando no se proporciona explícitamente
-                        ch = content_data.get("content_html")
-                        nt = content_data.get("narrative_text")
-                        ft = content_data.get("full_text")
-                        if ch and nt:
-                            initial_status = "narrative_ready"
-                        elif ch:
-                            initial_status = "html_ready"
-                        elif ft:
-                            initial_status = "skeleton"
+                        if "status" in content_data:
+                            initial_status = content_data["status"]
                         else:
-                            initial_status = "draft"
+                            if ch and nt:
+                                initial_status = "narrative_ready"
+                            elif ch:
+                                initial_status = "html_ready"
+                            elif ft:
+                                initial_status = "skeleton"
+                            else:
+                                initial_status = "draft"
                 
                 # Crear objeto de contenido
                 content = TopicContent(
@@ -469,7 +510,8 @@ class ContentService(VerificationBaseService):
                     parent_content_id=content_data.get("parent_content_id"),
                     content_html=content_data.get("content_html"),
                     narrative_text=content_data.get("narrative_text"),
-                    full_text=content_data.get("full_text")
+                    full_text=content_data.get("full_text"),
+                    template_snapshot=content_data.get("template_snapshot")  # Incluir template_snapshot
                 )
                 
                 # Insertar en la base de datos
@@ -510,20 +552,137 @@ class ContentService(VerificationBaseService):
         finally:
             session.end_session()
     
-    def _validate_sequential_order(self, contents_data: List[Dict]) -> None:
+    def create_bulk_slides_skeleton(self, slides_data: List[Dict]) -> Tuple[bool, List[str]]:
+        """
+        Creación masiva optimizada para diapositivas skeleton.
+        Requisitos estrictos:
+         - Todos los items deben tener content_type == 'slide'
+         - Todos deben pertenecer al mismo topic_id
+         - Cada slide debe incluir full_text (string) y template_snapshot (objeto/dict)
+         - El orden (order) debe existir para cada slide y ser una secuencia consecutiva comenzando en 1
+         - Las diapositivas serán creadas con status='skeleton' sin importar lo que envíe el cliente
+        """
+        if not slides_data:
+            return False, "No se proporcionaron diapositivas para crear"
+
+        # Validaciones iniciales
+        first_topic = slides_data[0].get("topic_id")
+        for i, slide in enumerate(slides_data):
+            if slide.get("content_type") != "slide":
+                return False, f"Elemento {i+1}: content_type debe ser 'slide'"
+            if slide.get("topic_id") != first_topic:
+                return False, "Todas las diapositivas deben pertenecer al mismo topic_id"
+            if "order" not in slide or not isinstance(slide.get("order"), int) or slide.get("order") < 1:
+                return False, f"Elemento {i+1}: order es requerido y debe ser entero positivo"
+            if "full_text" not in slide or not isinstance(slide.get("full_text"), str) or not slide.get("full_text").strip():
+                return False, f"Elemento {i+1}: full_text es requerido para crear una slide skeleton y debe ser una cadena no vacía"
+            ts = slide.get("template_snapshot")
+            if ts is None:
+                return False, f"Elemento {i+1}: template_snapshot es requerido y debe ser un objeto con estilos"
+            valid_ts, ts_msg = self.validate_template_snapshot(ts)
+            if not valid_ts:
+                return False, f"Elemento {i+1}: template_snapshot inválido: {ts_msg}"
+
+        # Validar secuencia de orders: deben ser únicos y consecutivos comenzando en 1
+        orders = sorted([s["order"] for s in slides_data])
+        if orders[0] != 1:
+            return False, "La secuencia de 'order' debe comenzar en 1"
+        for idx, val in enumerate(orders, start=1):
+            if val != idx:
+                return False, f"La secuencia de 'order' debe ser consecutiva sin gaps. Esperado {idx}, encontrado {val}"
+
+        # Preparar inserciones en transacción
+        session = self.db.client.start_session()
+        transaction_active = False
+        try:
+            session.start_transaction()
+            transaction_active = True
+
+            docs = []
+            for slide in slides_data:
+                # Extract markers
+                content_for_markers = slide.get("content", "")
+                if isinstance(content_for_markers, dict):
+                    content_for_markers = json.dumps(content_for_markers, ensure_ascii=False)
+                markers = ContentPersonalizationService.extract_markers(
+                    content_for_markers or json.dumps(slide.get("interactive_data", {}))
+                )
+
+                content_obj = TopicContent(
+                    topic_id=slide.get("topic_id"),
+                    content_type="slide",
+                    content=slide.get("content", ""),
+                    interactive_data=slide.get("interactive_data"),
+                    learning_methodologies=slide.get("learning_methodologies"),
+                    adaptation_options=slide.get("metadata"),
+                    resources=slide.get("resources"),
+                    web_resources=slide.get("web_resources"),
+                    generation_prompt=slide.get("generation_prompt"),
+                    ai_credits=slide.get("ai_credits", True),
+                    personalization_markers=markers,
+                    slide_template=slide.get("slide_template", {}),
+                    # Force skeleton status regardless of provided status
+                    status="skeleton",
+                    order=slide.get("order"),
+                    parent_content_id=slide.get("parent_content_id"),
+                    content_html=None,  # Ensure data consistency for skeleton slides
+                    narrative_text=None,  # Ensure data consistency for skeleton slides
+                    full_text=slide.get("full_text")
+                )
+                d = content_obj.to_dict()
+                # Store template_snapshot explicitly as provided for later rendering use
+                d["template_snapshot"] = slide.get("template_snapshot")
+                docs.append(d)
+
+            # Insertar en bloque
+            result = self.collection.insert_many(docs, session=session)
+            inserted_ids = [str(_id) for _id in result.inserted_ids]
+
+            # Actualizar contador de uso para slides
+            self.content_type_service.collection.update_one(
+                {"code": "slide"},
+                {"$inc": {"usage_count": len(inserted_ids)}},
+                session=session
+            )
+
+            session.commit_transaction()
+            transaction_active = False
+
+            logging.info(f"create_bulk_slides_skeleton: Insertadas {len(inserted_ids)} slides skeleton para topic {first_topic}")
+            # Log structure of template_snapshot for debugging (capped verbosity)
+            try:
+                logging.debug(f"create_bulk_slides_skeleton: template_snapshot ejemplo: {json.dumps(slides_data[0].get('template_snapshot'), ensure_ascii=False)[:200]}")
+            except Exception:
+                pass
+
+            return True, inserted_ids
+        except Exception as e:
+            if transaction_active:
+                try:
+                    session.abort_transaction()
+                except Exception:
+                    pass
+            logging.error(f"Error en create_bulk_slides_skeleton: {e}")
+            return False, str(e)
+        finally:
+            session.end_session()
+
+    def _validate_sequential_order(self, contents_data: List[Dict], types: Tuple[str, ...] = ('slide',)) -> None:
         """
         Valida que el orden secuencial sea consistente si se proporciona.
-        
+
         Args:
-            contents_data: Lista de datos de contenidos
-            
-        Raises:
-            ValueError: Si el orden no es válido
+            contents_data: Lista de contenidos a validar
+            types: Tupla de tipos de contenido a validar (default: solo slides)
         """
-        # Agrupar por topic_id y parent_content_id para validar orden
         groups = {}
-        
+
         for i, content_data in enumerate(contents_data):
+            # Solo incluir en la validación si el tipo de contenido está en los tipos especificados
+            content_type = content_data.get("content_type")
+            if content_type not in types:
+                continue
+
             topic_id = content_data.get("topic_id")
             parent_id = content_data.get("parent_content_id")
             order = content_data.get("order")
@@ -537,27 +696,26 @@ class ContentService(VerificationBaseService):
                 groups[group_key].append({
                     "index": i,
                     "order": order,
-                    "content_type": content_data.get("content_type")
+                    "content_type": content_type
                 })
         
         # Validar cada grupo
         for group_key, items in groups.items():
-            if len(items) > 1:
-                # Ordenar por order
-                items.sort(key=lambda x: x["order"])
-                
-                # Verificar que no haya duplicados
-                orders = [item["order"] for item in items]
-                if len(orders) != len(set(orders)):
-                    duplicates = [order for order in set(orders) if orders.count(order) > 1]
-                    raise ValueError(f"Orden duplicado encontrado en grupo {group_key}: {duplicates}")
-                
-                # Verificar secuencia consecutiva desde 1
-                expected_order = 1
-                for item in items:
-                    if item["order"] != expected_order:
-                        raise ValueError(f"Orden secuencial incorrecto en grupo {group_key}: esperado {expected_order}, encontrado {item['order']}")
-                    expected_order += 1
+            # Ordenar por order
+            items.sort(key=lambda x: x["order"])
+            
+            # Verificar que no haya duplicados
+            orders = [item["order"] for item in items]
+            if len(orders) != len(set(orders)):
+                duplicates = [order for order in set(orders) if orders.count(order) > 1]
+                raise ValueError(f"Orden duplicado encontrado en grupo {group_key}: {duplicates}")
+            
+            # Verificar secuencia consecutiva desde 1 (incluso si hay un solo item)
+            expected_order = 1
+            for item in items:
+                if item["order"] != expected_order:
+                    raise ValueError(f"Orden secuencial incorrecto en grupo {group_key}: esperado {expected_order}, encontrado {item['order']}")
+                expected_order += 1
 
     def get_topic_content(self, topic_id: str, content_type: str = None) -> List[Dict]:
         """
@@ -853,6 +1011,74 @@ class ContentService(VerificationBaseService):
         Obtiene estadísticas de embedding para un tema.
         """
         return self.embedded_content_service.get_embedding_statistics(topic_id)
+    
+    def validate_template_snapshot(self, template_snapshot: Any) -> Tuple[bool, str]:
+        """
+        Valida la estructura esperada del campo `template_snapshot` que describe estilos de slide.
+        Se espera un objeto/dict con campos como:
+            - palette: dict {primary: "#FFFFFF", secondary: "#000000", ...}
+            - grid: dict {columns: int, gap: int, rows: optional int}
+            - fontFamilies: list of str
+            - spacing: dict {small: int, medium: int, large: int}
+            - breakpoints: dict {mobile: int, tablet: int, desktop: int}
+        Retorna (True, "") si válido, o (False, "mensaje") si inválido.
+        """
+        try:
+            if not isinstance(template_snapshot, dict):
+                logging.debug("validate_template_snapshot: template_snapshot debe ser un objeto/dict")
+                return False, "template_snapshot debe ser un objeto JSON (no un string)"
+            
+            # Required top-level keys (flexible)
+            required_keys = ["palette", "grid", "fontFamilies", "spacing", "breakpoints"]
+            for key in required_keys:
+                if key not in template_snapshot:
+                    return False, f"Falta campo requerido en template_snapshot: '{key}'"
+
+            # Validate palette
+            palette = template_snapshot.get("palette")
+            if not isinstance(palette, dict) or not palette:
+                return False, "palette debe ser un objeto con al menos un color"
+            hex_color_re = re.compile(r'^#([A-Fa-f0-9]{6}|[A-Fa-f0-9]{3})$')
+            for name, color in palette.items():
+                if not isinstance(color, str) or not hex_color_re.match(color.strip()):
+                    return False, f"palette.{name} debe ser un color hex válido (ej. '#RRGGBB')"
+
+            # Validate grid
+            grid = template_snapshot.get("grid")
+            if not isinstance(grid, dict):
+                return False, "grid debe ser un objeto con configuración de grillas"
+            columns = grid.get("columns")
+            if not isinstance(columns, int) or columns < 1:
+                return False, "grid.columns debe ser un entero >= 1"
+            if "gap" in grid and (not isinstance(grid.get("gap"), int) or grid.get("gap") < 0):
+                return False, "grid.gap debe ser un entero >= 0 si se proporciona"
+
+            # Validate fontFamilies
+            font_families = template_snapshot.get("fontFamilies")
+            if not isinstance(font_families, list) or not font_families or not all(isinstance(f, str) for f in font_families):
+                return False, "fontFamilies debe ser una lista de cadenas de texto indicando familias de fuentes"
+
+            # Validate spacing
+            spacing = template_snapshot.get("spacing")
+            if not isinstance(spacing, dict):
+                return False, "spacing debe ser un objeto con valores numéricos"
+            for k, v in spacing.items():
+                if not isinstance(v, (int, float)) or v < 0:
+                    return False, f"spacing.{k} debe ser un número >= 0"
+
+            # Validate breakpoints
+            breakpoints = template_snapshot.get("breakpoints")
+            if not isinstance(breakpoints, dict) or not breakpoints:
+                return False, "breakpoints debe ser un objeto con al menos un punto de ruptura"
+            for name, val in breakpoints.items():
+                if not isinstance(val, int) or val <= 0:
+                    return False, f"breakpoints.{name} debe ser un entero positivo"
+
+            logging.debug("validate_template_snapshot: estructura válida")
+            return True, ""
+        except Exception as e:
+            logging.error(f"Error validando template_snapshot: {e}")
+            return False, f"Error validando template_snapshot: {str(e)}"
 
     def update_content(self, content_id: str, update_data: Dict) -> Tuple[bool, str]:
         """

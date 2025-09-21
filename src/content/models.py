@@ -98,6 +98,8 @@ class TopicContent:
                  content_html: Optional[str] = None,
                  narrative_text: Optional[str] = None,
                  full_text: Optional[str] = None,
+                 # Campo para snapshot de plantilla de estilos
+                 template_snapshot: Optional[Dict] = None,
                  **kwargs):
         self._id = _id or ObjectId()
         self.topic_id = ObjectId(topic_id)
@@ -129,6 +131,7 @@ class TopicContent:
         self.content_html = content_html
         self.narrative_text = narrative_text
         self.full_text = full_text
+        self.template_snapshot = template_snapshot
 
         if kwargs:
             logging.warning(f"TopicContent received unexpected arguments, which were ignored: {list(kwargs.keys())}")
@@ -158,6 +161,7 @@ class TopicContent:
             "content_html": self.content_html,
             "narrative_text": self.narrative_text,
             "full_text": self.full_text,
+            "template_snapshot": self.template_snapshot,
         }
         # Campos opcionales de plantillas
         if self.instance_id:

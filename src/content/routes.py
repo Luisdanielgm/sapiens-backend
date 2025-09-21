@@ -3,6 +3,7 @@ from flask_jwt_extended import jwt_required, get_jwt_identity
 from bson import ObjectId
 import logging
 import datetime
+import json
 
 from src.shared.decorators import role_required
 from src.shared.database import get_db
@@ -135,6 +136,31 @@ def create_content():
 def create_bulk_content():
     """
     Crea múltiples contenidos en una sola transacción.
+
+    Soporte mejorado para slides:
+    - Para creación masiva de diapositivas skeleton considere usar el endpoint dedicado:
+      POST /api/content/bulk/slides
+    - Si se incluyen diapositivas en el array 'contents', los campos relevantes son:
+        - template_snapshot: objeto JSON con estructura de estilos (obligatorio para skeleton slides).
+          Ejemplo de estructura esperada:
+          {
+              "palette": {"primary": "#112233", "secondary": "#FFFFFF"},
+              "grid": {"columns": 12, "gap": 16},
+              "fontFamilies": ["Inter", "Roboto"],
+              "spacing": {"small": 8, "medium": 16, "large": 32},
+              "breakpoints": {"mobile": 480, "tablet": 768, "desktop": 1024}
+          }
+        - full_text: texto plano usado para generar HTML/narrativa (obligatorio para skeleton slides)
+        - content_html: contenido HTML (opcional, para slides no-skeleton)
+        - narrative_text: texto narrativo (opcional, para slides no-skeleton)
+        - order: entero positivo indicando posición secuencial
+        - parent_content_id: ObjectId del contenido padre (opcional)
+    - Validaciones importantes:
+        - Cada elemento en 'contents' debe incluir topic_id y content_type
+        - Para slides skeleton (solo full_text sin HTML/narrativa): template_snapshot es OBLIGATORIO
+        - Para slides con HTML/narrativa: template_snapshot es opcional pero se valida si se proporciona
+        - template_snapshot debe ser un objeto/dict cuando se proporcione (no string)
+        - Si se proporciona content_html, será validado por el servidor
     
     Body:
     {
@@ -146,7 +172,8 @@ def create_bulk_content():
                 "description": "Descripción",
                 "content_data": {...},
                 "order": 1,
-                "parent_content_id": "ObjectId"
+                "parent_content_id": "ObjectId",
+                "template_snapshot": { ... } // opcional en este endpoint pero requiere estructura JSON si existe
                 // ... otros campos del contenido
             },
             // ... más contenidos
@@ -180,6 +207,131 @@ def create_bulk_content():
             
     except Exception as e:
         logging.error(f"Error creando contenidos en lote: {str(e)}")
+        return APIRoute.error(
+            ErrorCodes.SERVER_ERROR,
+            "Error interno del servidor",
+            status_code=500,
+        )
+
+@content_bp.route('/bulk/slides', methods=['POST'])
+@APIRoute.standard(auth_required_flag=True, roles=[ROLES["TEACHER"], ROLES["ADMIN"]])
+def create_bulk_slides():
+    """
+    Endpoint optimizado para creación masiva de diapositivas skeleton.
+
+    Reglas y estructura:
+    - Body: { "slides": [ { slide_object }, ... ] }
+    - Cada slide_object debe contener:
+        - topic_id: ObjectId (todas las slides deben pertenecer al mismo topic_id)
+        - content_type: "slide" (estrictamente)
+        - order: entero positivo. La secuencia debe ser consecutiva comenzando en 1 sin gaps.
+        - full_text: texto no vacío (se usará como base para la generación skeleton)
+        - template_snapshot: objeto JSON con la estructura de estilos (obligatorio).
+          Ejemplo mínimo (template_snapshot debe ser un dict, no un string):
+            {
+              "palette": {"primary": "#112233", "secondary": "#FFFFFF"},
+              "grid": {"columns": 12, "gap": 16},
+              "fontFamilies": ["Inter", "Roboto"],
+              "spacing": {"small": 8, "medium": 16, "large": 32},
+              "breakpoints": {"mobile": 480, "tablet": 768, "desktop": 1024}
+            }
+        - parent_content_id: ObjectId (opcional)
+        - Otros campos permitidos: slide_template, interactive_data, resources, metadata, generation_prompt
+
+    Validaciones realizadas por este endpoint (además de las del servicio):
+    - Verifica que se haya enviado el array 'slides' y que no esté vacío
+    - Todos los items deben ser content_type == 'slide'
+    - Todas las slides deben compartir el mismo topic_id
+    - template_snapshot debe ser un objeto/dict (no string)
+    - Verifica que order sea una secuencia única y consecutiva comenzando en 1
+
+    Responde con:
+    - 201 + lista de IDs insertados en caso de éxito
+    - 400 con mensaje de validación en caso de datos inválidos
+    """
+    try:
+        data = request.json or {}
+        slides_data = data.get('slides', [])
+
+        if not slides_data or not isinstance(slides_data, list):
+            return APIRoute.error(ErrorCodes.VALIDATION_ERROR, "Se requiere un array 'slides' con al menos un elemento")
+
+        # Determine user id for creator_id
+        user_id = getattr(request, 'user_id', None) or get_jwt_identity()
+
+        # Basic validations before delegating to service to provide faster feedback
+        first_topic = None
+        seen_orders = []
+        for idx, slide in enumerate(slides_data):
+            if not isinstance(slide, dict):
+                return APIRoute.error(ErrorCodes.VALIDATION_ERROR, f"Slide {idx+1} debe ser un objeto")
+
+            # Ensure content_type is 'slide'
+            if slide.get('content_type') != 'slide':
+                return APIRoute.error(ErrorCodes.VALIDATION_ERROR, f"Slide {idx+1}: content_type debe ser 'slide'")
+
+            # topic_id presence and consistency
+            topic_id = slide.get('topic_id')
+            if not topic_id:
+                return APIRoute.error(ErrorCodes.VALIDATION_ERROR, f"Slide {idx+1}: topic_id es requerido")
+            if first_topic is None:
+                first_topic = topic_id
+            else:
+                if topic_id != first_topic:
+                    return APIRoute.error(ErrorCodes.VALIDATION_ERROR, "Todas las diapositivas deben pertenecer al mismo topic_id")
+
+            # order validations
+            order = slide.get('order')
+            if order is None or not isinstance(order, int) or order < 1:
+                return APIRoute.error(ErrorCodes.VALIDATION_ERROR, f"Slide {idx+1}: order es requerido y debe ser un entero positivo")
+            seen_orders.append(order)
+
+            # full_text requirement for skeleton slides
+            full_text = slide.get('full_text')
+            if full_text is None or not isinstance(full_text, str) or not full_text.strip():
+                return APIRoute.error(ErrorCodes.VALIDATION_ERROR, f"Slide {idx+1}: full_text es requerido y debe ser una cadena no vacía para crear skeleton")
+
+            # template_snapshot must be an object/dict
+            ts = slide.get('template_snapshot')
+            if ts is None or not isinstance(ts, dict):
+                return APIRoute.error(ErrorCodes.VALIDATION_ERROR, f"Slide {idx+1}: template_snapshot es requerido y debe ser un objeto JSON (no string)")
+
+            # Attach creator_id for auditing
+            slide['creator_id'] = user_id
+
+        # Validate orders: unique and consecutive starting at 1
+        seen_orders_sorted = sorted(seen_orders)
+        if not seen_orders_sorted:
+            return APIRoute.error(ErrorCodes.VALIDATION_ERROR, "No se encontraron órdenes válidos en las diapositivas")
+        if seen_orders_sorted[0] != 1:
+            return APIRoute.error(ErrorCodes.VALIDATION_ERROR, "La secuencia de 'order' debe comenzar en 1")
+        for expected, actual in enumerate(seen_orders_sorted, start=1):
+            if expected != actual:
+                return APIRoute.error(ErrorCodes.VALIDATION_ERROR, f"La secuencia de 'order' debe ser consecutiva sin gaps. Esperado {expected}, encontrado {actual}")
+
+        # Log a compact example of the template_snapshot for debugging (capped)
+        try:
+            example_ts = slides_data[0].get('template_snapshot')
+            logging.info(f"create_bulk_slides: Recibiendo {len(slides_data)} slides para topic {first_topic}. Ejemplo template_snapshot: {json.dumps(example_ts, ensure_ascii=False)[:400]}")
+        except Exception:
+            logging.debug("create_bulk_slides: no fue posible serializar template_snapshot para logging")
+
+        # Delegate to service optimized method
+        success, result = content_service.create_bulk_slides_skeleton(slides_data)
+
+        if success:
+            return APIRoute.success(
+                data={"slide_ids": result},
+                message=f"Se crearon {len(result)} slides skeleton exitosamente",
+                status_code=201,
+            )
+        else:
+            # The service returns descriptive error strings; map to validation when applicable
+            err_msg = result or "Error creando slides"
+            return APIRoute.error(ErrorCodes.CREATION_ERROR, err_msg)
+
+    except Exception as e:
+        logging.error(f"Error creando slides en lote: {str(e)}")
         return APIRoute.error(
             ErrorCodes.SERVER_ERROR,
             "Error interno del servidor",
