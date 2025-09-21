@@ -1150,7 +1150,7 @@ class TopicService(VerificationBaseService):
         except Exception as e:
             return []
     
-    def update_theory_content(self, topic_id: str, theory_content: str) -> Tuple[bool, str]:
+  def update_theory_content(self, topic_id: str, theory_content: str) -> Tuple[bool, str]:
         try:
             # Actualizar el contenido teórico
             result = self.collection.update_one(
@@ -1162,13 +1162,16 @@ class TopicService(VerificationBaseService):
                     }
                 }
             )
-            
+
             if result.modified_count > 0:
                 return True, "Contenido teórico actualizado exitosamente"
-            return False, "No se pudo actualizar el contenido teórico"
+            elif result.matched_count > 0 and result.modified_count == 0:
+                logging.info(f"update_theory_content: Sin cambios en el contenido teórico para topic {topic_id}")
+                return True, "Sin cambios en el contenido teórico"
+            else:
+                return False, "Tema no encontrado"
         except Exception as e:
-            return False, str(e)
-    
+            return False, str(e)    
     def get_theory_content(self, topic_id: str) -> Optional[Dict]:
         try:
             # Obtener solo el contenido teórico
