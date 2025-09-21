@@ -1252,6 +1252,123 @@ class TopicService(VerificationBaseService):
             logging.error(f"Error al obtener contenidos por tipo: {str(e)}")
             return None
 
+    def validate_theory_content_integrity(self, topic_id: str) -> Dict[str, Any]:
+        """
+        Valida la integridad de los datos de contenido teórico entre Topic.theory_content
+        y cualquier TopicContent de tipo 'text' existente.
+
+        Args:
+            topic_id: ID del tema a validar
+
+        Returns:
+            Dict con información de integridad y inconsistencias encontradas
+        """
+        try:
+            validate_object_id(topic_id)
+
+            # Obtener el tema
+            topic = self.collection.find_one({"_id": ObjectId(topic_id)})
+            if not topic:
+                return {
+                    "valid": False,
+                    "error": "Tema no encontrado",
+                    "topic_id": topic_id
+                }
+
+            # Obtener theory_content del Topic
+            topic_theory_content = topic.get("theory_content", "")
+            has_topic_theory = bool(topic_theory_content and topic_theory_content.strip())
+
+            # Buscar TopicContent de tipo 'text'
+            db = get_db()
+            text_contents = list(db.topic_contents.find({
+                "topic_id": ObjectId(topic_id),
+                "content_type": "text"
+            }))
+
+            # Analizar inconsistencias
+            inconsistencies = []
+            recommendations = []
+
+            if has_topic_theory and text_contents:
+                inconsistencies.append({
+                    "type": "redundant_text_content",
+                    "description": f"Existen {len(text_contents)} TopicContent de tipo 'text' cuando ya hay theory_content en Topic",
+                    "severity": "warning",
+                    "count": len(text_contents)
+                })
+                recommendations.append("Ejecutar cleanup_redundant_text_content() para eliminar duplicados")
+
+            if not has_topic_theory and not text_contents:
+                inconsistencies.append({
+                    "type": "no_theoretical_content",
+                    "description": "No hay contenido teórico ni en Topic.theory_content ni en TopicContent",
+                    "severity": "info"
+                })
+
+            # Verificar contenidos '[object Object]' en theory_content
+            if has_topic_theory and topic_theory_content in ['[object Object]', '[Object object]', 'undefined', 'null']:
+                inconsistencies.append({
+                    "type": "invalid_theory_content",
+                    "description": f"theory_content contiene valor inválido: '{topic_theory_content}'",
+                    "severity": "error"
+                })
+                recommendations.append("Actualizar theory_content con contenido válido")
+
+            # Verificar duplicación de contenido con lógica mejorada
+            if has_topic_theory and text_contents:
+                for text_content in text_contents:
+                    # Enhanced duplicate extraction logic - try fields in order
+                    content_text = ""
+
+                    # Try 'content' field first
+                    if "content" in text_content and text_content["content"] is not None:
+                        content_text = str(text_content["content"])
+                    # Try 'content_text' field next
+                    elif "content_text" in text_content and text_content["content_text"] is not None:
+                        content_text = str(text_content["content_text"])
+                    # Try 'content_data.text' if content_data is a dict
+                    elif "content_data" in text_content and isinstance(text_content["content_data"], dict):
+                        content_data = text_content["content_data"]
+                        if "text" in content_data and content_data["text"] is not None:
+                            content_text = str(content_data["text"])
+
+                    # Compare with topic theory content
+                    if content_text == topic_theory_content:
+                        inconsistencies.append({
+                            "type": "exact_duplicate",
+                            "description": f"TopicContent {text_content['_id']} tiene contenido idéntico a theory_content",
+                            "severity": "warning",
+                            "content_id": str(text_content["_id"])
+                        })
+
+            # Determinar estado general
+            has_errors = any(inc["severity"] == "error" for inc in inconsistencies)
+            has_warnings = any(inc["severity"] == "warning" for inc in inconsistencies)
+
+            return {
+                "valid": not has_errors,
+                "topic_id": topic_id,
+                "has_topic_theory_content": has_topic_theory,
+                "topic_theory_content_length": len(topic_theory_content) if has_topic_theory else 0,
+                "text_content_count": len(text_contents),
+                "inconsistencies": inconsistencies,
+                "recommendations": recommendations,
+                "summary": {
+                    "errors": len([inc for inc in inconsistencies if inc["severity"] == "error"]),
+                    "warnings": len([inc for inc in inconsistencies if inc["severity"] == "warning"]),
+                    "info": len([inc for inc in inconsistencies if inc["severity"] == "info"])
+                }
+            }
+
+        except Exception as e:
+            logging.error(f"validate_theory_content_integrity: Error para topic {topic_id}: {str(e)}")
+            return {
+                "valid": False,
+                "error": f"Error en validación: {str(e)}",
+                "topic_id": topic_id
+            }
+
 class EvaluationService(VerificationBaseService):
     def __init__(self):
         super().__init__(collection_name="evaluations")
