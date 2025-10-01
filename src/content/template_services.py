@@ -10,6 +10,7 @@ import os
 
 from .template_models import Template, TemplateInstance
 from src.shared.database import get_db
+from .models import LearningMethodologyTypes, DeprecatedContentTypes, ContentTypes
 
 class TemplateService:
     """
@@ -19,7 +20,8 @@ class TemplateService:
     def __init__(self):
         self.db = get_db()
         self.templates_collection: Collection = self.db.templates
-        
+        # No crear TemplateInstanceService aquí para evitar recursión entre inicializadores.
+    
     def create_template(self, template_data: Dict, user_id: str) -> Template:
         """
         Crea una nueva plantilla.
@@ -113,48 +115,157 @@ class TemplateService:
                       owner_filter: str = "all", 
                       scope_filter: str = None, 
                       user_id: str = None,
-                      workspace_id: str = None) -> List[Template]:
+                      workspace_id: str = None,
+                      style_tags: Optional[List[str]] = None,
+                      subject_tags: Optional[List[str]] = None,
+                      learning_methodology: Optional[str] = None,
+                      compatibility_mode: Optional[str] = None,
+                      migration_recommended: Optional[bool] = None,
+                      limit: int = 100,
+                      skip: int = 0,
+                      sort: Optional[List[Tuple[str, int]]] = None) -> List[Template]:
         """
-        Lista plantillas con filtros.
+        Lista plantillas con filtros optimizados. Mueve la lógica de filtrado por tags al nivel de consulta MongoDB.
         
         Args:
             owner_filter: "me" | "all"
             scope_filter: "public" | "org" | "private" | None
             user_id: ID del usuario actual
             workspace_id: ID del workspace actual
+            style_tags: lista de tags de estilo a filtrar (coincidencia ALL)
+            subject_tags: lista de tags de materia a filtrar (coincidencia ANY)
+            learning_methodology: filtrar plantillas compatibles con esta metodología
+            compatibility_mode: modo de compatibilidad (p.ej. "kinesthetic") para incluir plantillas mapeadas
+            migration_recommended: si True, solo plantillas marcadas como recomendadas para migración legacy
+            limit: número máximo de resultados
+            skip: offset
+            sort: lista de tuplas (campo, dir) para sort
         """
         try:
             query = {}
             
             # Filtro de propietario
             if owner_filter == "me" and user_id:
-                query["owner_id"] = ObjectId(user_id)
+                try:
+                    query["owner_id"] = ObjectId(user_id)
+                except Exception:
+                    query["owner_id"] = user_id
             elif owner_filter == "all":
                 # Para "all", incluir públicas y del usuario/org
                 scope_conditions = [{"scope": "public"}]
                 
                 if user_id:
-                    scope_conditions.append({"owner_id": ObjectId(user_id)})
+                    try:
+                        scope_conditions.append({"owner_id": ObjectId(user_id)})
+                    except Exception:
+                        scope_conditions.append({"owner_id": user_id})
                 
-                # TODO: Añadir filtro por organización cuando se implemente
+                    # Añadir plantillas privadas del usuario
+                    scope_conditions.append({"scope": {"$in": ["public", "org", "private"]}})
+                
+                # Si workspace_id disponible, preferir org scope también
                 if workspace_id:
-                    # scope_conditions.append({"workspace_id": ObjectId(workspace_id), "scope": "org"})
-                    pass
+                    # Buscar plantillas de scope org asociadas al workspace (campo workspace_id)
+                    try:
+                        scope_conditions.append({"workspace_id": ObjectId(workspace_id), "scope": "org"})
+                    except Exception:
+                        scope_conditions.append({"workspace_id": workspace_id, "scope": "org"})
                 
                 query["$or"] = scope_conditions
             
-            # Filtro de scope
+            # Filtro de scope explícito
             if scope_filter:
+                # Combinar correctamente con posibles $or preexistentes
                 if "$or" in query:
-                    # Si ya hay filtro OR, combinar con scope
                     query = {"$and": [query, {"scope": scope_filter}]}
                 else:
                     query["scope"] = scope_filter
             
-            # Ejecutar consulta
-            templates_data = list(self.templates_collection.find(query).sort("created_at", -1))
+            # Filtrado por style_tags: requerir que el array style_tags del documento contenga al menos todos los solicitados
+            if style_tags:
+                if isinstance(style_tags, str):
+                    style_tags = [style_tags]
+                # usar $all para requerir todos los tags; si se desea $in, cambiar a {"$in": style_tags}
+                query["style_tags"] = {"$all": style_tags}
             
-            return [Template(**template_data) for template_data in templates_data]
+            # Filtrado por subject_tags: coincidencia ANY (al menos uno)
+            if subject_tags:
+                if isinstance(subject_tags, str):
+                    subject_tags = [subject_tags]
+                query["subject_tags"] = {"$in": subject_tags}
+            
+            # Filtrado por metodología de aprendizaje: mirar en capabilities.compatible_methodologies o en capabilities.learning_methodologies
+            if learning_methodology:
+                # buscar en posibles ubicaciones dentro de capabilities
+                query["$or"] = query.get("$or", []) + [
+                    {"capabilities.compatible_methodologies": learning_methodology},
+                    {"capabilities.learning_methodologies": learning_methodology},
+                    {"capabilities.methodologies": learning_methodology}
+                ]
+                # Si previously had a top-level $and container we must keep consistent, but Mongo will accept multiple $or as list
+                
+            # compatibility_mode: por ejemplo 'kinesthetic' -> map to recommended template tags/mappings
+            if compatibility_mode:
+                # Map methodology keywords to template name hints using LearningMethodologyTypes mapping
+                mapped = LearningMethodologyTypes.map_kinesthetic_to_templates().get(compatibility_mode, [])
+                if mapped:
+                    # Buscar por name o por capabilities.recommendation
+                    query["$or"] = query.get("$or", []) + [
+                        {"name": {"$in": mapped}},
+                        {"capabilities.recommended_aliases": {"$in": mapped}},
+                        {"capabilities.modes": compatibility_mode}
+                    ]
+                else:
+                    # Fallback: attempt to match capability flag
+                    query["capabilities.mode"] = compatibility_mode
+            
+            # migration_recommended: buscar plantillas marcadas para reemplazar legacy games/simulations
+            if migration_recommended is not None:
+                if migration_recommended:
+                    # Buscar campo capabilities.replaces_legacy o migration_recommended = True
+                    query["$or"] = query.get("$or", []) + [
+                        {"capabilities.replaces_legacy": True},
+                        {"migration_recommended": True},
+                        {"capabilities.legacy_compatibility": True}
+                    ]
+                else:
+                    # Explicit negative filter
+                    query["$and"] = query.get("$and", []) + [
+                        {"capabilities.replaces_legacy": {"$ne": True}},
+                        {"migration_recommended": {"$ne": True}},
+                        {"capabilities.legacy_compatibility": {"$ne": True}}
+                    ]
+            
+            # Ejecutar consulta con paginación y sort opcional
+            cursor = self.templates_collection.find(query)
+            # aplicar sort por defecto si no se entrega sort
+            if sort:
+                cursor = cursor.sort(sort)
+            else:
+                cursor = cursor.sort("created_at", -1)
+            if skip and skip > 0:
+                cursor = cursor.skip(int(skip))
+            if limit and limit > 0:
+                cursor = cursor.limit(int(limit))
+            
+            templates_data = list(cursor)
+            
+            # Construir objetos Template (se usa _clean_template_data en get_template; aquí usamos Template(**data) similar a antes)
+            result = []
+            for td in templates_data:
+                # intentar limpiar datos parcialmente para evitar errores si faltan campos
+                try:
+                    result.append(Template(**td))
+                except Exception:
+                    # fallback: reconstruir con campos mínimos
+                    try:
+                        cleaned = self._clean_template_data(td)
+                        result.append(Template(**cleaned))
+                    except Exception:
+                        logging.warning(f"list_templates: no se pudo construir Template para documento {_id if ( _id := td.get('_id')) else 'unknown'}; se omite")
+                        continue
+            
+            return result
             
         except Exception as e:
             logging.error(f"Error listing templates: {str(e)}")
@@ -349,6 +460,559 @@ class TemplateService:
         except Exception as e:
             logging.error(f"Error deleting template {template_id}: {str(e)}")
             raise e
+
+    # Nuevo método optimizado para el endpoint /api/templates/available
+    def get_available_templates_for_teacher(self,
+                                            teacher_id: str,
+                                            workspace_id: Optional[str] = None,
+                                            subject: Optional[str] = None,
+                                            style: Optional[str] = None,
+                                            scope: Optional[str] = "public",
+                                            learning_methodology: Optional[str] = None,
+                                            compatibility: Optional[str] = None,
+                                            limit: int = 50,
+                                            skip: int = 0) -> List[Dict]:
+        """
+        Retorna una lista de plantillas optimizadas para profesores, incluyendo metadata adicional:
+        usage_statistics, effectiveness_metrics, migration_compatibility.
+        Usa list_templates() internamente para los filtros principales.
+        """
+        try:
+            style_tags = [style] if style else None
+            subject_tags = [subject] if subject else None
+
+            # Llamar a list_templates con parámetros apropiados
+            templates = self.list_templates(
+                owner_filter="all",
+                scope_filter=scope,
+                user_id=teacher_id,
+                workspace_id=workspace_id,
+                style_tags=style_tags,
+                subject_tags=subject_tags,
+                learning_methodology=learning_methodology,
+                compatibility_mode=compatibility,
+                migration_recommended=None,
+                limit=limit,
+                skip=skip
+            )
+
+            # Preparar colecciones auxiliares para métricas
+            instances_coll = self.db.template_instances
+            metrics_coll = self.db.template_metrics if "template_metrics" in self.db.list_collection_names() else None
+
+            enriched = []
+            for t in templates:
+                try:
+                    tid = t._id if hasattr(t, "_id") else None
+                    tid_obj = ObjectId(tid) if tid else None
+
+                    # usage_count: cantidad de instancias basadas en esta plantilla
+                    usage_count = 0
+                    if tid_obj:
+                        try:
+                            usage_count = instances_coll.count_documents({"template_id": tid_obj})
+                        except Exception:
+                            # fallback: count by string id
+                            usage_count = instances_coll.count_documents({"template_id": str(tid_obj)})
+                    
+                    # effectiveness_score: intentar leer de template_metrics collection si existe
+                    effectiveness_score = None
+                    if metrics_coll and tid_obj:
+                        try:
+                            m = metrics_coll.find_one({"template_id": tid_obj})
+                            if m and "effectiveness_score" in m:
+                                effectiveness_score = float(m.get("effectiveness_score"))
+                        except Exception:
+                            effectiveness_score = None
+
+                    # migration_compatibility: heurística simple
+                    caps = getattr(t, "capabilities", {}) or {}
+                    migration_compatibility = bool(caps.get("replaces_legacy") or caps.get("legacy_compatibility") or getattr(t, "migration_recommended", False))
+
+                    # Build result entry
+                    entry = {
+                        "template_id": str(tid) if tid else None,
+                        "name": getattr(t, "name", ""),
+                        "description": getattr(t, "description", ""),
+                        "scope": getattr(t, "scope", ""),
+                        "style_tags": getattr(t, "style_tags", []),
+                        "subject_tags": getattr(t, "subject_tags", []),
+                        "usage_statistics": {
+                            "usage_count": usage_count
+                        },
+                        "effectiveness_metrics": {
+                            "effectiveness_score": effectiveness_score
+                        },
+                        "migration_compatibility": migration_compatibility,
+                        "owner_id": str(getattr(t, "owner_id", "")),
+                        "created_at": getattr(t, "created_at", None),
+                        "updated_at": getattr(t, "updated_at", None)
+                    }
+                    enriched.append(entry)
+                except Exception as e:
+                    logging.warning(f"get_available_templates_for_teacher: error enriqueciendo plantilla: {e}")
+                    continue
+
+            # Priorizar plantillas compatibles con migración (si las hay)
+            enriched.sort(key=lambda x: (not x.get("migration_compatibility", False), -(x.get("usage_statistics", {}).get("usage_count", 0))),)
+            return enriched
+
+        except Exception as e:
+            logging.error(f"Error in get_available_templates_for_teacher: {e}")
+            return []
+
+    def create_template_instance_for_topic(self,
+                                           template_id: str,
+                                           topic_id: str,
+                                           creator_id: str,
+                                           props: Optional[Dict] = None,
+                                           auto_generate: bool = False,
+                                           migration_source: Optional[Dict] = None,
+                                           create_topic_content: bool = False,
+                                           content_type_for_instance: str = "slide") -> Dict:
+        """
+        Encapsula la lógica para crear una instancia de plantilla ligada a un tema.
+        Valida permisos, crea la instancia y opcionalmente crea un TopicContent vinculado.
+        Soporta extracción de props desde contenidos legacy (migration_source).
+        """
+        try:
+            # Validar plantilla
+            template_doc = self.templates_collection.find_one({"_id": ObjectId(template_id)})
+            if not template_doc:
+                return {"success": False, "error": "Plantilla no encontrada"}
+
+            # Validar acceso según scope
+            scope = template_doc.get("scope", "private")
+            owner_id = template_doc.get("owner_id")
+            if scope == "private" and str(owner_id) != str(creator_id):
+                return {"success": False, "error": "No tienes permisos para usar esta plantilla (privada)"}
+
+            # Validar topic existe usando ContentService
+            from .services import ContentService
+            content_service = ContentService()
+            if not content_service.check_topic_exists(topic_id):
+                return {"success": False, "error": "Topic no encontrado"}
+
+            # Si viene migration_source intentar mapear props automáticamente
+            instance_props = {}
+            try:
+                instance_props.update(template_doc.get("defaults", {}) or {})
+                if props:
+                    instance_props.update(props)
+                if migration_source and isinstance(migration_source, dict):
+                    # Extraer props básicos desde interactive_data o generation_prompt
+                    ms_interactive = migration_source.get("interactive_data", {})
+                    if isinstance(ms_interactive, dict):
+                        # Merge keys that match props_schema if available
+                        instance_props.update({k: v for k, v in ms_interactive.items() if k not in instance_props})
+                    # If generation_prompt exists, map to 'prompt' prop if template expects it
+                    prompt = migration_source.get("generation_prompt")
+                    if prompt and "prompt" in (template_doc.get("props_schema") or {}):
+                        instance_props["prompt"] = prompt
+            except Exception as e:
+                logging.warning(f"create_template_instance_for_topic: error mapeando migration_source: {e}")
+
+            # Crear instancia usando TemplateInstanceService
+            from .template_services import TemplateInstanceService as _TIS  # local import to avoid circular references at module import time
+            # Note: using local import path above to reference same file class; Python will resolve it to current module object.
+            instance_service = _TIS()
+            instance_payload = {
+                "template_id": str(template_doc.get("_id")),
+                "topic_id": topic_id,
+                "creator_id": creator_id,
+                "props": instance_props,
+                "assets": template_doc.get("assets", []),
+                "learning_mix": template_doc.get("baseline_mix")
+            }
+            instance_obj = instance_service.create_instance(instance_payload)
+
+            # Opcional: crear TopicContent vinculado a la instancia (inserción directa para evitar validaciones estrictas)
+            created_content_id = None
+            if create_topic_content:
+                try:
+                    content_doc = {
+                        "topic_id": ObjectId(topic_id),
+                        "content": migration_source.get("content") if isinstance(migration_source, dict) else "",
+                        "content_type": content_type_for_instance,
+                        "interactive_data": migration_source.get("interactive_data") if isinstance(migration_source, dict) else {},
+                        "learning_methodologies": migration_source.get("learning_methodologies", []),
+                        "render_engine": "html_template",
+                        "instance_id": instance_obj._id,
+                        "template_id": template_doc.get("_id"),
+                        "template_version": template_doc.get("version"),
+                        "status": "draft",
+                        "created_at": datetime.now(),
+                        "updated_at": datetime.now()
+                    }
+                    result = self.db.topic_contents.insert_one(content_doc)
+                    created_content_id = str(result.inserted_id)
+                except Exception as e:
+                    logging.warning(f"create_template_instance_for_topic: no se pudo crear TopicContent vinculado: {e}")
+
+            # Registrar evento de uso para estadísticas simples
+            try:
+                self.db.template_usage.insert_one({
+                    "template_id": template_doc.get("_id"),
+                    "instance_id": instance_obj._id,
+                    "topic_id": ObjectId(topic_id),
+                    "creator_id": creator_id,
+                    "migration_source": migration_source,
+                    "created_at": datetime.now()
+                })
+            except Exception:
+                # no fatal
+                pass
+
+            response = {
+                "success": True,
+                "instance_id": str(instance_obj._id),
+                "template_id": str(template_doc.get("_id")),
+                "created_content_id": created_content_id
+            }
+
+            # Si auto_generate True, delegar a servicios de generación (no implementado aquí, sólo flag)
+            if auto_generate:
+                # Encolar tarea de generación o llamar a generator if exists (omitir implementación detallada aquí)
+                try:
+                    # registrar petición para procesar en background
+                    self.db.template_generation_queue.insert_one({
+                        "instance_id": instance_obj._id,
+                        "requested_by": creator_id,
+                        "status": "pending",
+                        "created_at": datetime.now()
+                    })
+                except Exception:
+                    pass
+
+            return response
+
+        except Exception as e:
+            logging.error(f"Error in create_template_instance_for_topic: {e}")
+            return {"success": False, "error": str(e)}
+
+    # Métodos especializados para migración de contenidos legacy (games/simulations)
+    def analyze_legacy_content_for_migration(self, topic_id: Optional[str] = None, module_id: Optional[str] = None, workspace_id: Optional[str] = None) -> Dict:
+        """
+        Analiza contenidos legacy (game, simulation) en el scope dado y determina templates compatibles.
+        Retorna análisis por contenido con heurísticas de compatibilidad.
+        """
+        try:
+            from .services import ContentService
+            content_service = ContentService()
+            # Reutilizar lógica existente si el ContentService la expone
+            suggestions = content_service.get_legacy_content_migration_suggestions(topic_id=topic_id)
+            deprecated_types = ContentTypes.get_deprecated_types()
+            results = {
+                "summary": suggestions,
+                "analysis": []
+            }
+
+            # Buscar contenidos legacy concretos
+            query = {"content_type": {"$in": deprecated_types}, "status": {"$ne": "deleted"}}
+            if topic_id:
+                query["topic_id"] = ObjectId(topic_id)
+            if module_id:
+                # intentar resolver topics en module - si falla, omitir
+                try:
+                    topics = list(self.db.topics.find({"module_id": module_id}, {"_id": 1}))
+                    topic_ids = [t["_id"] for t in topics]
+                    if topic_ids:
+                        query["topic_id"] = {"$in": topic_ids}
+                except Exception:
+                    pass
+
+            legacy_contents = list(self.db.topic_contents.find(query))
+            for lc in legacy_contents:
+                cid = lc.get("_id")
+                methodologies = lc.get("learning_methodologies", []) or []
+                interactive_keys = list(lc.get("interactive_data", {}).keys()) if isinstance(lc.get("interactive_data"), dict) else []
+                complexity = len(interactive_keys)
+                # candidate templates: buscar por subject_tags similares o capabilities.replaces_legacy
+                candidate_query = {
+                    "$or": [
+                        {"capabilities.replaces_legacy": True},
+                        {"migration_recommended": True},
+                        {"subject_tags": {"$in": lc.get("subject_tags", []) or []}},
+                        {"capabilities.compatible_methodologies": {"$in": methodologies}}
+                    ]
+                }
+                candidates = list(self.templates_collection.find(candidate_query).limit(10))
+                scored = []
+                for c in candidates:
+                    # heurística de puntuación: coincidencia en metodologías + flags + subject overlap
+                    score = 0
+                    caps = c.get("capabilities", {}) or {}
+                    comp_meth = caps.get("compatible_methodologies", []) or []
+                    # +2 por cada methodology match
+                    for m in methodologies:
+                        if m in comp_meth:
+                            score += 2
+                    # +3 si replaces_legacy
+                    if caps.get("replaces_legacy"):
+                        score += 3
+                    # +1 por subject overlap
+                    subj_overlap = len(set(c.get("subject_tags", []) or []).intersection(set(lc.get("subject_tags", []) or [])))
+                    score += subj_overlap
+                    # +1 if template explicitly recommended
+                    if c.get("migration_recommended"):
+                        score += 1
+                    scored.append({
+                        "template_id": str(c.get("_id")),
+                        "name": c.get("name"),
+                        "score": score,
+                        "capabilities": caps
+                    })
+                # sort candidates by score desc
+                scored.sort(key=lambda x: -x["score"])
+                results["analysis"].append({
+                    "content_id": str(cid),
+                    "content_type": lc.get("content_type"),
+                    "topic_id": str(lc.get("topic_id")) if lc.get("topic_id") else None,
+                    "methodologies": methodologies,
+                    "interactive_keys": interactive_keys,
+                    "migration_complexity": complexity,
+                    "recommended_templates": scored[:5]
+                })
+
+            return results
+        except Exception as e:
+            logging.error(f"Error in analyze_legacy_content_for_migration: {e}")
+            return {"error": str(e)}
+
+    def get_migration_recommendations(self, content_id: str) -> Dict:
+        """
+        Provee recomendaciones detalladas de templates para migrar un contenido legacy específico.
+        """
+        try:
+            from .services import ContentService
+            content_service = ContentService()
+            content = content_service.get_content(content_id)
+            if not content:
+                return {"error": "Contenido no encontrado"}
+
+            methodologies = content.get("learning_methodologies", []) or []
+            subject_tags = content.get("subject_tags", []) or []
+            interactive_keys = list(content.get("interactive_data", {}).keys()) if isinstance(content.get("interactive_data"), dict) else []
+
+            # Buscar plantillas candidatas
+            candidate_query = {
+                "$or": [
+                    {"capabilities.replaces_legacy": True},
+                    {"migration_recommended": True},
+                    {"subject_tags": {"$in": subject_tags}},
+                    {"capabilities.compatible_methodologies": {"$in": methodologies}}
+                ]
+            }
+            candidates = list(self.templates_collection.find(candidate_query))
+
+            recommendations = []
+            for c in candidates:
+                caps = c.get("capabilities", {}) or {}
+                comp_meth = caps.get("compatible_methodologies", []) or []
+                score = 0
+                for m in methodologies:
+                    if m in comp_meth:
+                        score += 3
+                if caps.get("replaces_legacy"):
+                    score += 4
+                # subject overlap
+                subj_overlap = len(set(subject_tags).intersection(set(c.get("subject_tags", []) or [])))
+                score += subj_overlap
+                # small boost for explicit migration_recommended
+                if c.get("migration_recommended"):
+                    score += 1
+
+                recommendations.append({
+                    "template_id": str(c.get("_id")),
+                    "name": c.get("name"),
+                    "description": c.get("description"),
+                    "score": score,
+                    "capabilities": caps
+                })
+
+            recommendations.sort(key=lambda x: -x["score"])
+            return {
+                "content_id": content_id,
+                "recommendations": recommendations[:10],
+                "methodologies": methodologies,
+                "interactive_keys": interactive_keys
+            }
+
+        except Exception as e:
+            logging.error(f"Error in get_migration_recommendations: {e}")
+            return {"error": str(e)}
+
+    def execute_content_migration(self, content_id: str, template_id: str, mark_legacy: bool = True, creator_id: Optional[str] = None, migration_notes: Optional[str] = None) -> Dict:
+        """
+        Ejecuta la migración automática de un contenido legacy (game/simulation) a una instancia de template.
+        Realiza validaciones de compatibilidad y crea la instancia + nuevo TopicContent.
+        """
+        try:
+            content_service = ContentService()
+            content = content_service.get_content(content_id)
+            if not content:
+                return {"success": False, "error": "Contenido legacy no encontrado"}
+
+            template = self.templates_collection.find_one({"_id": ObjectId(template_id)})
+            if not template:
+                return {"success": False, "error": "Template destino no encontrado"}
+
+            # Calcular compatibilidad simple
+            content_methods = content.get("learning_methodologies", []) or []
+            template_methods = (template.get("capabilities", {}) or {}).get("compatible_methodologies", []) or []
+            compatibility_score = 0
+            for m in content_methods:
+                if m in template_methods:
+                    compatibility_score += 1
+
+            # If template declares replaces_legacy, boost
+            if (template.get("capabilities", {}) or {}).get("replaces_legacy"):
+                compatibility_score += 2
+
+            if compatibility_score <= 0:
+                # Still allow if forced? For safety, require at least some match
+                return {"success": False, "error": "Template no compatible (compatibility_score=0). Selecciona otra plantilla o revisa recomendaciones."}
+
+            # Crear instancia usando TemplateInstanceService
+            from .template_services import TemplateInstanceService as _TIS  # local import
+            instance_service = _TIS()
+            # Map props from legacy interactive_data or generation_prompt
+            props = {}
+            interactive_data = content.get("interactive_data") or {}
+            if isinstance(interactive_data, dict):
+                # Take keys that match template defaults if possible, otherwise pass full interactive_data under a single 'legacy_data' prop
+                props.update(interactive_data)
+            if content.get("generation_prompt"):
+                props.setdefault("prompt", content.get("generation_prompt"))
+
+            instance_payload = {
+                "template_id": str(template.get("_id")),
+                "topic_id": str(content.get("topic_id")),
+                "creator_id": creator_id or str(content.get("creator_id", "")),
+                "props": props,
+                "assets": template.get("assets", []),
+                "learning_mix": template.get("baseline_mix")
+            }
+            instance_obj = instance_service.create_instance(instance_payload)
+
+            # Crear nuevo TopicContent que referencia la instancia
+            new_content_doc = {
+                "topic_id": content.get("topic_id"),
+                "content": content.get("content", ""),
+                "content_type": "interactive_exercise",  # represent migrated interactive as interactive_exercise
+                "interactive_data": props,
+                "learning_methodologies": content.get("learning_methodologies", []),
+                "render_engine": "html_template",
+                "instance_id": instance_obj._id,
+                "template_id": template.get("_id"),
+                "template_version": template.get("version"),
+                "status": "draft",
+                "created_at": datetime.now(),
+                "updated_at": datetime.now(),
+                "migration_meta": {
+                    "source_content_id": ObjectId(content_id),
+                    "compatibility_score": compatibility_score,
+                    "migration_notes": migration_notes
+                }
+            }
+            result = self.db.topic_contents.insert_one(new_content_doc)
+            new_content_id = str(result.inserted_id)
+
+            # Marcar legacy content como migrado si aplica
+            if mark_legacy:
+                try:
+                    self.db.topic_contents.update_one(
+                        {"_id": ObjectId(content_id)},
+                        {"$set": {"status": "migrated", "migrated_at": datetime.now(), "migrated_to": ObjectId(new_content_id)}}
+                    )
+                except Exception as e:
+                    logging.warning(f"execute_content_migration: no se pudo marcar legacy como migrado: {e}")
+
+            # Registrar en log de migraciones
+            try:
+                self.db.template_migrations.insert_one({
+                    "legacy_content_id": ObjectId(content_id),
+                    "new_content_id": ObjectId(new_content_id),
+                    "template_id": template.get("_id"),
+                    "instance_id": instance_obj._id,
+                    "compatibility_score": compatibility_score,
+                    "executed_by": creator_id,
+                    "created_at": datetime.now(),
+                    "notes": migration_notes
+                })
+            except Exception:
+                pass
+
+            return {
+                "success": True,
+                "new_content_id": new_content_id,
+                "instance_id": str(instance_obj._id),
+                "compatibility_score": compatibility_score
+            }
+
+        except Exception as e:
+            logging.error(f"Error in execute_content_migration: {e}")
+            return {"success": False, "error": str(e)}
+
+    def get_migration_status(self, workspace_id: Optional[str] = None) -> Dict:
+        """
+        Provee estadísticas generales de migración por workspace:
+        - counts de legacy pendientes
+        - templates más usados para migración
+        - progreso general
+        """
+        try:
+            deprecated_types = ContentTypes.get_deprecated_types()
+
+            base_query = {"content_type": {"$in": deprecated_types}, "status": {"$ne": "deleted"}}
+            if workspace_id:
+                # intentamos filtrar por topics del workspace si existe campo workspace_id en topics
+                try:
+                    topics = list(self.db.topics.find({"workspace_id": workspace_id}, {"_id": 1}))
+                    topic_ids = [t["_id"] for t in topics]
+                    if topic_ids:
+                        base_query["topic_id"] = {"$in": topic_ids}
+                except Exception:
+                    pass
+
+            total_legacy = self.db.topic_contents.count_documents(base_query)
+            migrated_query = dict(base_query)
+            migrated_query["status"] = "migrated"
+            migrated_count = self.db.topic_contents.count_documents(migrated_query)
+
+            # Templates used for migration
+            pipeline = [
+                {"$match": {}},
+                {"$group": {"_id": "$template_id", "count": {"$sum": 1}}},
+                {"$sort": {"count": -1}},
+                {"$limit": 10}
+            ]
+            top_templates_raw = list(self.db.template_migrations.aggregate(pipeline)) if "template_migrations" in self.db.list_collection_names() else []
+            top_templates = []
+            for t in top_templates_raw:
+                try:
+                    tid = t.get("_id")
+                    tpl = self.templates_collection.find_one({"_id": tid})
+                    top_templates.append({
+                        "template_id": str(tid),
+                        "name": tpl.get("name") if tpl else None,
+                        "count": int(t.get("count", 0))
+                    })
+                except Exception:
+                    continue
+
+            progress_percent = round((migrated_count / total_legacy * 100), 2) if total_legacy > 0 else 0.0
+
+            return {
+                "workspace_id": workspace_id,
+                "total_legacy_contents": int(total_legacy),
+                "migrated_count": int(migrated_count),
+                "progress_percent": progress_percent,
+                "top_templates_used_for_migration": top_templates
+            }
+        except Exception as e:
+            logging.error(f"Error in get_migration_status: {e}")
+            return {"error": str(e)}
 
 class TemplateInstanceService:
     """

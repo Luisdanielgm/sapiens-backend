@@ -150,12 +150,20 @@ class EmbeddedContentService:
         # Calcular espacio disponible
         analysis['available_space'] = max(0, 1 - analysis['current_density'])
         
-        # Verificar compatibilidad de layout
-        slide_template = slide.get('slide_template', {})
-        if slide_template.get('supports_embedding', False):
-            analysis['layout_compatibility'] = 1.0
-        elif slide_template.get('layout') in ['two-column', 'sidebar']:
-            analysis['layout_compatibility'] = 0.8
+        # Verificar compatibilidad de layout basada en el template string
+        slide_template = slide.get('slide_template', "")
+        if isinstance(slide_template, str):
+            # Analizar el template string para determinar compatibilidad
+            template_lower = slide_template.lower()
+            if 'embedding' in template_lower or 'embed' in template_lower:
+                analysis['layout_compatibility'] = 1.0
+            elif any(keyword in template_lower for keyword in ['two-column', 'sidebar', 'split', 'dual']):
+                analysis['layout_compatibility'] = 0.8
+            else:
+                analysis['layout_compatibility'] = 0.5
+        else:
+            # Fallback para compatibilidad con templates antiguos
+            analysis['layout_compatibility'] = 0.5
         
         return analysis
     

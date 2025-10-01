@@ -72,9 +72,9 @@ class SlideStyleService:
     def generate_slide_template(self, 
                               palette_name: Optional[str] = None,
                               font_family: Optional[str] = None,
-                              custom_colors: Optional[Dict] = None) -> Dict:
+                              custom_colors: Optional[Dict] = None) -> str:
         """
-        Genera un slide_template base con paleta de colores y estilos.
+        Genera un prompt para slide_template con especificaciones de diseño.
         
         Args:
             palette_name: Nombre de la paleta predefinida (opcional)
@@ -82,7 +82,7 @@ class SlideStyleService:
             custom_colors: Colores personalizados que sobrescriben la paleta (opcional)
             
         Returns:
-            Dict con la estructura del slide_template
+            String con el prompt para generar la plantilla de diapositiva
         """
         try:
             # Seleccionar paleta
@@ -101,90 +101,74 @@ class SlideStyleService:
             if not font_family:
                 font_family = random.choice(self.FONT_FAMILIES)
             
-            # Generar template
-            slide_template = {
-                "background": colors["background"],
-                "styles": {
-                    "fontFamily": font_family,
-                    "colors": {
-                        "text": colors["textColor"],
-                        "title": colors["titleColor"],
-                        "accent": colors["accentColor"],
-                        "secondary": colors["secondaryColor"]
-                    },
-                    "typography": {
-                        "titleSize": "2.5rem",
-                        "textSize": "1.2rem",
-                        "lineHeight": "1.6",
-                        "titleWeight": "bold",
-                        "textWeight": "normal"
-                    },
-                    "layout": {
-                        "padding": "2rem",
-                        "margin": "1rem",
-                        "borderRadius": "8px",
-                        "boxShadow": "0 4px 6px rgba(0, 0, 0, 0.1)"
-                    },
-                    "animations": {
-                        "fadeIn": True,
-                        "slideTransition": "ease-in-out",
-                        "duration": "0.3s"
-                    }
-                },
-                "metadata": {
-                    "paletteName": palette_name,
-                    "generatedAt": datetime.now().isoformat(),
-                    "version": "1.0"
-                }
-            }
+            # Generar prompt para slide template
+            slide_template_prompt = f"""Crea una diapositiva educativa con las siguientes especificaciones de diseño:
+
+PALETA DE COLORES ({palette_name}):
+- Fondo: {colors["background"]}
+- Texto principal: {colors["textColor"]}
+- Títulos: {colors["titleColor"]}
+- Color de acento: {colors["accentColor"]}
+- Color secundario: {colors["secondaryColor"]}
+
+TIPOGRAFÍA:
+- Familia de fuente: {font_family}
+- Tamaño de título: 2.5rem (peso: bold)
+- Tamaño de texto: 1.2rem (peso: normal)
+- Altura de línea: 1.6
+
+DISEÑO Y LAYOUT:
+- Padding: 2rem
+- Margen: 1rem
+- Bordes redondeados: 8px
+- Sombra: sutil (0 4px 6px rgba(0, 0, 0, 0.1))
+
+ANIMACIONES:
+- Transición de entrada: fade-in
+- Transición entre slides: ease-in-out
+- Duración: 0.3s
+
+La diapositiva debe ser visualmente atractiva, educativa y seguir principios de diseño moderno. Asegúrate de que el contraste sea adecuado para la legibilidad."""
             
-            self.logger.info(f"Slide template generado con paleta '{palette_name}'")
-            return slide_template
+            self.logger.info(f"Slide template prompt generado con paleta '{palette_name}'")
+            return slide_template_prompt
             
         except Exception as e:
-            self.logger.error(f"Error generando slide template: {str(e)}")
-            # Retornar template básico en caso de error
+            self.logger.error(f"Error generando slide template prompt: {str(e)}")
+            # Retornar prompt básico en caso de error
             return self._get_default_template()
     
-    def _get_default_template(self) -> Dict:
+    def _get_default_template(self) -> str:
         """
-        Retorna un template por defecto en caso de error.
+        Retorna un prompt de template por defecto en caso de error.
         """
-        return {
-            "background": "#FFFFFF",
-            "styles": {
-                "fontFamily": "Arial, sans-serif",
-                "colors": {
-                    "text": "#333333",
-                    "title": "#1E3A8A",
-                    "accent": "#DC2626",
-                    "secondary": "#6B7280"
-                },
-                "typography": {
-                    "titleSize": "2.5rem",
-                    "textSize": "1.2rem",
-                    "lineHeight": "1.6",
-                    "titleWeight": "bold",
-                    "textWeight": "normal"
-                },
-                "layout": {
-                    "padding": "2rem",
-                    "margin": "1rem",
-                    "borderRadius": "8px",
-                    "boxShadow": "0 4px 6px rgba(0, 0, 0, 0.1)"
-                },
-                "animations": {
-                    "fadeIn": True,
-                    "slideTransition": "ease-in-out",
-                    "duration": "0.3s"
-                }
-            },
-            "metadata": {
-                "paletteName": "default",
-                "generatedAt": datetime.now().isoformat(),
-                "version": "1.0"
-            }
-        }
+        return """Crea una diapositiva educativa con las siguientes especificaciones de diseño:
+
+PALETA DE COLORES (académica):
+- Fondo: #FFFFFF
+- Texto principal: #333333
+- Títulos: #1E3A8A
+- Color de acento: #DC2626
+- Color secundario: #6B7280
+
+TIPOGRAFÍA:
+- Familia de fuente: Arial, sans-serif
+- Tamaño de título: 2.5rem (peso: bold)
+- Tamaño de texto: 1.2rem (peso: normal)
+- Altura de línea: 1.6
+
+DISEÑO Y LAYOUT:
+- Padding: 2rem
+- Margen: 1rem
+- Bordes redondeados: 8px
+- Sombra: sutil (0 4px 6px rgba(0, 0, 0, 0.1))
+
+ANIMACIONES:
+- Transición de entrada: fade-in
+- Transición entre slides: ease-in-out
+- Duración: 0.3s
+
+La diapositiva debe ser visualmente atractiva, educativa y seguir principios de diseño moderno. Asegúrate de que el contraste sea adecuado para la legibilidad."""
     
     def get_available_palettes(self) -> List[str]:
         """
@@ -204,31 +188,35 @@ class SlideStyleService:
         """
         return self.COLOR_PALETTES.get(palette_name)
     
-    def validate_slide_template(self, slide_template: Dict) -> bool:
+    def validate_slide_template(self, slide_template: str) -> bool:
         """
-        Valida que un slide_template tenga la estructura requerida.
+        Valida que un slide_template sea un string válido para usar como prompt de IA.
         
         Args:
-            slide_template: Template a validar
+            slide_template: String con el prompt para generar la plantilla
             
         Returns:
             bool: True si es válido, False en caso contrario
         """
         try:
-            # Campos obligatorios según la validación existente
-            required_fields = ["background", "styles"]
+            # Validar que sea un string no vacío
+            if not isinstance(slide_template, str):
+                self.logger.warning("El slide_template debe ser un string")
+                return False
             
-            for field in required_fields:
-                if field not in slide_template:
-                    self.logger.warning(f"Campo requerido '{field}' faltante en slide_template")
-                    return False
+            # Validar que no esté vacío (después de quitar espacios)
+            if not slide_template.strip():
+                self.logger.warning("El slide_template no puede estar vacío")
+                return False
             
-            # Validar estructura de styles si existe
-            if "styles" in slide_template:
-                styles = slide_template["styles"]
-                if not isinstance(styles, dict):
-                    self.logger.warning("El campo 'styles' debe ser un diccionario")
-                    return False
+            # Validar longitud mínima y máxima razonable para un prompt
+            if len(slide_template.strip()) < 10:
+                self.logger.warning("El slide_template es demasiado corto (mínimo 10 caracteres)")
+                return False
+                
+            if len(slide_template) > 5000:
+                self.logger.warning("El slide_template es demasiado largo (máximo 5000 caracteres)")
+                return False
             
             return True
             

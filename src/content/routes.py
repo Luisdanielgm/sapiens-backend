@@ -1,9 +1,10 @@
-from flask import Blueprint, request, g
+from flask import Blueprint, request, g, jsonify, make_response
 from flask_jwt_extended import jwt_required, get_jwt_identity
 from bson import ObjectId
 import logging
 import datetime
 import json
+import warnings
 
 from src.shared.decorators import role_required
 from src.shared.database import get_db
@@ -11,8 +12,6 @@ from src.shared.standardization import APIRoute, ErrorCodes
 from src.content.services import (
     ContentService,
     ContentTypeService,
-    VirtualContentService,
-    ContentResultService,
 )
 from src.content.template_integration_service import TemplateIntegrationService
 from src.shared.constants import ROLES
@@ -22,9 +21,30 @@ content_bp = Blueprint('content', __name__, url_prefix='/api/content')
 # Servicios
 content_service = ContentService()
 content_type_service = ContentTypeService()
-virtual_content_service = VirtualContentService()
-content_result_service = ContentResultService()
+# virtual_content_service = VirtualContentService()  # No existe en services.py
+# content_result_service = ContentResultService()    # No existe en services.py
 template_integration_service = TemplateIntegrationService()
+
+# Helper for deprecation responses with headers
+def _deprecation_response(message: str, recommendation: str = None, status_code: int = 410, sunset: str = "2025-12-31"):
+    """
+    Construye una respuesta JSON con cabeceras HTTP de deprecación para endpoints legacy.
+    """
+    body = {
+        "error": {
+            "message": message
+        }
+    }
+    if recommendation:
+        body["error"]["recommendation"] = recommendation
+
+    resp = make_response(jsonify(body), status_code)
+    # Standard deprecation / sunset headers
+    resp.headers['Deprecation'] = 'true'
+    resp.headers['Sunset'] = sunset
+    # Provide an explanatory Warning header (RFC 7234 compatible style)
+    resp.headers['Warning'] = f'299 - "Deprecated API; use templates. Sunset: {sunset}"'
+    return resp
 
 # ============================================
 # ENDPOINTS DE TIPOS DE CONTENIDO
@@ -155,30 +175,18 @@ def create_bulk_content():
         - narrative_text: texto narrativo (opcional, para slides no-skeleton)
         - order: entero positivo indicando posición secuencial
         - parent_content_id: ObjectId del contenido padre (opcional)
-    - Validaciones importantes:
-        - Cada elemento en 'contents' debe incluir topic_id y content_type
-        - Para slides skeleton (solo full_text sin HTML/narrativa): template_snapshot es OBLIGATORIO
-        - Para slides con HTML/narrativa: template_snapshot es opcional pero se valida si se proporciona
-        - template_snapshot debe ser un objeto/dict cuando se proporcione (no string)
-        - Si se proporciona content_html, será validado por el servidor
-    
-    Body:
-    {
-        "contents": [
-            {
-                "topic_id": "ObjectId",
-                "content_type": "slide|quiz|...",
-                "title": "Título del contenido",
-                "description": "Descripción",
-                "content_data": {...},
-                "order": 1,
-                "parent_content_id": "ObjectId",
-                "template_snapshot": { ... } // opcional en este endpoint pero requiere estructura JSON si existe
-                // ... otros campos del contenido
-            },
-            // ... más contenidos
-        ]
-    }
+        - Otros campos permitidos: slide_template (string prompt para IA), interactive_data, resources, metadata, generation_prompt
+
+    Validaciones realizadas por este endpoint (además de las del servicio):
+    - Verifica que se haya enviado el array 'slides' y que no esté vacío
+    - Todos los items deben ser content_type == 'slide'
+    - Todas las slides deben compartir el mismo topic_id
+    - template_snapshot debe ser un objeto/dict (no string)
+    - Verifica que order sea una secuencia única y consecutiva comenzando en 1
+
+    Responde con:
+    - 201 + lista de IDs insertados en caso de éxito
+    - 400 con mensaje de validación en caso de datos inválidos
     """
     try:
         data = request.json
@@ -236,7 +244,7 @@ def create_bulk_slides():
               "breakpoints": {"mobile": 480, "tablet": 768, "desktop": 1024}
             }
         - parent_content_id: ObjectId (opcional)
-        - Otros campos permitidos: slide_template, interactive_data, resources, metadata, generation_prompt
+        - Otros campos permitidos: slide_template (string prompt para IA), interactive_data, resources, metadata, generation_prompt
 
     Validaciones realizadas por este endpoint (además de las del servicio):
     - Verifica que se haya enviado el array 'slides' y que no esté vacío
@@ -635,6 +643,228 @@ def get_slide_status(content_id):
             status_code=500,
         )
 
+@content_bp.route('/topic/<topic_id>/slides/complete', methods=['GET'])
+@APIRoute.standard(auth_required_flag=True)
+def get_topic_complete_slides(topic_id):
+    """
+    Endpoint para obtener únicamente las slides completas (content_html + narrative_text).
+    Query params:
+        - limit (int, optional)
+        - skip (int, optional)
+    Retorna:
+    {
+        "slides": [...],
+        "metadata": {
+            "total_complete": int,
+            "total_slides": int,
+            "completion_percentage": float,
+            "estimated_time_remaining_ms": int|null,
+            "average_generation_time_ms": float|null
+        }
+    }
+    """
+    try:
+        # Validate topic existence
+        if not ObjectId.is_valid(topic_id) or not content_service.check_topic_exists(topic_id):
+            return APIRoute.error(ErrorCodes.NOT_FOUND, "Topic no encontrado", status_code=404)
+
+        # Parse pagination
+        try:
+            limit = request.args.get('limit', None)
+            if limit is not None:
+                limit = int(limit)
+            skip = request.args.get('skip', 0)
+            skip = int(skip) if skip is not None else 0
+        except Exception:
+            return APIRoute.error(ErrorCodes.VALIDATION_ERROR, "Parámetros de paginación inválidos")
+
+        # Use specialized service method
+        complete_res = content_service.get_complete_slides_only(topic_id, limit=limit, skip=skip)
+        slides = complete_res.get('slides', [])
+        total_complete = int(complete_res.get('total', len(slides)))
+
+        # Total slides in topic (minimal projection)
+        try:
+            all_slides = content_service.get_topic_content(topic_id, content_type='slide', include_metadata=False)
+            total_slides = len(all_slides)
+        except Exception:
+            total_slides = None
+
+        completion_percentage = round((total_complete / total_slides * 100), 2) if total_slides and total_slides > 0 else 0.0
+
+        # Try to obtain average/estimated time from generation status
+        try:
+            status_stats = content_service.get_slide_generation_status(topic_id)
+            avg_time = status_stats.get('average_generation_time_ms')
+            est_remaining = status_stats.get('estimated_time_remaining_ms')
+        except Exception:
+            avg_time = None
+            est_remaining = None
+
+        metadata = {
+            "total_complete": total_complete,
+            "total_slides": total_slides,
+            "completion_percentage": completion_percentage,
+            "average_generation_time_ms": avg_time,
+            "estimated_time_remaining_ms": est_remaining
+        }
+
+        return APIRoute.success(data={"slides": slides, "metadata": metadata})
+    except Exception as e:
+        logging.error(f"Error en endpoint get_topic_complete_slides para topic {topic_id}: {str(e)}")
+        return APIRoute.error(
+            ErrorCodes.SERVER_ERROR,
+            "Error interno del servidor",
+            status_code=500,
+        )
+
+@content_bp.route('/topic/<topic_id>/slides/status', methods=['GET'])
+@APIRoute.standard(auth_required_flag=True)
+def get_topic_slides_status(topic_id):
+    """
+    Endpoint para verificar el progreso general de generación de slides de un topic.
+    Query params:
+        - render_engine (optional) : filtrar por motor de renderizado
+        - group_by_parent (optional boolean)
+    Respuesta:
+        {
+            "global": { ... }  # resultado de get_slide_generation_status()
+            "filtered": { ... } # opcional, si se aplican filtros
+        }
+    """
+    try:
+        # Validate topic
+        if not ObjectId.is_valid(topic_id) or not content_service.check_topic_exists(topic_id):
+            return APIRoute.error(ErrorCodes.NOT_FOUND, "Topic no encontrado", status_code=404)
+
+        render_engine = request.args.get('render_engine', None)
+        group_by_parent_raw = request.args.get('group_by_parent', 'false')
+        group_by_parent = str(group_by_parent_raw).lower() in ('1', 'true', 'yes', 'y')
+
+        # Base (global) stats from existing method
+        try:
+            global_stats = content_service.get_slide_generation_status(topic_id) or {}
+        except Exception as e:
+            logging.error(f"Error obteniendo global slide generation status: {e}")
+            global_stats = {}
+
+        filtered_stats = None
+        # If filters are provided, use optimized method to compute filtered stats
+        if render_engine or group_by_parent:
+            try:
+                optimized = content_service.get_topic_slides_optimized(
+                    topic_id=topic_id,
+                    status_filter=None,
+                    render_engine=render_engine,
+                    group_by_parent=group_by_parent,
+                    include_progress=True
+                )
+                filtered_stats = optimized.get('stats', {})
+                # include by_parent if requested
+                if group_by_parent:
+                    filtered_stats = {
+                        "stats": filtered_stats,
+                        "by_parent": optimized.get('by_parent', {})
+                    }
+            except Exception as e:
+                logging.error(f"Error obteniendo filtered stats para render_engine={render_engine} group_by_parent={group_by_parent}: {e}")
+                filtered_stats = None
+
+        response = {
+            "global": global_stats
+        }
+        if filtered_stats is not None:
+            response["filtered"] = filtered_stats
+            response["filter_applied"] = {
+                "render_engine": render_engine,
+                "group_by_parent": group_by_parent
+            }
+        else:
+            response["filter_applied"] = None
+
+        return APIRoute.success(data=response)
+    except Exception as e:
+        logging.error(f"Error en endpoint get_topic_slides_status para topic {topic_id}: {str(e)}")
+        return APIRoute.error(
+            ErrorCodes.SERVER_ERROR,
+            "Error interno del servidor",
+            status_code=500,
+        )
+
+@content_bp.route('/topic/<topic_id>/slides/advanced', methods=['GET'])
+@APIRoute.standard(auth_required_flag=True)
+def get_topic_slides_advanced(topic_id):
+    """
+    Endpoint auxiliar que expone la funcionalidad de get_topic_slides_optimized / get_slides_with_advanced_filters.
+    Query params:
+        - status: comma-separated list of statuses (e.g. skeleton,html_ready,narrative_ready)
+        - render_engine: filter by render engine
+        - group_by_parent: boolean
+        - include_progress: boolean
+        - limit: int
+        - skip: int
+    """
+    try:
+        # Validate topic
+        if not ObjectId.is_valid(topic_id) or not content_service.check_topic_exists(topic_id):
+            return APIRoute.error(ErrorCodes.NOT_FOUND, "Topic no encontrado", status_code=404)
+
+        # Parse params
+        status_raw = request.args.get('status', None)
+        status_list = None
+        if status_raw:
+            # support comma-separated or repeated params
+            try:
+                status_list = [s.strip() for s in status_raw.split(',') if s.strip()]
+            except Exception:
+                status_list = None
+
+        render_engine = request.args.get('render_engine', None)
+        group_by_parent_raw = request.args.get('group_by_parent', 'false')
+        include_progress_raw = request.args.get('include_progress', 'true')
+        try:
+            group_by_parent = str(group_by_parent_raw).lower() in ('1', 'true', 'yes', 'y')
+            include_progress = str(include_progress_raw).lower() in ('1', 'true', 'yes', 'y')
+        except Exception:
+            group_by_parent = False
+            include_progress = True
+
+        # Pagination
+        try:
+            limit_raw = request.args.get('limit', None)
+            limit = int(limit_raw) if limit_raw is not None else None
+        except Exception:
+            return APIRoute.error(ErrorCodes.VALIDATION_ERROR, "Parámetro 'limit' inválido")
+        try:
+            skip_raw = request.args.get('skip', 0)
+            skip = int(skip_raw) if skip_raw is not None else 0
+        except Exception:
+            return APIRoute.error(ErrorCodes.VALIDATION_ERROR, "Parámetro 'skip' inválido")
+
+        # Use advanced filters method
+        try:
+            res = content_service.get_slides_with_advanced_filters(
+                topic_id=topic_id,
+                status=status_list,
+                render_engine=render_engine,
+                group_by_parent=group_by_parent,
+                include_progress=include_progress,
+                limit=limit,
+                skip=skip
+            )
+            return APIRoute.success(data=res)
+        except Exception as e:
+            logging.error(f"Error ejecutando get_slides_with_advanced_filters: {e}")
+            return APIRoute.error(ErrorCodes.SERVER_ERROR, "Error interno al obtener slides avanzados", status_code=500)
+
+    except Exception as e:
+        logging.error(f"Error en endpoint get_topic_slides_advanced para topic {topic_id}: {str(e)}")
+        return APIRoute.error(
+            ErrorCodes.SERVER_ERROR,
+            "Error interno del servidor",
+            status_code=500,
+        )
+
 # ============================================
 # ENDPOINTS DE CONTENIDO PERSONALIZADO
 # ============================================
@@ -768,7 +998,9 @@ def record_result():
         data = request.json
         data['student_id'] = data.get('student_id', request.user_id)
         
-        success, result = content_result_service.record_result(data)
+        # TODO: Implementar ContentResultService
+        # success, result = content_result_service.record_result(data)
+        success, result = False, "ContentResultService no implementado"
 
         if success:
             return APIRoute.success(
@@ -809,11 +1041,13 @@ def get_student_results(student_id):
         virtual_content_id = request.args.get('virtual_content_id')
         content_type = request.args.get('content_type')
         
-        results = content_result_service.get_student_results(
-            student_id, 
-            virtual_content_id=virtual_content_id,
-            content_type=content_type
-        )
+        # TODO: Implementar ContentResultService
+        # results = content_result_service.get_student_results(
+        #     student_id, 
+        #     virtual_content_id=virtual_content_id,
+        #     content_type=content_type
+        # )
+        results = []  # Temporal hasta implementar ContentResultService
 
         return APIRoute.success(data={"results": results})
         
@@ -836,7 +1070,9 @@ def get_my_results():
         student_id = get_jwt_identity()
         content_type = request.args.get('content_type')
         
-        results = content_result_service.get_student_results(student_id, content_type)
+        # TODO: Implementar ContentResultService
+        # results = content_result_service.get_student_results(student_id, content_type)
+        results = []  # Temporal hasta implementar ContentResultService
 
         return APIRoute.success(data={"results": results})
         
@@ -859,11 +1095,10 @@ def create_game_legacy():
     DEPRECATED - Endpoint de compatibilidad para crear juegos.
     
     Este endpoint será eliminado en la próxima versión.
-    Usar: POST /api/content/ con content_type="game"
+    No permite creación de nuevos games por defecto. Use templates interactivos.
     
-    Redirige al endpoint unificado con content_type="game"
+    Para casos excepcionales, puede usar ?force_legacy=true pero solo ADMIN puede usar ese flag.
     """
-    import warnings
     warnings.warn(
         "El endpoint /api/content/games está obsoleto. Usar /api/content/ con content_type='game'",
         DeprecationWarning,
@@ -871,19 +1106,60 @@ def create_game_legacy():
     )
     
     try:
-        data = request.json
+        # Evaluate force_legacy param
+        force_raw = request.args.get('force_legacy', 'false')
+        force_legacy = str(force_raw).lower() in ('1', 'true', 'yes', 'y')
+
+        user_id = getattr(request, 'user_id', None) or get_jwt_identity()
+        user_role = None
+        try:
+            user_role = g.user.get('role') if getattr(g, 'user', None) else None
+        except Exception:
+            user_role = None
+
+        # If not forcing legacy creation, block creation and inform user of deprecation
+        if not force_legacy:
+            msg = ("El endpoint para crear 'game' está en desuso y no admite la creación de nuevos juegos. "
+                   "Por favor migre a plantillas interactivas (interactive_template) o use "
+                   "POST /api/content/from-template para crear contenido interactivo. "
+                   "Ver: GET /api/content/games/migration-info para detalles de migración.")
+            logging.warning(f"Blocked create_game_legacy attempt by user={user_id} role={user_role} - deprecation enforced")
+            return _deprecation_response(msg, recommendation="Use interactive templates via /api/content/from-template", status_code=410)
+
+        # If force_legacy requested, ensure user is ADMIN
+        if force_legacy and user_role != ROLES["ADMIN"]:
+            logging.warning(f"Unauthorized force_legacy create_game_legacy attempt by user={user_id} role={user_role}")
+            return _deprecation_response("El flag force_legacy está reservado para administradores.", recommendation=None, status_code=403)
+
+        # Allow legacy creation only for ADMIN with explicit flag. Proceed to create content but mark as deprecated creation.
+        data = request.json or {}
         data['content_type'] = 'game'
-        data['creator_id'] = get_jwt_identity()
-        
-        success, result = content_service.create_content(data)
+        data['creator_id'] = user_id
+
+        # Compute creator roles for validation
+        creator_roles = [user_role] if user_role else []
+
+        logging.info(f"Creating legacy game by admin user={user_id}. Payload keys: {list(data.keys())}")
+
+        # Pass allow_deprecated=True and creator_roles to service
+        success, result = content_service.create_content(data, allow_deprecated=True, creator_roles=creator_roles)
 
         if success:
-            return APIRoute.success(
+            resp = APIRoute.success(
                 data={"game_id": result},
-                message="Juego creado exitosamente",
+                message="Juego legacy creado exitosamente (uso de endpoint deprecated)",
                 status_code=201,
             )
+            # attach deprecation headers to the success response as well
+            try:
+                resp.headers['Deprecation'] = 'true'
+                resp.headers['Sunset'] = '2025-12-31'
+                resp.headers['Warning'] = '299 - "Deprecated API; use templates instead"'
+            except Exception:
+                pass
+            return resp
         else:
+            logging.error(f"Failed to create legacy game (admin attempt) user={user_id} error={result}")
             return APIRoute.error(ErrorCodes.CREATION_ERROR, result)
             
     except Exception as e:
@@ -901,9 +1177,11 @@ def create_simulation_legacy():
     DEPRECATED - Endpoint de compatibilidad para crear simulaciones.
     
     Este endpoint será eliminado en la próxima versión.
-    Usar: POST /api/content/ con content_type="simulation"
+    No permite creación de nuevas simulations por defecto. Use plantillas de simulación.
+    
+    Parámetros:
+    - ?force_legacy=true : permite crear simulaciones legacy solo para ADMIN
     """
-    import warnings
     warnings.warn(
         "El endpoint /api/content/simulations está obsoleto. Usar /api/content/ con content_type='simulation'",
         DeprecationWarning,
@@ -911,19 +1189,56 @@ def create_simulation_legacy():
     )
     
     try:
-        data = request.json
+        # Evaluate force_legacy param
+        force_raw = request.args.get('force_legacy', 'false')
+        force_legacy = str(force_raw).lower() in ('1', 'true', 'yes', 'y')
+
+        user_id = getattr(request, 'user_id', None) or get_jwt_identity()
+        user_role = None
+        try:
+            user_role = g.user.get('role') if getattr(g, 'user', None) else None
+        except Exception:
+            user_role = None
+
+        if not force_legacy:
+            msg = ("El endpoint para crear 'simulation' está en desuso y no admite la creación de nuevas simulaciones. "
+                   "Use plantillas de simulación (interactive_simulation_template) o "
+                   "POST /api/content/from-template. Ver: GET /api/content/simulations/migration-info para detalles.")
+            logging.warning(f"Blocked create_simulation_legacy attempt by user={user_id} role={user_role} - deprecation enforced")
+            return _deprecation_response(msg, recommendation="Use simulation templates via /api/content/from-template", status_code=410)
+
+        # If force_legacy requested, ensure user is ADMIN
+        if force_legacy and user_role != ROLES["ADMIN"]:
+            logging.warning(f"Unauthorized force_legacy create_simulation_legacy attempt by user={user_id} role={user_role}")
+            return _deprecation_response("El flag force_legacy está reservado para administradores.", recommendation=None, status_code=403)
+
+        # Allow legacy creation only for ADMIN with explicit flag. Proceed to create content but mark as deprecated creation.
+        data = request.json or {}
         data['content_type'] = 'simulation'
-        data['creator_id'] = get_jwt_identity()
-        
-        success, result = content_service.create_content(data)
+        data['creator_id'] = user_id
+
+        # Compute creator roles for validation
+        creator_roles = [user_role] if user_role else []
+
+        logging.info(f"Creating legacy simulation by admin user={user_id}. Payload keys: {list(data.keys())}")
+
+        success, result = content_service.create_content(data, allow_deprecated=True, creator_roles=creator_roles)
 
         if success:
-            return APIRoute.success(
+            resp = APIRoute.success(
                 data={"simulation_id": result},
-                message="Simulación creada exitosamente",
+                message="Simulación legacy creada exitosamente (uso de endpoint deprecated)",
                 status_code=201,
             )
+            try:
+                resp.headers['Deprecation'] = 'true'
+                resp.headers['Sunset'] = '2025-12-31'
+                resp.headers['Warning'] = '299 - "Deprecated API; use templates instead"'
+            except Exception:
+                pass
+            return resp
         else:
+            logging.error(f"Failed to create legacy simulation (admin attempt) user={user_id} error={result}")
             return APIRoute.error(ErrorCodes.CREATION_ERROR, result)
             
     except Exception as e:
@@ -942,8 +1257,10 @@ def create_quiz_legacy():
     
     Este endpoint será eliminado en la próxima versión.
     Usar: POST /api/content/ con content_type="quiz"
+    
+    Nota: Quizzes no están siendo deshabilitados en esta fase, pero el endpoint se marca como deprecated.
+    Se emiten warnings y cabeceras de deprecación.
     """
-    import warnings
     warnings.warn(
         "El endpoint /api/content/quizzes está obsoleto. Usar /api/content/ con content_type='quiz'",
         DeprecationWarning,
@@ -953,16 +1270,26 @@ def create_quiz_legacy():
     try:
         data = request.json
         data['content_type'] = 'quiz'
-        data['creator_id'] = request.user_id
+        user_id = getattr(request, 'user_id', None) or get_jwt_identity()
+        data['creator_id'] = user_id
         
         success, result = content_service.create_content(data)
 
         if success:
-            return APIRoute.success(
+            resp = APIRoute.success(
                 data={"quiz_id": result},
                 message="Quiz creado exitosamente",
                 status_code=201,
             )
+            # Attach deprecation headers as advisory (still allows creation)
+            try:
+                resp.headers['Deprecation'] = 'true'
+                resp.headers['Sunset'] = '2025-12-31'
+                resp.headers['Warning'] = '299 - "Deprecated API; prefer unified /api/content endpoint"'
+            except Exception:
+                pass
+            logging.info(f"Legacy quiz created by user={user_id or 'unknown'}")
+            return resp
         else:
             return APIRoute.error(ErrorCodes.CREATION_ERROR, result)
             
@@ -974,7 +1301,62 @@ def create_quiz_legacy():
             status_code=500,
         )
 
+@content_bp.route('/games/migration-info', methods=['GET'])
+@APIRoute.standard(auth_required_flag=True)
+def get_games_migration_info():
+    """
+    Retorna información y sugerencias para migrar juegos legacy a plantillas interactivas.
+    Query params:
+        - topic_id (opcional): si se provee, se analizan los juegos de ese topic
+    """
+    try:
+        topic_id = request.args.get('topic_id', None)
+        suggestions = content_service.get_legacy_content_migration_suggestions(topic_id=topic_id, content_type='game')
+        return APIRoute.success(data={"migration_info": suggestions})
+    except Exception as e:
+        logging.error(f"Error obteniendo migration-info para games: {e}")
+        return APIRoute.error(ErrorCodes.SERVER_ERROR, "Error interno del servidor", status_code=500)
 
+@content_bp.route('/simulations/migration-info', methods=['GET'])
+@APIRoute.standard(auth_required_flag=True)
+def get_simulations_migration_info():
+    """
+    Retorna información y sugerencias para migrar simulaciones legacy a plantillas de simulación.
+    Query params:
+        - topic_id (opcional): si se provee, se analizan las simulaciones de ese topic
+    """
+    try:
+        topic_id = request.args.get('topic_id', None)
+        suggestions = content_service.get_legacy_content_migration_suggestions(topic_id=topic_id, content_type='simulation')
+        return APIRoute.success(data={"migration_info": suggestions})
+    except Exception as e:
+        logging.error(f"Error obteniendo migration-info para simulations: {e}")
+        return APIRoute.error(ErrorCodes.SERVER_ERROR, "Error interno del servidor", status_code=500)
+
+@content_bp.route('/deprecated/status', methods=['GET'])
+@APIRoute.standard(auth_required_flag=True)
+def get_deprecated_status():
+    """
+    Retorna el estado general de deprecación y estadísticas de contenidos legacy.
+    Query params:
+        - topic_id (optional): filtrar por topic
+        - module_id (optional): filtrar por módulo
+    """
+    try:
+        topic_id = request.args.get('topic_id', None)
+        module_id = request.args.get('module_id', None)
+        try:
+            stats = content_service.check_deprecated_content_usage(topic_id=topic_id, module_id=module_id)
+        except TypeError:
+            # fallback if service uses different signature
+            try:
+                stats = content_service.check_deprecated_content_usage(topic_id)
+            except TypeError:
+                stats = content_service.check_deprecated_content_usage()
+        return APIRoute.success(data={"deprecated_status": stats})
+    except Exception as e:
+        logging.error(f"Error obteniendo deprecated status: {e}")
+        return APIRoute.error(ErrorCodes.SERVER_ERROR, "Error interno del servidor", status_code=500)
 
 # ============================================
 # ENDPOINTS DE INTEGRACIÓN CON PLANTILLAS
@@ -1169,186 +1551,6 @@ def migrate_content_to_template(content_id):
             
     except Exception as e:
         logging.error(f"Error migrando contenido a plantilla: {str(e)}")
-        return APIRoute.error(
-            ErrorCodes.SERVER_ERROR,
-            "Error interno del servidor",
-            status_code=500,
-        )
-
-# ============================================
-# ENDPOINTS DE RECOMENDACIONES DE PLANTILLAS
-# ============================================
-
-@content_bp.route('/topic/<topic_id>/template-recommendations', methods=['GET'])
-@APIRoute.standard(auth_required_flag=True)
-def get_template_recommendations(topic_id):
-    """
-    Obtiene recomendaciones de plantillas para cada diapositiva de un tema.
-    
-    Query params:
-        student_id: ID del estudiante (opcional, para personalización futura)
-    """
-    try:
-        student_id = request.args.get('student_id')
-        
-        recommendations = content_service.get_template_recommendations(
-            topic_id=topic_id,
-            student_id=student_id
-        )
-        
-        return APIRoute.success(data={
-            "recommendations": recommendations,
-            "topic_id": topic_id
-        })
-        
-    except Exception as e:
-        logging.error(f"Error obteniendo recomendaciones de plantillas: {str(e)}")
-        return APIRoute.error(
-            ErrorCodes.SERVER_ERROR,
-            "Error interno del servidor",
-            status_code=500,
-        )
-
-@content_bp.route('/topic/<topic_id>/apply-template-recommendations', methods=['POST'])
-@APIRoute.standard(auth_required_flag=True, roles=[ROLES["TEACHER"], ROLES["ADMIN"]])
-def apply_template_recommendations(topic_id):
-    """
-    Aplica recomendaciones de plantillas a las diapositivas de un tema.
-    
-    Body:
-    {
-        "recommendations": {
-            "slide_id_1": "template_id_1",
-            "slide_id_2": "template_id_2"
-        }
-    }
-    """
-    try:
-        data = request.get_json()
-        
-        if not data or "recommendations" not in data:
-            return APIRoute.error(ErrorCodes.VALIDATION_ERROR, "Campo 'recommendations' requerido")
-        
-        recommendations = data["recommendations"]
-        
-        success, message = content_service.apply_template_recommendations(
-            topic_id=topic_id,
-            recommendations=recommendations
-        )
-        
-        if success:
-            return APIRoute.success(message=message)
-        else:
-            return APIRoute.error(ErrorCodes.BUSINESS_LOGIC_ERROR, message)
-            
-    except Exception as e:
-        logging.error(f"Error aplicando recomendaciones de plantillas: {str(e)}")
-        return APIRoute.error(
-            ErrorCodes.SERVER_ERROR,
-            "Error interno del servidor",
-            status_code=500,
-        )
-
-@content_bp.route('/slide/<slide_id>/template-compatibility/<template_id>', methods=['GET'])
-@APIRoute.standard(auth_required_flag=True)
-def get_slide_template_compatibility(slide_id, template_id):
-    """
-    Analiza la compatibilidad entre una diapositiva y una plantilla específica.
-    """
-    try:
-        compatibility = content_service.get_slide_template_compatibility(
-            slide_id=slide_id,
-            template_id=template_id
-        )
-        
-        return APIRoute.success(data={
-            "compatibility": compatibility,
-            "slide_id": slide_id,
-            "template_id": template_id
-        })
-        
-    except Exception as e:
-        logging.error(f"Error analizando compatibilidad de plantilla: {str(e)}")
-        return APIRoute.error(
-            ErrorCodes.SERVER_ERROR,
-            "Error interno del servidor",
-            status_code=500,
-        )
-
-@content_bp.route('/<virtual_content_id>/complete-auto', methods=['POST'])
-@APIRoute.standard(auth_required_flag=True)
-def mark_content_complete_auto(virtual_content_id):
-    """
-    Marca automáticamente un contenido virtual como completado al 100%.
-    Se usa para contenidos de solo lectura que no requieren interacción del usuario.
-
-    Path params:
-        virtual_content_id: ID del contenido virtual a marcar como completado
-    """
-    try:
-        user_id = get_jwt_identity()
-
-        # Validar que el virtual_content_id sea válido
-        if not ObjectId.is_valid(virtual_content_id):
-            return APIRoute.error(ErrorCodes.VALIDATION_ERROR, "ID de contenido virtual inválido")
-
-        # Buscar el contenido virtual
-        db = get_db()
-        virtual_content = db.virtual_topic_contents.find_one({
-            "_id": ObjectId(virtual_content_id),
-            "student_id": ObjectId(user_id)
-        })
-
-        if not virtual_content:
-            return APIRoute.error(
-                ErrorCodes.NOT_FOUND,
-                "Contenido virtual no encontrado o no pertenece al usuario"
-            )
-
-        # Verificar que no esté ya completado
-        interaction_tracking = virtual_content.get("interaction_tracking", {}) or {}
-        if interaction_tracking.get("completion_status") == "completed":
-            return APIRoute.success(
-                message="El contenido ya estaba marcado como completado",
-                data={"already_completed": True}
-            )
-
-        # Actualizar el estado de completitud
-        update_data = {
-            "interaction_tracking": {
-                **interaction_tracking,
-                "completion_status": "completed",
-                "completion_percentage": 100.0,
-                "completed_at": datetime.now()
-            },
-            "updated_at": datetime.now()
-        }
-
-        # Actualizar en la base de datos
-        result = db.virtual_topic_contents.update_one(
-            {"_id": ObjectId(virtual_content_id)},
-            {"$set": update_data}
-        )
-
-        if result.modified_count == 0:
-            return APIRoute.error(
-                ErrorCodes.SERVER_ERROR,
-                "No se pudo actualizar el estado del contenido"
-            )
-
-        logging.info(f"Contenido virtual {virtual_content_id} marcado como completado automáticamente")
-
-        return APIRoute.success(
-            message="Contenido marcado como completado exitosamente",
-            data={
-                "virtual_content_id": virtual_content_id,
-                "completion_percentage": 100.0,
-                "completion_status": "completed"
-            }
-        )
-
-    except Exception as e:
-        logging.error(f"Error marcando contenido como completado: {str(e)}")
         return APIRoute.error(
             ErrorCodes.SERVER_ERROR,
             "Error interno del servidor",

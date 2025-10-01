@@ -7,6 +7,8 @@ import traceback
 
 from .template_services import TemplateService, TemplateInstanceService, TemplateMarkupExtractor
 from .template_models import Template, TemplateInstance
+from .services import ContentService
+from .models import ContentTypes
 from src.shared.decorators import auth_required, role_required
 from src.shared.constants import ROLES
 from src.shared.utils import ensure_json_serializable
@@ -123,6 +125,65 @@ def list_templates():
         
     except Exception as e:
         logging.error(f"Error listing templates: {str(e)}")
+        return jsonify({
+            "success": False,
+            "error": "INTERNAL_ERROR",
+            "message": "Error interno del servidor"
+        }), 500
+
+@template_bp.route('/available', methods=['GET'])
+@auth_required
+@role_required([ROLES["TEACHER"], ROLES["ADMIN"]])
+def get_available_templates():
+    """
+    Endpoint optimizado para profesores que retorna plantillas disponibles con filtros avanzados.
+    Query params:
+      - subject: filtro por materia del tema actual
+      - style: filtro por estilo de aprendizaje
+      - scope: public|org|private
+      - learning_methodology: visual|kinesthetic|gamification etc.
+      - compatibility: modo de compatibilidad (p.ej. kinesthetic)
+      - limit, skip: paginación
+    """
+    try:
+        user_id = get_jwt_identity()
+        claims = get_jwt()
+        workspace_id = claims.get('workspace_id')
+
+        subject = request.args.get('subject')
+        style = request.args.get('style')
+        scope = request.args.get('scope', 'public')
+        learning_methodology = request.args.get('learning_methodology')
+        compatibility = request.args.get('compatibility')
+        limit = int(request.args.get('limit', 50))
+        skip = int(request.args.get('skip', 0))
+
+        templates = template_service.get_available_templates_for_teacher(
+            teacher_id=user_id,
+            workspace_id=workspace_id,
+            subject=subject,
+            style=style,
+            scope=scope,
+            learning_methodology=learning_methodology,
+            compatibility=compatibility,
+            limit=limit,
+            skip=skip
+        )
+
+        # Asegurar serialización
+        templates_serializable = ensure_json_serializable(templates)
+
+        return jsonify({
+            "success": True,
+            "data": {
+                "templates": templates_serializable,
+                "total": len(templates_serializable)
+            }
+        }), 200
+
+    except Exception as e:
+        logging.error(f"Error in get_available_templates: {e}")
+        traceback.print_exc()
         return jsonify({
             "success": False,
             "error": "INTERNAL_ERROR",
@@ -360,6 +421,69 @@ def delete_template(template_id):
         }), 403
     except Exception as e:
         logging.error(f"Error deleting template {template_id}: {str(e)}")
+        return jsonify({
+            "success": False,
+            "error": "INTERNAL_ERROR",
+            "message": "Error interno del servidor"
+        }), 500
+
+@template_bp.route('/topic/<topic_id>/use_template/<template_id>', methods=['POST'])
+@auth_required
+@role_required([ROLES["TEACHER"], ROLES["ADMIN"]])
+def use_template_on_topic(topic_id, template_id):
+    """
+    Crear contenido desde un template específico y vincularlo a un topic.
+    Body (optional):
+      {
+        "props": {...},
+        "auto_generate": true|false,
+        "migration_source": {...},
+        "create_topic_content": true|false,
+        "content_type_for_instance": "slide" (default)
+      }
+    """
+    try:
+        user_id = get_jwt_identity()
+        data = request.get_json() or {}
+
+        props = data.get("props")
+        auto_generate = bool(data.get("auto_generate", False))
+        migration_source = data.get("migration_source")
+        create_topic_content = bool(data.get("create_topic_content", False))
+        content_type_for_instance = data.get("content_type_for_instance", "slide")
+
+        # Use the TemplateService helper that encapsulates validation and creation
+        result = template_service.create_template_instance_for_topic(
+            template_id=template_id,
+            topic_id=topic_id,
+            creator_id=user_id,
+            props=props,
+            auto_generate=auto_generate,
+            migration_source=migration_source,
+            create_topic_content=create_topic_content,
+            content_type_for_instance=content_type_for_instance
+        )
+
+        if not result or not result.get("success"):
+            err = result.get("error", "No se pudo crear la instancia")
+            return jsonify({
+                "success": False,
+                "error": "OPERATION_FAILED",
+                "message": err
+            }), 400
+
+        return jsonify({
+            "success": True,
+            "data": {
+                "message": "Instancia creada y vinculada al topic exitosamente",
+                "instance_id": result.get("instance_id"),
+                "created_content_id": result.get("created_content_id")
+            }
+        }), 201
+
+    except Exception as e:
+        logging.error(f"Error using template {template_id} on topic {topic_id}: {e}")
+        traceback.print_exc()
         return jsonify({
             "success": False,
             "error": "INTERNAL_ERROR",
@@ -885,6 +1009,44 @@ def get_template_recommendations():
             "message": "Error interno del servidor"
         }), 500
 
+@template_bp.route('/recommendations/<topic_id>', methods=['GET'])
+@auth_required
+def get_template_recommendations_for_topic(topic_id):
+    """
+    Endpoint auxiliar que provee recomendaciones de templates basadas en el topic.
+    Usa la lógica existente de ContentService y TemplateRecommendationService.
+    """
+    try:
+        # Validar topic_id
+        try:
+            ObjectId(topic_id)
+        except Exception:
+            return jsonify({
+                "success": False,
+                "error": "VALIDATION_ERROR",
+                "message": "topic_id debe ser un ObjectId válido"
+            }), 400
+
+        content_service = ContentService()
+        recs = content_service.get_template_recommendations(topic_id=topic_id, student_id=None)
+
+        # Asegurar formato
+        recs_serializable = ensure_json_serializable(recs)
+
+        return jsonify({
+            "success": True,
+            "data": recs_serializable
+        }), 200
+
+    except Exception as e:
+        logging.error(f"Error in get_template_recommendations_for_topic for topic {topic_id}: {e}")
+        traceback.print_exc()
+        return jsonify({
+            "success": False,
+            "error": "INTERNAL_ERROR",
+            "message": "Error interno del servidor"
+        }), 500
+
 def _apply_props_to_template(html: str, props: Dict[str, Any]) -> str:
     """
     Aplica las propiedades de una instancia al HTML de la plantilla.
@@ -915,3 +1077,165 @@ def _apply_props_to_template(html: str, props: Dict[str, Any]) -> str:
     except Exception as e:
         logging.error(f"Error applying props to template: {str(e)}")
         return html  # Devolver HTML original si falla el procesamiento
+
+# === MIGRATION ENDPOINTS (legacy games/simulations -> templates) ===
+
+@template_bp.route('/migration/games', methods=['GET'])
+@auth_required
+@role_required([ROLES["TEACHER"], ROLES["ADMIN"]])
+def migration_suggestions_games():
+    """
+    Lista games legacy y provee sugerencias de templates equivalentes para migración.
+    Query params:
+      - topic_id (optional)
+      - module_id (optional)
+      - workspace_id (optional)
+    """
+    try:
+        topic_id = request.args.get('topic_id')
+        module_id = request.args.get('module_id')
+        workspace_id = request.args.get('workspace_id')
+
+        content_service = ContentService()
+        # Use specialized helper to gather suggestions scoped to games
+        suggestions = content_service.get_legacy_content_migration_suggestions(topic_id=topic_id, content_type=ContentTypes.GAME)
+
+        return jsonify({
+            "success": True,
+            "data": suggestions
+        }), 200
+
+    except Exception as e:
+        logging.error(f"Error in migration_suggestions_games: {e}")
+        traceback.print_exc()
+        return jsonify({
+            "success": False,
+            "error": "INTERNAL_ERROR",
+            "message": "Error interno del servidor"
+        }), 500
+
+@template_bp.route('/migration/simulations', methods=['GET'])
+@auth_required
+@role_required([ROLES["TEACHER"], ROLES["ADMIN"]])
+def migration_suggestions_simulations():
+    """
+    Lista simulations legacy y provee sugerencias de templates equivalentes para migración.
+    Query params:
+      - topic_id (optional)
+      - module_id (optional)
+      - workspace_id (optional)
+    """
+    try:
+        topic_id = request.args.get('topic_id')
+        module_id = request.args.get('module_id')
+        workspace_id = request.args.get('workspace_id')
+
+        content_service = ContentService()
+        suggestions = content_service.get_legacy_content_migration_suggestions(topic_id=topic_id, content_type=ContentTypes.SIMULATION)
+
+        return jsonify({
+            "success": True,
+            "data": suggestions
+        }), 200
+
+    except Exception as e:
+        logging.error(f"Error in migration_suggestions_simulations: {e}")
+        traceback.print_exc()
+        return jsonify({
+            "success": False,
+            "error": "INTERNAL_ERROR",
+            "message": "Error interno del servidor"
+        }), 500
+
+@template_bp.route('/migration/execute', methods=['POST'])
+@auth_required
+@role_required([ROLES["TEACHER"], ROLES["ADMIN"]])
+def execute_migration():
+    """
+    Ejecuta la migración automática de un game/simulation legacy a un template.
+    Body:
+      {
+        "content_id": "<legacy_content_id>",
+        "template_id": "<target_template_id>",
+        "mark_legacy": true|false,
+        "migration_notes": "texto opcional"
+      }
+    """
+    try:
+        user_id = get_jwt_identity()
+        data = request.get_json() or {}
+
+        content_id = data.get("content_id")
+        template_id = data.get("template_id")
+        mark_legacy = data.get("mark_legacy", True)
+        migration_notes = data.get("migration_notes")
+
+        if not content_id or not template_id:
+            return jsonify({
+                "success": False,
+                "error": "VALIDATION_ERROR",
+                "message": "content_id y template_id son requeridos"
+            }), 400
+
+        # Ejecutar migración
+        result = template_service.execute_content_migration(
+            content_id=content_id,
+            template_id=template_id,
+            mark_legacy=bool(mark_legacy),
+            creator_id=user_id,
+            migration_notes=migration_notes
+        )
+
+        if not result.get("success"):
+            return jsonify({
+                "success": False,
+                "error": "MIGRATION_FAILED",
+                "message": result.get("error", "La migración falló")
+            }), 400
+
+        return jsonify({
+            "success": True,
+            "data": {
+                "new_content_id": result.get("new_content_id"),
+                "instance_id": result.get("instance_id"),
+                "compatibility_score": result.get("compatibility_score")
+            }
+        }), 200
+
+    except Exception as e:
+        logging.error(f"Error executing migration: {e}")
+        traceback.print_exc()
+        return jsonify({
+            "success": False,
+            "error": "INTERNAL_ERROR",
+            "message": "Error interno del servidor"
+        }), 500
+
+@template_bp.route('/migration/status', methods=['GET'])
+@auth_required
+def migration_status():
+    """
+    Reporte de estado general de migración por workspace.
+    Query params:
+      - workspace_id (optional) (if absent, jwts workspace will be used)
+    """
+    try:
+        claims = get_jwt()
+        default_workspace = claims.get('workspace_id')
+        workspace_id = request.args.get('workspace_id') or default_workspace
+
+        status = template_service.get_migration_status(workspace_id=workspace_id)
+
+        return jsonify({
+            "success": True,
+            "data": status
+        }), 200
+
+    except Exception as e:
+        logging.error(f"Error getting migration status: {e}")
+        traceback.print_exc()
+        return jsonify({
+            "success": False,
+            "error": "INTERNAL_ERROR",
+            "message": "Error interno del servidor"
+        }), 500

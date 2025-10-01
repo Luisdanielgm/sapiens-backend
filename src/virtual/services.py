@@ -446,7 +446,7 @@ class VirtualTopicService(VerificationBaseService):
                 if original_content:
                     # Incluir personalization_markers y slide_template del contenido original
                     content["original_personalization_markers"] = original_content.get("personalization_markers", {})
-                    content["original_slide_template"] = original_content.get("slide_template", {})
+                    content["original_slide_template"] = original_content.get("slide_template", "")
                     content["original_content_type"] = original_content.get("content_type", "unknown")
                     content["original_content"] = original_content.get("content", "")
                     content["original_interactive_data"] = original_content.get("interactive_data", {})
@@ -473,7 +473,7 @@ class VirtualTopicService(VerificationBaseService):
                     "source_type": "legacy_resource",
                     # Para recursos legacy, no hay marcadores ni plantillas
                     "original_personalization_markers": {},
-                    "original_slide_template": {},
+                    "original_slide_template": "",
                     "original_content_type": "legacy_resource"
                 })
 

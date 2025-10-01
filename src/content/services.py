@@ -3,12 +3,13 @@ from bson import ObjectId
 from datetime import datetime, timedelta
 import json
 import logging
+import threading
 
 from src.shared.database import get_db
 from src.shared.constants import STATUS
 from src.shared.standardization import VerificationBaseService, ErrorCodes
 from src.shared.exceptions import AppException
-from .models import ContentType, TopicContent, VirtualTopicContent, ContentResult, ContentTypes
+from .models import ContentType, TopicContent, VirtualTopicContent, ContentResult, ContentTypes, DeprecatedContentTypes, LearningMethodologyTypes
 from .slide_style_service import SlideStyleService
 import re
 from src.ai_monitoring.services import AIMonitoringService
@@ -96,6 +97,13 @@ class ContentService(VerificationBaseService):
         self.structured_sequence_service = StructuredSequenceService(get_db())
         self.template_recommendation_service = TemplateRecommendationService()
         self.embedded_content_service = EmbeddedContentService(self.db)
+
+        # Simple in-memory caches for expensive aggregated stats
+        # Structure: { cache_key: { "ts": datetime, "value": ... } }
+        self._stats_cache: Dict[str, Dict[str, Any]] = {}
+        self._cache_lock = threading.Lock()
+        # Default TTL (seconds) for stats cache
+        self._stats_cache_ttl = 10
 
     def check_topic_exists(self, topic_id: str) -> bool:
         """Verifica si un tema existe."""
@@ -225,12 +233,13 @@ class ContentService(VerificationBaseService):
             logging.error(f"Error sanitizando HTML: {str(e)}")
             return ""  # Retornar vacío en caso de error para evitar inyección
 
-    def create_content(self, content_data: Dict) -> Tuple[bool, str]:
+    def create_content(self, content_data: Dict, allow_deprecated: bool = False, creator_roles: Optional[List[str]] = None) -> Tuple[bool, str]:
         """
         Crea contenido de cualquier tipo (estático o interactivo).
         
         Args:
             content_data: Datos del contenido a crear
+            allow_deprecated: Si True permite crear tipos deprecated (solo para administradores en casos excepcionales)
             
         Returns:
             Tuple[bool, str]: (éxito, mensaje/ID)
@@ -249,15 +258,26 @@ class ContentService(VerificationBaseService):
             if not content_type_def:
                 return False, f"Tipo de contenido '{content_type}' no válido"
 
+            # Validate deprecation of content type
+            allowed, info = self.validate_content_type_deprecation(content_type, allow_deprecated=allow_deprecated, creator_roles=creator_roles)
+            if not allowed:
+                # info may contain suggestion metadata or message
+                message = info.get("message") if isinstance(info, dict) and info.get("message") else f"El tipo de contenido '{content_type}' está en desuso y no puede crearse. Considere migrar a plantillas interactivas."
+                # attach replacement suggestion if available
+                if isinstance(info, dict) and info.get("replacement"):
+                    message = f"{message} Reemplazo recomendado: {info.get('replacement')}"
+                logging.warning(f"create_content: intento de crear contenido deprecated type='{content_type}' topic='{topic_id}' allowed={allow_deprecated}")
+                return False, message
+
             # Validaciones específicas para diapositivas
             if content_type == "slide":
-                slide_template = content_data.get("slide_template", {})
+                slide_template = content_data.get("slide_template", "")
                 if not slide_template:
-                    return False, f"El contenido de tipo '{content_type}' requiere un campo 'slide_template' con la plantilla de fondo"
+                    return False, f"El contenido de tipo '{content_type}' requiere un campo 'slide_template' con el prompt para la plantilla"
                 
                 # Validar estructura del slide_template usando el servicio
                 if not self.slide_style_service.validate_slide_template(slide_template):
-                    return False, "El slide_template no tiene una estructura válida"
+                    return False, "El slide_template no es un prompt válido"
 
                 # If client provided template_snapshot (new field), validate it too
                 template_snapshot = content_data.get("template_snapshot")
@@ -330,7 +350,7 @@ class ContentService(VerificationBaseService):
                 generation_prompt=content_data.get("generation_prompt"),
                 ai_credits=content_data.get("ai_credits", True),
                 personalization_markers=markers,
-                slide_template=content_data.get("slide_template", {}),  # Incluir slide_template
+                slide_template=content_data.get("slide_template", ""),  # Incluir slide_template
                 status=initial_status,
                 content_html=content_data.get("content_html"),
                 narrative_text=content_data.get("narrative_text"),
@@ -356,6 +376,283 @@ class ContentService(VerificationBaseService):
         except Exception as e:
             logging.error(f"Error creando contenido: {str(e)}")
             return False, f"Error interno: {str(e)}"
+
+    def validate_content_type_deprecation(self, content_type: str, allow_deprecated: bool = False, creator_roles: Optional[List[str]] = None) -> Tuple[bool, Optional[Dict]]:
+        """
+        Valida si un tipo de contenido está marcado como deprecated y si se permite su creación.
+        Args:
+            content_type: Código del tipo de contenido a validar
+            allow_deprecated: Flag explícito para permitir creación de tipos deprecated (solo administradores)
+            creator_roles: Lista de roles del creador (p.ej. ['ADMIN']). Si incluye 'ADMIN' se permite crear cuando allow_deprecated=True
+        Returns:
+            (True, info_dict) si está permitido (info_dict puede tener metadata sobre reemplazo)
+            (False, info_dict_or_message) si no está permitido; info_dict puede contener metadata de DeprecatedContentTypes.info_for
+        """
+        try:
+            if not content_type:
+                return True, None
+            # Chequear si está en la lista de deprecated definida en modelos
+            if DeprecatedContentTypes.is_deprecated(content_type):
+                info = DeprecatedContentTypes.info_for(content_type) or {}
+                # Si allow_deprecated explícito y rol admin en creator_roles -> permitir, pero registrar
+                is_admin = False
+                try:
+                    if creator_roles and isinstance(creator_roles, list):
+                        is_admin = any(r.upper() == "ADMIN" for r in creator_roles)
+                except Exception:
+                    is_admin = False
+
+                if allow_deprecated and is_admin:
+                    logging.warning(f"validate_content_type_deprecation: creación permitida de tipo deprecated '{content_type}' por ADMIN (allow_deprecated=True)")
+                    return True, info
+                # If allow_deprecated True but no admin role, still disallow and log
+                if allow_deprecated and not is_admin:
+                    logging.warning(f"validate_content_type_deprecation: intento de allow_deprecated sin rol ADMIN para tipo '{content_type}'")
+                    return False, {"message": "Permiso insuficiente para crear contenido deprecated. Se requiere rol ADMIN para usar allow_deprecated."}
+
+                # Default: disallow creation
+                logging.info(f"validate_content_type_deprecation: intento de creación bloqueado para tipo deprecated '{content_type}'")
+                return False, info or {"message": f"El tipo '{content_type}' está en desuso y no puede crearse. Use plantillas interactivas en su lugar."}
+            # Not deprecated
+            return True, None
+        except Exception as e:
+            logging.error(f"Error validando deprecación de tipo de contenido '{content_type}': {e}", exc_info=True)
+            # En caso de error, probar si el tipo está deprecated
+            try:
+                is_deprecated = DeprecatedContentTypes.is_deprecated(content_type)
+                if is_deprecated:
+                    logging.warning(f"validate_content_type_deprecation: error de validación para tipo deprecated '{content_type}', bloqueando creación por seguridad")
+                    return False, {'message': 'Tipo en desuso; no se permite creación por error de validación'}
+                else:
+                    logging.warning(f"validate_content_type_deprecation: error de validación para tipo no deprecated '{content_type}', permitiendo creación por seguridad")
+                    return True, None
+            except Exception as inner_e:
+                logging.error(f"validate_content_type_deprecation: error secundario al verificar deprecación durante manejo de error para '{content_type}': {inner_e}", exc_info=True)
+                # Si no podemos determinar el estado de deprecación, permitir creación para no bloquear el flujo
+                return True, None
+
+    def get_legacy_content_migration_suggestions(self, topic_id: Optional[str] = None, content_type: Optional[str] = None) -> Dict:
+        """
+        Analiza contenidos legacy (game, simulation) en el tema y propone sugerencias de migración a plantillas.
+        Retorna un dict con:
+            - topic_id (si se proporciona)
+            - totals: {type: count}
+            - last_created_at per type
+            - sample_contents: list of sample content metadata (id, title, learning_methodologies)
+            - suggested_templates: recomendaciones por tipo/metodología
+
+        Args:
+            topic_id: ID del tema a analizar (opcional). Si es None, se agregan datos globales.
+            content_type: Tipo de contenido específico a filtrar (opcional). Si se proporciona,
+                         solo se analizan contenidos de ese tipo.
+        """
+        try:
+            deprecated_types = ContentTypes.get_deprecated_types()
+
+            # Build query based on parameters
+            query = {
+                "content_type": {"$in": deprecated_types},
+                "status": {"$ne": "deleted"}
+            }
+
+            # If content_type is provided, filter only that type
+            if content_type:
+                if content_type not in deprecated_types:
+                    return {"error": f"content_type '{content_type}' no es un tipo deprecated válido"}
+                query["content_type"] = content_type
+
+            # If topic_id is provided, filter by topic
+            if topic_id:
+                query["topic_id"] = ObjectId(topic_id)
+
+            cursor = self.collection.find(query, {
+                "_id": 1,
+                "content_type": 1,
+                "learning_methodologies": 1,
+                "interactive_data": 1,
+                "created_at": 1,
+                "updated_at": 1,
+                "content": 1,
+                "topic_id": 1
+            }).sort([("created_at", -1)])
+
+            contents = list(cursor)
+            totals: Dict[str, int] = {}
+            last_created: Dict[str, Optional[datetime]] = {}
+            samples: Dict[str, List[Dict]] = {}
+            methodology_counter: Dict[str, Dict[str, int]] = {}
+
+            for c in contents:
+                ctype = c.get("content_type")
+                totals[ctype] = totals.get(ctype, 0) + 1
+                created = c.get("created_at")
+                if created:
+                    prev = last_created.get(ctype)
+                    if not prev or (isinstance(created, datetime) and created > prev):
+                        last_created[ctype] = created
+
+                # gather sample up to 5 per type
+                samples.setdefault(ctype, [])
+                if len(samples[ctype]) < 5:
+                    samples[ctype].append({
+                        "content_id": str(c.get("_id")),
+                        "topic_id": str(c.get("topic_id")),
+                        "learning_methodologies": c.get("learning_methodologies", []),
+                        "interactive_data_keys": list(c.get("interactive_data", {}).keys()) if isinstance(c.get("interactive_data"), dict) else [],
+                        "content_preview": (c.get("content")[:250] if isinstance(c.get("content"), str) else None)
+                    })
+
+                # count methodologies
+                for m in (c.get("learning_methodologies") or []):
+                    methodology_counter.setdefault(ctype, {})
+                    methodology_counter[ctype][m] = methodology_counter[ctype].get(m, 0) + 1
+
+            # Build suggested templates using metadata and LearningMethodologyTypes mapping
+            suggested_templates: Dict[str, List[str]] = {}
+            for ctype in (deprecated_types if not content_type else [content_type]):
+                # base replacement from DeprecatedContentTypes
+                meta = DeprecatedContentTypes.info_for(ctype) or {}
+                base_replacement = meta.get("replacement")
+                suggestions = []
+                if base_replacement:
+                    suggestions.append(base_replacement)
+                # if kinesthetic/gamification methodologies are common, include kinesthetic template mappings
+                meth_counts = methodology_counter.get(ctype, {})
+                # pick top methodologies
+                top_methods = sorted(meth_counts.items(), key=lambda x: x[1], reverse=True)[:3]
+                for m, _ in top_methods:
+                    # if methodology is kinesthetic or gamification, add mapped templates
+                    if m in (LearningMethodologyTypes.KINESTHETIC, LearningMethodologyTypes.GAMIFICATION):
+                        mapped = LearningMethodologyTypes.map_kinesthetic_to_templates().get(m, [])
+                        for t in mapped:
+                            if t not in suggestions:
+                                suggestions.append(t)
+                    else:
+                        # also include collaborative/project_based suggestions
+                        mapped = LearningMethodologyTypes.map_kinesthetic_to_templates().get(m, [])
+                        if mapped:
+                            for t in mapped:
+                                if t not in suggestions:
+                                    suggestions.append(t)
+                suggested_templates[ctype] = suggestions
+
+            result = {
+                "totals": totals,
+                "last_created_at": {k: (v.isoformat() if isinstance(v, datetime) else None) for k, v in last_created.items()},
+                "sample_contents": samples,
+                "methodology_distribution": methodology_counter,
+                "suggested_templates": suggested_templates
+            }
+
+            # Only include topic_id if it was provided
+            if topic_id:
+                result["topic_id"] = topic_id
+
+            return result
+        except Exception as e:
+            logging.error(f"Error generando sugerencias de migración para topic {topic_id}: {e}")
+            return {"error": str(e)}
+
+    def check_deprecated_content_usage(self, topic_id: Optional[str] = None, module_id: Optional[str] = None) -> Dict:
+        """
+        Consulta estadísticas de uso de contenidos deprecated por topic o por módulo.
+        Retorna:
+            - scope (topic/module/all)
+            - totals_by_type
+            - last_created_by_type
+            - sample_ids_by_type
+            - recommended_actions (human readable)
+        Nota: module_id handling intenta resolver topics pertenecientes al módulo si existe la colección topics
+        """
+        try:
+            deprecated_types = ContentTypes.get_deprecated_types()
+            query = {"content_type": {"$in": deprecated_types}, "status": {"$ne": "deleted"}}
+
+            scope = "all"
+            if topic_id:
+                try:
+                    query["topic_id"] = ObjectId(topic_id)
+                    scope = f"topic:{topic_id}"
+                except Exception:
+                    return {"error": "topic_id inválido"}
+            elif module_id:
+                # intentar obtener topics pertenecientes al módulo (campo module_id en topics)
+                try:
+                    topics = list(self.db.topics.find({"module_id": module_id}, {"_id": 1}))
+                    topic_ids = [t["_id"] for t in topics]
+                    if topic_ids:
+                        query["topic_id"] = {"$in": topic_ids}
+                        scope = f"module:{module_id}"
+                    else:
+                        # if no topics found, return empty stats
+                        return {
+                            "scope": f"module:{module_id}",
+                            "totals_by_type": {},
+                            "last_created_by_type": {},
+                            "sample_ids_by_type": {},
+                            "recommended_actions": ["No se encontraron topics en el módulo especificado."]
+                        }
+                except Exception as e:
+                    logging.warning(f"check_deprecated_content_usage: no se pudo resolver module_id -> topics: {e}")
+                    return {"error": "module_id procesado incorrectamente"}
+
+            cursor = self.collection.find(query, {
+                "_id": 1,
+                "content_type": 1,
+                "created_at": 1,
+                "learning_methodologies": 1
+            }).sort([("created_at", -1)])
+            items = list(cursor)
+
+            totals_by_type: Dict[str, int] = {}
+            last_created_by_type: Dict[str, Optional[datetime]] = {}
+            sample_ids_by_type: Dict[str, List[str]] = {}
+            methodology_summary: Dict[str, Dict[str, int]] = {}
+
+            for it in items:
+                ctype = it.get("content_type")
+                totals_by_type[ctype] = totals_by_type.get(ctype, 0) + 1
+                created = it.get("created_at")
+                if created:
+                    prev = last_created_by_type.get(ctype)
+                    if not prev or (isinstance(created, datetime) and created > prev):
+                        last_created_by_type[ctype] = created
+                sample_ids_by_type.setdefault(ctype, [])
+                if len(sample_ids_by_type[ctype]) < 10:
+                    sample_ids_by_type[ctype].append(str(it.get("_id")))
+
+                for m in (it.get("learning_methodologies") or []):
+                    methodology_summary.setdefault(ctype, {})
+                    methodology_summary[ctype][m] = methodology_summary[ctype].get(m, 0) + 1
+
+            # Build recommended actions
+            recommended_actions = []
+            for ctype in deprecated_types:
+                count = totals_by_type.get(ctype, 0)
+                if count == 0:
+                    recommended_actions.append(f"No hay contenidos '{ctype}' en el scope {scope}.")
+                    continue
+                meta = DeprecatedContentTypes.info_for(ctype) or {}
+                replacement = meta.get("replacement", "interactive_template")
+                sunset = meta.get("sunset_date")
+                sunset_str = sunset.isoformat() if isinstance(sunset, datetime) else str(sunset) if sunset else "N/A"
+                recommended_actions.append(
+                    f"Tipo '{ctype}': {count} elementos. Última creación: {last_created_by_type.get(ctype).isoformat() if isinstance(last_created_by_type.get(ctype), datetime) else 'desconocida'}. "
+                    f"Recomendación: migrar a '{replacement}'. Fecha de sunset: {sunset_str}."
+                )
+
+            result = {
+                "scope": scope,
+                "totals_by_type": totals_by_type,
+                "last_created_by_type": {k: (v.isoformat() if isinstance(v, datetime) else None) for k, v in last_created_by_type.items()},
+                "sample_ids_by_type": sample_ids_by_type,
+                "methodology_summary": methodology_summary,
+                "recommended_actions": recommended_actions
+            }
+            return result
+        except Exception as e:
+            logging.error(f"Error en check_deprecated_content_usage: {e}")
+            return {"error": str(e)}
 
     def create_bulk_content(self, contents_data: List[Dict]) -> Tuple[bool, List[str]]:
         """
@@ -399,12 +696,12 @@ class ContentService(VerificationBaseService):
                 
                 # Validaciones específicas para diapositivas
                 if content_type == "slide":
-                    slide_template = content_data.get("slide_template", {})
+                    slide_template = content_data.get("slide_template", "")
                     if not slide_template:
                         raise ValueError(f"Contenido {i+1}: El contenido de tipo 'slide' requiere un campo 'slide_template'")
 
                     if not self.slide_style_service.validate_slide_template(slide_template):
-                        raise ValueError(f"Contenido {i+1}: El slide_template no tiene una estructura válida")
+                        raise ValueError(f"Contenido {i+1}: El slide_template no es un prompt válido")
 
                     # Detectar caso skeleton: full_text presente sin content_html ni narrative_text
                     ft = content_data.get("full_text")
@@ -511,7 +808,7 @@ class ContentService(VerificationBaseService):
                     generation_prompt=content_data.get("generation_prompt"),
                     ai_credits=content_data.get("ai_credits", True),
                     personalization_markers=markers,
-                    slide_template=content_data.get("slide_template", {}),
+                    slide_template=content_data.get("slide_template", ""),
                     status=initial_status,
                     order=content_data.get("order"),
                     parent_content_id=content_data.get("parent_content_id"),
@@ -627,7 +924,7 @@ class ContentService(VerificationBaseService):
                     generation_prompt=slide.get("generation_prompt"),
                     ai_credits=slide.get("ai_credits", True),
                     personalization_markers=markers,
-                    slide_template=slide.get("slide_template", {}),
+                    slide_template=slide.get("slide_template", ""),
                     # Force skeleton status regardless of provided status
                     status="skeleton",
                     order=slide.get("order"),
@@ -769,7 +1066,7 @@ class ContentService(VerificationBaseService):
             pipeline = [
                 {"$match": query},
                 # Añadir a pipeline campo que indica si order es null para ordenar correctamente
-                {"$addFields": {"_order_null": {"$eq": [ {"$ifNull": ["$order", "__NULL__"]}, "__NULL__"] }}},
+                {"$addFields": {"_order_null": {"$eq": ["$order", None]}}},
                 {"$sort": {"_order_null": 1, "order": 1, "created_at": -1}}
             ]
 
@@ -879,7 +1176,7 @@ class ContentService(VerificationBaseService):
             logging.error(f"Error obteniendo estadísticas de secuencia: {str(e)}")
             return {}
     
-    def generate_slide_template(self, palette_name: str = None, font_family: str = None, custom_colors: Dict = None) -> Dict:
+    def generate_slide_template(self, palette_name: str = None, font_family: str = None, custom_colors: Dict = None) -> str:
         """
         Genera un slide_template usando el servicio de estilo de diapositivas.
         
@@ -889,7 +1186,7 @@ class ContentService(VerificationBaseService):
             custom_colors: Colores personalizados (opcional)
             
         Returns:
-            Dict con el slide_template generado
+            String con el prompt para generar el slide_template
         """
         return self.slide_style_service.generate_slide_template(
             palette_name=palette_name,
@@ -1135,13 +1432,11 @@ class ContentService(VerificationBaseService):
             # Validaciones específicas para diapositivas
             content_type = update_data.get("content_type", current_content.get("content_type"))
             if content_type == "slide" and "slide_template" in update_data:
-                slide_template = update_data.get("slide_template", {})
+                slide_template = update_data.get("slide_template", "")
                 if slide_template:  # Solo validar si se proporciona slide_template
-                    # Validar estructura básica de slide_template
-                    required_template_fields = ["background", "styles"]
-                    for field in required_template_fields:
-                        if field not in slide_template:
-                            return False, f"El slide_template debe incluir el campo '{field}'"
+                    # Validar que slide_template sea un prompt válido
+                    if not self.slide_style_service.validate_slide_template(slide_template):
+                        return False, "El slide_template no es un prompt válido"
 
             update_data["updated_at"] = datetime.now()
 
@@ -1265,63 +1560,53 @@ class ContentService(VerificationBaseService):
     def get_slide_generation_status(self, topic_id: str) -> Dict:
         """
         Retorna estadísticas sobre el estado de generación de las diapositivas
-        de un tema. Utiliza aggregation pipeline para obtener métricas más detalladas:
+        de un tema. Incluye:
             - counts por estado
             - slides_with_html, slides_with_narrative, slides_complete (ambos)
             - completion_percentage
-            - average_generation_time (ms) basado en updated_at - created_at cuando esté disponible
-            - estimated_time_remaining (ms) = avg_gen_time * pending_count
-            - last_updated_slide (id + timestamp)
-            - progress_trend: lista de counts por día (últimos 7 días)
+            - average_generation_time_ms
+            - estimated_time_remaining_ms
+            - last_completed_slide (id + timestamp)
+            - progress_trend (últimos 7 días)
+            - slides_by_render_engine
+            - parent_content_groups (stats por parent_content_id)
+            - quality_metrics (avg html length, avg narrative length)
+            - bottleneck_analysis (slides con mayor tiempo de generación)
+        Implementa cache temporal para mejorar rendimiento en consultas frecuentes.
         """
         try:
-            match_stage = {
-                "$match": {
-                    "topic_id": ObjectId(topic_id),
-                    "content_type": "slide",
-                    "status": {"$ne": "deleted"}
-                }
+            cache_key = f"slide_status::{topic_id}"
+            with self._cache_lock:
+                cached = self._stats_cache.get(cache_key)
+                if cached:
+                    ts = cached.get("ts")
+                    if ts and (datetime.utcnow() - ts).total_seconds() < self._stats_cache_ttl:
+                        logging.debug(f"get_slide_generation_status: returning cached status for topic {topic_id}")
+                        return cached.get("value", {})
+
+            # Build base query
+            base_query = {
+                "topic_id": ObjectId(topic_id),
+                "content_type": "slide",
+                "status": {"$ne": "deleted"}
             }
 
-            # Pipeline para métricas agregadas
-            pipeline = [
-                match_stage,
-                {"$project": {
-                    "status": 1,
-                    "content_html": 1,
-                    "narrative_text": 1,
-                    "created_at": 1,
-                    "updated_at": 1
-                }},
-                {"$addFields": {
-                    "has_html": {"$cond": [{"$ifNull": ["$content_html", False]}, 1, 0]},
-                    "has_narrative": {"$cond": [{"$ifNull": ["$narrative_text", False]}, 1, 0]},
-                    "gen_time_ms": {
-                        "$cond": [
-                            {"$and": [{"$ifNull": ["$created_at", False]}, {"$ifNull": ["$updated_at", False]}]},
-                            {"$subtract": ["$updated_at", "$created_at"]},
-                            None
-                        ]
-                    },
-                    "updated_day": {"$dateToString": {"format": "%Y-%m-%d", "date": {"$ifNull": ["$updated_at", "$created_at"]}}}
-                }},
-                {"$group": {
-                    "_id": None,
-                    "total": {"$sum": 1},
-                    "by_status": {"$push": "$status"},
-                    "slides_with_html": {"$sum": "$has_html"},
-                    "slides_with_narrative": {"$sum": "$has_narrative"},
-                    "slides_complete": {"$sum": {"$cond": [{"$and": [{"$eq": ["$has_html", 1]}, {"$eq": ["$has_narrative", 1]}]}, 1, 0]}},
-                    "gen_times": {"$push": "$gen_time_ms"},
-                    "last_updated": {"$max": "$updated_at"},
-                    "updated_days": {"$push": "$updated_day"}
-                }},
-            ]
+            # Fetch slides with fields needed for metrics
+            slides_cursor = self.collection.find(base_query, {
+                "_id": 1,
+                "status": 1,
+                "content_html": 1,
+                "narrative_text": 1,
+                "created_at": 1,
+                "updated_at": 1,
+                "render_engine": 1,
+                "parent_content_id": 1
+            })
 
-            agg_result = list(self.collection.aggregate(pipeline))
-            if not agg_result:
-                # No slides found -> return zeros
-                return {
+            slides = list(slides_cursor)
+            total = len(slides)
+            if total == 0:
+                result_empty = {
                     "total": 0,
                     "by_status": {},
                     "slides_with_html": 0,
@@ -1330,64 +1615,144 @@ class ContentService(VerificationBaseService):
                     "completion_percentage": 0.0,
                     "average_generation_time_ms": None,
                     "estimated_time_remaining_ms": None,
-                    "last_updated_slide": None,
-                    "progress_trend": []
+                    "last_completed_slide": None,
+                    "progress_trend": [],
+                    "slides_by_render_engine": {},
+                    "parent_content_groups": {},
+                    "quality_metrics": {},
+                    "bottleneck_analysis": []
                 }
+                with self._cache_lock:
+                    self._stats_cache[cache_key] = {"ts": datetime.utcnow(), "value": result_empty}
+                return result_empty
 
-            data = agg_result[0]
+            by_status_counts: Dict[str, int] = {}
+            slides_with_html = 0
+            slides_with_narrative = 0
+            slides_complete = 0
+            gen_times_ms: List[float] = []
+            slides_by_render_engine: Dict[str, int] = {}
+            parent_groups: Dict[str, Dict[str, Any]] = {}
+            html_lengths: List[int] = []
+            narrative_lengths: List[int] = []
+            last_completed_slide = None
 
-            # Compute by_status counts
-            by_status_counts = {}
-            for s in data.get("by_status", []):
-                if not s:
-                    s = "unknown"
-                by_status_counts[s] = by_status_counts.get(s, 0) + 1
+            for s in slides:
+                status = s.get("status") or "unknown"
+                by_status_counts[status] = by_status_counts.get(status, 0) + 1
 
-            total = data.get("total", 0)
-            slides_with_html = int(data.get("slides_with_html", 0))
-            slides_with_narrative = int(data.get("slides_with_narrative", 0))
-            slides_complete = int(data.get("slides_complete", 0))
+                has_html = bool(s.get("content_html"))
+                has_narr = bool(s.get("narrative_text"))
+
+                if has_html:
+                    slides_with_html += 1
+                    html_lengths.append(len(s.get("content_html") or ""))
+                if has_narr:
+                    slides_with_narrative += 1
+                    narrative_lengths.append(len(s.get("narrative_text") or ""))
+                if has_html and has_narr:
+                    slides_complete += 1
+                    # track last completed slide by updated_at
+                    updated_at = s.get("updated_at") or s.get("created_at")
+                    if updated_at:
+                        if (last_completed_slide is None) or (isinstance(updated_at, datetime) and updated_at > last_completed_slide.get("updated_at")):
+                            last_completed_slide = {
+                                "content_id": str(s["_id"]),
+                                "updated_at": updated_at
+                            }
+
+                # compute gen time if possible
+                created = s.get("created_at")
+                updated = s.get("updated_at")
+                if isinstance(created, datetime) and isinstance(updated, datetime):
+                    try:
+                        delta_ms = (updated - created).total_seconds() * 1000.0
+                        if delta_ms >= 0:
+                            gen_times_ms.append(delta_ms)
+                    except Exception:
+                        pass
+
+                # render engine counts
+                engine = s.get("render_engine") or "unknown"
+                slides_by_render_engine[engine] = slides_by_render_engine.get(engine, 0) + 1
+
+                # parent grouping
+                parent_raw = s.get("parent_content_id")
+                try:
+                    parent_key = str(parent_raw) if parent_raw is not None else "root"
+                except Exception:
+                    parent_key = "root"
+                pg = parent_groups.setdefault(parent_key, {"total": 0, "with_html": 0, "with_narrative": 0, "complete": 0})
+                pg["total"] += 1
+                if has_html:
+                    pg["with_html"] += 1
+                if has_narr:
+                    pg["with_narrative"] += 1
+                if has_html and has_narr:
+                    pg["complete"] += 1
 
             completion_percentage = round((slides_complete / total * 100), 2) if total > 0 else 0.0
-
-            # Average generation time (ms) ignoring nulls
-            gen_times = [g for g in data.get("gen_times", []) if isinstance(g, (int, float))]
-            avg_gen_time = None
-            if gen_times:
-                try:
-                    avg_gen_time = sum(gen_times) / len(gen_times)
-                    # ensure numeric
-                    avg_gen_time = float(avg_gen_time)
-                except Exception:
-                    avg_gen_time = None
-
-            # Estimated time remaining: avg_gen_time * pending_count (where pending = total - slides_with_html)
+            avg_gen_time = float(sum(gen_times_ms) / len(gen_times_ms)) if gen_times_ms else None
             pending_count = total - slides_with_html
-            estimated_remaining = None
-            if avg_gen_time is not None and pending_count > 0:
-                estimated_remaining = int(avg_gen_time * pending_count)
+            estimated_remaining = int(avg_gen_time * pending_count) if (avg_gen_time is not None and pending_count > 0) else None
 
-            last_updated_ts = data.get("last_updated")
-            last_updated_slide_info = None
+            # quality metrics
+            quality_metrics = {}
             try:
-                # Find the slide document with the last_updated timestamp to return id
-                if last_updated_ts:
-                    doc = self.collection.find_one({
-                        "topic_id": ObjectId(topic_id),
-                        "content_type": "slide",
-                        "updated_at": last_updated_ts
-                    }, {"_id": 1, "updated_at": 1})
-                    if doc:
-                        last_updated_slide_info = {
-                            "content_id": str(doc["_id"]),
-                            "updated_at": doc.get("updated_at").isoformat() if isinstance(doc.get("updated_at"), datetime) else doc.get("updated_at")
-                        }
+                quality_metrics["avg_html_length"] = round(sum(html_lengths) / len(html_lengths), 2) if html_lengths else 0
+                quality_metrics["avg_narrative_length"] = round(sum(narrative_lengths) / len(narrative_lengths), 2) if narrative_lengths else 0
+                quality_metrics["sample_html_length_distribution"] = {
+                    "min": min(html_lengths) if html_lengths else 0,
+                    "max": max(html_lengths) if html_lengths else 0,
+                    "count": len(html_lengths)
+                }
             except Exception:
-                last_updated_slide_info = None
+                quality_metrics = {}
 
-            # Progress trend: count of updates per day for the last 7 days
+            # bottleneck analysis: slides with largest gen times
+            bottleneck_analysis = []
             try:
-                # Build trend pipeline
+                # Query top 3 by (updated_at - created_at)
+                bottleneck_pipeline = [
+                    {"$match": base_query},
+                    {"$project": {
+                        "_id": 1,
+                        "created_at": 1,
+                        "updated_at": 1,
+                        "content_html": 1,
+                        "narrative_text": 1
+                    }},
+                    {"$addFields": {
+                        "gen_time_ms": {
+                            "$cond": [
+                                {"$and": [{"$ifNull": ["$created_at", False]}, {"$ifNull": ["$updated_at", False]}]},
+                                {"$subtract": ["$updated_at", "$created_at"]},
+                                None
+                            ]
+                        }
+                    }},
+                    {"$sort": {"gen_time_ms": -1}},
+                    {"$limit": 5}
+                ]
+                top_bottlenecks = list(self.collection.aggregate(bottleneck_pipeline))
+                for b in top_bottlenecks:
+                    gen_time = b.get("gen_time_ms")
+                    # gen_time may be a datetime delta coming from mongo pipeline; handle gracefully
+                    try:
+                        gen_time_val = float(gen_time)
+                    except Exception:
+                        gen_time_val = None
+                    bottleneck_analysis.append({
+                        "content_id": str(b["_id"]),
+                        "gen_time_ms": gen_time_val,
+                        "has_html": bool(b.get("content_html")),
+                        "has_narrative": bool(b.get("narrative_text"))
+                    })
+            except Exception:
+                bottleneck_analysis = []
+
+                # progress trend: last 7 days updates (per day)
+            try:
                 from_date = datetime.utcnow() - timedelta(days=6)
                 trend_pipeline = [
                     {"$match": {
@@ -1404,6 +1769,16 @@ class ContentService(VerificationBaseService):
             except Exception:
                 progress_trend = []
 
+            last_completed_slide_info = None
+            if last_completed_slide:
+                try:
+                    last_completed_slide_info = {
+                        "content_id": last_completed_slide["content_id"],
+                        "updated_at": last_completed_slide["updated_at"].isoformat() if isinstance(last_completed_slide["updated_at"], datetime) else last_completed_slide["updated_at"]
+                    }
+                except Exception:
+                    last_completed_slide_info = None
+
             result = {
                 "total": total,
                 "by_status": by_status_counts,
@@ -1413,14 +1788,23 @@ class ContentService(VerificationBaseService):
                 "completion_percentage": completion_percentage,
                 "average_generation_time_ms": avg_gen_time,
                 "estimated_time_remaining_ms": estimated_remaining,
-                "last_updated_slide": last_updated_slide_info,
-                "progress_trend": progress_trend
+                "last_completed_slide": last_completed_slide_info,
+                "progress_trend": progress_trend,
+                "slides_by_render_engine": slides_by_render_engine,
+                "parent_content_groups": parent_groups,
+                "quality_metrics": quality_metrics,
+                "bottleneck_analysis": bottleneck_analysis
             }
+
+            # cache result
+            with self._cache_lock:
+                self._stats_cache[cache_key] = {"ts": datetime.utcnow(), "value": result}
+
             return result
         except Exception as e:
             logging.error(f"Error obteniendo estado de generación de slides para topic {topic_id}: {str(e)}")
             return {}
-
+    
     def update_slide_html(self, content_id: str, html_content: str, updater_id: str = None) -> Tuple[bool, str]:
         """
         Actualiza únicamente el campo content_html de una diapositiva.
@@ -1471,6 +1855,15 @@ class ContentService(VerificationBaseService):
 
             if result.modified_count > 0:
                 logging.info(f"update_slide_html: slide {content_id} actualizado a status {update_data.get('status')} by {updater_id or 'unknown'}")
+                # Invalidate relevant caches for the topic
+                try:
+                    current_topic = current.get("topic_id")
+                    cache_key = f"slide_status::{current_topic}"
+                    with self._cache_lock:
+                        if cache_key in self._stats_cache:
+                            del self._stats_cache[cache_key]
+                except Exception:
+                    pass
                 return True, "HTML de la diapositiva actualizado exitosamente"
             else:
                 logging.debug(f"update_slide_html: no hubo cambios al actualizar slide {content_id}")
@@ -1531,6 +1924,15 @@ class ContentService(VerificationBaseService):
 
             if result.modified_count > 0:
                 logging.info(f"update_slide_narrative: slide {content_id} narrative actualizado. nuevo_status={update_data.get('status')}")
+                # Invalidate relevant caches for the topic
+                try:
+                    current_topic = current.get("topic_id")
+                    cache_key = f"slide_status::{current_topic}"
+                    with self._cache_lock:
+                        if cache_key in self._stats_cache:
+                            del self._stats_cache[cache_key]
+                except Exception:
+                    pass
                 return True, "Narrativa de la diapositiva actualizada exitosamente"
             else:
                 logging.debug(f"update_slide_narrative: no hubo cambios al actualizar narrativa slide {content_id}")
@@ -1763,7 +2165,7 @@ class ContentService(VerificationBaseService):
         except Exception as e:
             logging.error(f"Error verificando completitud de slides para topic {topic_id}: {e}")
             return {}
-
+    
     def get_topic_slides_optimized(self, topic_id: str, status_filter: Optional[List[str]] = None,
                                    render_engine: Optional[str] = None, group_by_parent: bool = False,
                                    include_progress: bool = True, limit: Optional[int] = None, skip: int = 0) -> Dict:
@@ -1781,21 +2183,55 @@ class ContentService(VerificationBaseService):
                 "stats": { total, completed, pending, slides_with_html, slides_with_narrative },
                 "slides": [ ... ]  # lista de slides (paginada si se solicita)
                 "by_parent": { parent_id: { stats:..., slides: [...] } }  # opcional
+                "last_completed_slide": {...},
+                "completion_trend": [...],
+                "generation_efficiency": {...}
             }
+        Implementa validaciones adicionales, caching para stats y optimizaciones cuando se solicitan sólo slides completas.
         """
         try:
+            # Validate topic_id
+            try:
+                topic_obj_id = ObjectId(topic_id)
+            except Exception:
+                logging.error(f"get_topic_slides_optimized: topic_id inválido: {topic_id}")
+                return {}
+
             if status_filter is None:
                 status_filter = ["draft", "active", "published", "skeleton", "html_ready", "narrative_ready"]
 
-            match = {
-                "topic_id": ObjectId(topic_id),
+            # Normalize group_by_parent to bool
+            group_by_parent = bool(group_by_parent)
+
+            match: Dict[str, Any] = {
+                "topic_id": topic_obj_id,
                 "content_type": "slide",
                 "status": {"$in": status_filter}
             }
             if render_engine:
                 match["render_engine"] = render_engine
 
-            # Base pipeline to compute per-slide flags and generation times
+            # If caller only wants completed slides (both html and narrative present), route to specialized fast method
+            only_completed = set(status_filter) == {"narrative_ready"} or (status_filter == ["narrative_ready"])
+            if only_completed and not group_by_parent and not include_progress and limit is None and skip == 0 and not render_engine:
+                # Very fast path: use specialized query to retrieve completed slides
+                try:
+                    comp = self.get_complete_slides_only(topic_id)
+                    return {
+                        "stats": {
+                            "total": len(comp.get("slides", [])),
+                            "slides_complete": len(comp.get("slides", []))
+                        },
+                        "slides": comp.get("slides", []),
+                        "last_completed_slide": comp.get("last_completed_slide"),
+                        "completion_trend": comp.get("completion_trend", []),
+                        "generation_efficiency": comp.get("generation_efficiency")
+                    }
+                except Exception as e:
+                    logging.debug(f"get_topic_slides_optimized: fast path get_complete_slides_only failed: {e}")
+                    # fallback to full pipeline
+
+            # Base projection pipeline
             pipeline = [
                 {"$match": match},
                 {"$project": {
@@ -1821,7 +2257,7 @@ class ContentService(VerificationBaseService):
                 {"$sort": {"order": 1, "created_at": 1}}
             ]
 
-            # For pagination of slides list, create a copy of pipeline for slides retrieval
+            # Slides retrieval pipeline with pagination
             slides_pipeline = list(pipeline)
             if skip and skip > 0:
                 slides_pipeline.append({"$skip": int(skip)})
@@ -1847,50 +2283,123 @@ class ContentService(VerificationBaseService):
                     slide_item = {"content_id": str(s.get("_id"))}
                 slides_list.append(slide_item)
 
-            # Aggregation for overall stats (single query)
-            stats_pipeline = [
-                {"$match": match},
-                {"$group": {
-                    "_id": None,
-                    "total": {"$sum": 1},
-                    "slides_with_html": {"$sum": {"$cond": [{"$ifNull": ["$content_html", False]}, 1, 0]}},
-                    "slides_with_narrative": {"$sum": {"$cond": [{"$ifNull": ["$narrative_text", False]}, 1, 0]}},
-                    "slides_complete": {"$sum": {"$cond": [{"$and": [{"$ifNull": ["$content_html", False]}, {"$ifNull": ["$narrative_text", False]}]}, 1, 0]}},
-                    "avg_gen_time_ms": {"$avg": {"$cond": [
-                        {"$and": [{"$ifNull": ["$created_at", False]}, {"$ifNull": ["$updated_at", False]}]},
-                        {"$subtract": ["$updated_at", "$created_at"]},
-                        None
-                    ]}}
-                }}
-            ]
-            stats_res = list(self.collection.aggregate(stats_pipeline))
-            if stats_res:
-                st = stats_res[0]
-                total = int(st.get("total", 0))
-                slides_with_html = int(st.get("slides_with_html", 0))
-                slides_with_narrative = int(st.get("slides_with_narrative", 0))
-                slides_complete = int(st.get("slides_complete", 0))
-                avg_gen_time = st.get("avg_gen_time_ms")
-            else:
-                total = slides_with_html = slides_with_narrative = slides_complete = 0
-                avg_gen_time = None
+            # Stats: try to use cached aggregated stats
+            cache_key = f"slides_optimized_stats::{topic_id}::{render_engine}::{','.join(sorted(status_filter))}::{group_by_parent}"
+            with self._cache_lock:
+                cached = self._stats_cache.get(cache_key)
+                if cached and (datetime.utcnow() - cached.get("ts")).total_seconds() < self._stats_cache_ttl:
+                    logging.debug(f"get_topic_slides_optimized: using cached stats for key {cache_key}")
+                    cached_stats = cached.get("value", {})
+                else:
+                    # Compute stats
+                    stats_pipeline = [
+                        {"$match": match},
+                        {"$group": {
+                            "_id": None,
+                            "total": {"$sum": 1},
+                            "slides_with_html": {"$sum": {"$cond": [{"$ifNull": ["$content_html", False]}, 1, 0]}},
+                            "slides_with_narrative": {"$sum": {"$cond": [{"$ifNull": ["$narrative_text", False]}, 1, 0]}},
+                            "slides_complete": {"$sum": {"$cond": [{"$and": [{"$ifNull": ["$content_html", False]}, {"$ifNull": ["$narrative_text", False]}]}, 1, 0]}},
+                            "avg_gen_time_ms": {"$avg": {"$cond": [
+                                {"$and": [{"$ifNull": ["$created_at", False]}, {"$ifNull": ["$updated_at", False]}]},
+                                {"$subtract": ["$updated_at", "$created_at"]},
+                                None
+                            ]}}
+                        }}
+                    ]
+                    stats_res = list(self.collection.aggregate(stats_pipeline))
+                    if stats_res:
+                        st = stats_res[0]
+                        total = int(st.get("total", 0))
+                        slides_with_html = int(st.get("slides_with_html", 0))
+                        slides_with_narrative = int(st.get("slides_with_narrative", 0))
+                        slides_complete = int(st.get("slides_complete", 0))
+                        avg_gen_time = st.get("avg_gen_time_ms")
+                    else:
+                        total = slides_with_html = slides_with_narrative = slides_complete = 0
+                        avg_gen_time = None
 
-            pending = total - slides_with_html
-            completion_percentage = round((slides_complete / total * 100), 2) if total > 0 else 0.0
-            estimated_time_remaining_ms = int(avg_gen_time * pending) if (avg_gen_time is not None and pending > 0) else None
+                    pending = total - slides_with_html
+                    completion_percentage = round((slides_complete / total * 100), 2) if total > 0 else 0.0
+                    estimated_time_remaining_ms = int(avg_gen_time * pending) if (avg_gen_time is not None and pending > 0) else None
+
+                    # Determine last completed slide
+                    last_completed = None
+                    try:
+                        last_doc = self.collection.find_one({
+                            "topic_id": topic_obj_id,
+                            "content_type": "slide",
+                            "content_html": {"$ne": None},
+                            "narrative_text": {"$ne": None},
+                        }, sort=[("updated_at", -1)], projection={"_id": 1, "updated_at": 1})
+                        if last_doc:
+                            last_completed = {
+                                "content_id": str(last_doc["_id"]),
+                                "updated_at": last_doc.get("updated_at").isoformat() if isinstance(last_doc.get("updated_at"), datetime) else last_doc.get("updated_at")
+                            }
+                    except Exception:
+                        last_completed = None
+
+                    # completion trend last 7 days
+                    try:
+                        from_date = datetime.utcnow() - timedelta(days=6)
+                        trend_pipeline = [
+                            {"$match": {
+                                "topic_id": topic_obj_id,
+                                "content_type": "slide",
+                                "updated_at": {"$gte": from_date}
+                            }},
+                            {"$project": {"day": {"$dateToString": {"format": "%Y-%m-%d", "date": {"$ifNull": ["$updated_at", "$created_at"]}}}}},
+                            {"$group": {"_id": "$day", "count": {"$sum": 1}}},
+                            {"$sort": {"_id": 1}}
+                        ]
+                        trend_docs = list(self.collection.aggregate(trend_pipeline))
+                        progress_trend = [{ "date": t["_id"], "count": t["count"] } for t in trend_docs]
+                    except Exception:
+                        progress_trend = []
+
+                    # generation_efficiency heuristic: slides_complete / (avg_gen_time_ms + 1)
+                    try:
+                        generation_efficiency = None
+                        if avg_gen_time is not None and avg_gen_time > 0:
+                            generation_efficiency = round((slides_complete / total) / (avg_gen_time / 1000.0 + 1e-6), 6) if total > 0 else None
+                        else:
+                            generation_efficiency = None
+                    except Exception:
+                        generation_efficiency = None
+
+                    cached_stats = {
+                        "total": total,
+                        "slides_with_html": slides_with_html,
+                        "slides_with_narrative": slides_with_narrative,
+                        "slides_complete": slides_complete,
+                        "pending": pending,
+                        "completion_percentage": completion_percentage,
+                        "average_generation_time_ms": float(avg_gen_time) if avg_gen_time is not None else None,
+                        "estimated_time_remaining_ms": estimated_time_remaining_ms,
+                        "last_completed_slide": last_completed,
+                        "completion_trend": progress_trend,
+                        "generation_efficiency": generation_efficiency
+                    }
+
+                    with self._cache_lock:
+                        self._stats_cache[cache_key] = {"ts": datetime.utcnow(), "value": cached_stats}
 
             result = {
                 "stats": {
-                    "total": total,
-                    "slides_with_html": slides_with_html,
-                    "slides_with_narrative": slides_with_narrative,
-                    "slides_complete": slides_complete,
-                    "pending": pending,
-                    "completion_percentage": completion_percentage,
-                    "average_generation_time_ms": float(avg_gen_time) if avg_gen_time is not None else None,
-                    "estimated_time_remaining_ms": estimated_time_remaining_ms
+                    "total": cached_stats.get("total", 0),
+                    "slides_with_html": cached_stats.get("slides_with_html", 0),
+                    "slides_with_narrative": cached_stats.get("slides_with_narrative", 0),
+                    "slides_complete": cached_stats.get("slides_complete", 0),
+                    "pending": cached_stats.get("pending", 0),
+                    "completion_percentage": cached_stats.get("completion_percentage", 0.0),
+                    "average_generation_time_ms": cached_stats.get("average_generation_time_ms"),
+                    "estimated_time_remaining_ms": cached_stats.get("estimated_time_remaining_ms")
                 },
-                "slides": slides_list
+                "slides": slides_list,
+                "last_completed_slide": cached_stats.get("last_completed_slide"),
+                "completion_trend": cached_stats.get("completion_trend"),
+                "generation_efficiency": cached_stats.get("generation_efficiency")
             }
 
             if group_by_parent:
@@ -1934,418 +2443,3 @@ class ContentService(VerificationBaseService):
         except Exception as e:
             logging.error(f"Error en get_topic_slides_optimized para topic {topic_id}: {e}")
             return {}
-
-    
-    def adapt_content_to_methodology(self, content_id: str, methodology_code: str) -> Tuple[bool, Dict]:
-        """Adapta un contenido según una metodología de aprendizaje."""
-        try:
-            from src.study_plans.services import TopicContentService
-
-            topic_content_service = TopicContentService()
-            return topic_content_service.adapt_content_to_methodology(content_id, methodology_code)
-        except Exception as e:
-            logging.error(f"Error adaptando contenido: {str(e)}")
-            return False, {"error": str(e)}
-
-class VirtualContentService(VerificationBaseService):
-    """
-    Servicio para contenido personalizado por estudiante.
-    Unifica virtual_games, virtual_simulations, etc.
-    """
-    def __init__(self):
-        super().__init__(collection_name="virtual_topic_contents")
-
-    def personalize_content(self, virtual_topic_id: str, content_id: str, 
-                          student_id: str, cognitive_profile: Dict) -> Tuple[bool, str]:
-        """
-        Personaliza contenido para un estudiante específico.
-        
-        Args:
-            virtual_topic_id: ID del tema virtual
-            content_id: ID del contenido base
-            student_id: ID del estudiante
-            cognitive_profile: Perfil cognitivo del estudiante
-            
-        Returns:
-            Tuple[bool, str]: (éxito, mensaje/ID)
-        """
-        try:
-            # Obtener contenido base
-            content = get_db().topic_contents.find_one({"_id": ObjectId(content_id)})
-            if not content:
-                return False, "Contenido no encontrado"
-
-            # Generar adaptaciones basadas en perfil cognitivo
-            personalization_data = self._generate_personalization(content, cognitive_profile)
-            
-            # Verificar si ya existe personalización
-            existing = self.collection.find_one({
-                "virtual_topic_id": ObjectId(virtual_topic_id),
-                "content_id": ObjectId(content_id),
-                "student_id": ObjectId(student_id)
-            })
-            
-            if existing:
-                # Actualizar personalización existente
-                result = self.collection.update_one(
-                    {"_id": existing["_id"]},
-                    {"$set": {
-                        "personalization_data": personalization_data,
-                        "updated_at": datetime.now()
-                    }}
-                )
-                return True, str(existing["_id"])
-            else:
-                # Crear nueva personalización
-                virtual_content = VirtualTopicContent(
-                    virtual_topic_id=virtual_topic_id,
-                    content_id=content_id,
-                    student_id=student_id,
-                    personalization_data=personalization_data
-                )
-                
-                result = self.collection.insert_one(virtual_content.to_dict())
-                return True, str(result.inserted_id)
-                
-        except Exception as e:
-            logging.error(f"Error personalizando contenido: {str(e)}")
-            return False, f"Error interno: {str(e)}"
-
-    def _generate_personalization(self, content: Dict, cognitive_profile: Dict) -> Dict:
-        """
-        Genera adaptaciones basadas en perfil cognitivo.
-        """
-        personalization = {
-            "difficulty_adjustment": 0,
-            "time_allocation": 1.0,
-            "interface_adaptations": {},
-            "content_adaptations": {},
-            "accessibility_options": {}
-        }
-        
-        # Adaptaciones por tipo de contenido
-        content_type = content.get("content_type", "")
-        
-        # Adaptaciones generales por perfil VAK
-        vak_scores = cognitive_profile.get("vak_scores", {})
-        
-        if vak_scores.get("visual", 0) > 0.7:
-            personalization["content_adaptations"]["enhance_visuals"] = True
-            personalization["interface_adaptations"]["visual_emphasis"] = True
-            
-        if vak_scores.get("auditory", 0) > 0.7:
-            personalization["content_adaptations"]["add_audio"] = True
-            personalization["accessibility_options"]["audio_descriptions"] = True
-            
-        if vak_scores.get("kinesthetic", 0) > 0.7:
-            personalization["content_adaptations"]["increase_interactivity"] = True
-            personalization["interface_adaptations"]["tactile_feedback"] = True
-        
-        # Adaptaciones por dificultades de aprendizaje
-        learning_disabilities = cognitive_profile.get("learning_disabilities", {})
-        
-        if learning_disabilities.get("dyslexia"):
-            personalization["accessibility_options"]["high_contrast"] = True
-            personalization["accessibility_options"]["dyslexia_font"] = True
-            personalization["content_adaptations"]["reduce_text_density"] = True
-            
-        if learning_disabilities.get("adhd"):
-            personalization["interface_adaptations"]["minimize_distractions"] = True
-            personalization["content_adaptations"]["shorter_segments"] = True
-            personalization["time_allocation"] = 1.5  # Más tiempo
-            
-        # Adaptaciones específicas por tipo de contenido interactivo
-        if content_type in ["game", "simulation", "quiz"]:
-            if cognitive_profile.get("attention_span") == "short":
-                personalization["content_adaptations"]["break_into_segments"] = True
-                personalization["interface_adaptations"]["progress_indicators"] = True
-                
-        return personalization
-
-    def track_interaction(self, virtual_content_id: str, interaction_data: Dict) -> bool:
-        """
-        Registra interacción con contenido personalizado.
-        """
-        try:
-            update_data = {
-                "interaction_tracking.last_accessed": datetime.now(),
-                "interaction_tracking.access_count": {"$inc": 1},
-                "updated_at": datetime.now()
-            }
-            
-            # Agregar datos específicos de la interacción
-            if interaction_data.get("time_spent"):
-                update_data["interaction_tracking.total_time_spent"] = {"$inc": interaction_data["time_spent"]}
-                
-            if interaction_data.get("completion_percentage"):
-                update_data["interaction_tracking.completion_percentage"] = interaction_data["completion_percentage"]
-                
-            if interaction_data.get("completion_status"):
-                update_data["interaction_tracking.completion_status"] = interaction_data["completion_status"]
-                
-            result = self.collection.update_one(
-                {"_id": ObjectId(virtual_content_id)},
-                {"$set": update_data}
-            )
-            
-            return result.modified_count > 0
-            
-        except Exception as e:
-            logging.error(f"Error registrando interacción: {str(e)}")
-            return False
-
-class ContentResultService(VerificationBaseService):
-    """
-    Servicio unificado para resultados de contenido interactivo.
-    Reemplaza GameResultService, SimulationResultService, QuizResultService.
-    """
-    def __init__(self):
-        super().__init__(collection_name="content_results")
-
-    def record_result(self, result_data: Dict) -> Tuple[bool, str]:
-        """
-        Registra resultado de interacción con contenido.
-        
-        Args:
-            result_data: Datos del resultado
-            
-        Returns:
-            Tuple[bool, str]: (éxito, mensaje/ID)
-        """
-        try:
-            # Derivar score y métricas desde session_data/learning_metrics
-            session_data = result_data.pop("session_data", {}) or {}
-            learning_metrics = result_data.pop("learning_metrics", {}) or {}
-
-            if "score" not in result_data:
-                score = session_data.get("score")
-                if score is None:
-                    completion = session_data.get("completion_percentage")
-                    if completion is not None:
-                        score = completion / 100.0
-                result_data["score"] = score if score is not None else 0.0
-
-            metrics = result_data.get("metrics", {})
-            metrics.update(session_data)
-            metrics.update(learning_metrics)
-            result_data["metrics"] = metrics
-
-            # Asegurar que virtual_content_id esté presente si existe información suficiente
-            if not result_data.get("virtual_content_id"):
-                student_id = result_data.get("student_id")
-                content_id = result_data.get("content_id")
-                if student_id and content_id:
-                    virtual_content = get_db().virtual_topic_contents.find_one({
-                        "student_id": ObjectId(student_id),
-                        "content_id": ObjectId(content_id)
-                    })
-                    if virtual_content:
-                        result_data["virtual_content_id"] = str(virtual_content["_id"])
-                    else:
-                        logging.warning(
-                            f"No se encontró virtual_content_id para content_id: {content_id}, student_id: {student_id}"
-                        )
-
-            # Validar y convertir evaluation_id si está presente
-            if result_data.get("evaluation_id"):
-                try:
-                    ObjectId(result_data["evaluation_id"])  # Validar formato
-                except Exception:
-                    logging.warning(f"evaluation_id inválido: {result_data['evaluation_id']}")
-                    result_data.pop("evaluation_id", None)
-
-            content_result = ContentResult(**result_data)
-            result = self.collection.insert_one(content_result.to_dict())
-
-            if result_data.get("virtual_content_id"):
-                try:
-                    virtual_content_service = VirtualContentService()
-                    virtual_content_service.track_interaction(
-                        result_data["virtual_content_id"],
-                        session_data,
-                    )
-                except Exception as track_error:
-                    logging.warning(
-                        f"Error actualizando tracking de contenido virtual: {track_error}"
-                    )
-
-            # Enviar feedback automático al sistema RL para aprendizaje granular
-            try:
-                from src.personalization.services import AdaptivePersonalizationService
-                
-                # Preparar datos de feedback para el modelo RL
-                feedback_data = {
-                    "student_id": result_data["student_id"],
-                    "content_id": result_data.get("virtual_content_id") or result_data.get("content_id"),
-                    "interaction_type": result_data.get("session_type", "content_interaction"),
-                    "performance_score": result_data["score"],
-                    "engagement_metrics": result_data.get("metrics", {})
-                }
-                
-                # Enviar feedback al sistema RL de forma asíncrona
-                personalization_service = AdaptivePersonalizationService()
-                success, message = personalization_service.submit_learning_feedback(feedback_data)
-                
-                if success:
-                    logging.info(f"Feedback RL enviado exitosamente para ContentResult {result.inserted_id}")
-                else:
-                    logging.warning(f"Error enviando feedback RL: {message}")
-                    
-            except Exception as rl_error:
-                logging.warning(f"Error enviando feedback al sistema RL: {str(rl_error)}")
-
-            return True, str(result.inserted_id)
-            
-        except Exception as e:
-            logging.error(f"Error registrando resultado: {str(e)}")
-            return False, f"Error interno: {str(e)}"
-
-    def get_student_results(self, student_id: str, virtual_content_id: str = None, content_type: str = None, evaluation_id: str = None) -> List[Dict]:
-        """
-        Obtiene resultados de un estudiante, filtrados por virtual_content_id como clave principal.
-        
-        Args:
-            student_id: ID del estudiante
-            virtual_content_id: ID del contenido virtual (clave principal)
-            content_type: Tipo de contenido (opcional, para compatibilidad)
-            evaluation_id: ID de evaluación (opcional)
-        """
-        try:
-            query = {"student_id": ObjectId(student_id)}
-            
-            # Usar virtual_content_id como filtro principal si se proporciona
-            if virtual_content_id:
-                query["virtual_content_id"] = ObjectId(virtual_content_id)
-            elif content_type:
-                # Fallback: buscar por tipo de contenido si no hay virtual_content_id
-                # Buscar contenidos virtuales del tipo especificado
-                virtual_contents = list(get_db().virtual_topic_contents.find({
-                    "student_id": ObjectId(student_id),
-                    "content_type": content_type
-                }))
-                
-                if virtual_contents:
-                    virtual_content_ids = [vc["_id"] for vc in virtual_contents]
-                    query["virtual_content_id"] = {"$in": virtual_content_ids}
-                else:
-                    return []  # No hay contenidos virtuales de este tipo
-            
-            if evaluation_id:
-                query["evaluation_id"] = ObjectId(evaluation_id)
-            
-            results = list(self.collection.find(query).sort("recorded_at", -1))
-            
-            # Convertir ObjectIds a strings para JSON
-            for result in results:
-                result["_id"] = str(result["_id"])
-                result["student_id"] = str(result["student_id"])
-                if result.get("content_id"):
-                    result["content_id"] = str(result["content_id"])
-                if result.get("virtual_content_id"):
-                    result["virtual_content_id"] = str(result["virtual_content_id"])
-                if result.get("evaluation_id"):
-                    result["evaluation_id"] = str(result["evaluation_id"])
-                
-            return results
-            
-        except Exception as e:
-            logging.error(f"Error obteniendo resultados del estudiante: {str(e)}")
-            return []
-
-
-class ContentPersonalizationService:
-    """Procesa contenido para identificar marcadores de personalización"""
-
-    marker_pattern = re.compile(r"{{(.*?)}}")
-
-    @classmethod
-    def extract_markers(cls, text: str) -> Dict:
-        segments = []
-        last_idx = 0
-        for match in cls.marker_pattern.finditer(text):
-            start, end = match.span()
-            if start > last_idx:
-                segments.append({"type": "static", "content": text[last_idx:start]})
-            marker_id = match.group(1)
-            segments.append({"type": "marker", "id": marker_id})
-            last_idx = end
-        if last_idx < len(text):
-            segments.append({"type": "static", "content": text[last_idx:]})
-        return {"segments": segments}
-    
-    @classmethod
-    def apply_markers(cls, content: Dict, student: Dict) -> Dict:
-        """
-        Aplica marcadores de personalización reemplazando placeholders con datos del estudiante.
-        
-        Args:
-            content: Contenido con posibles marcadores {{student.campo}}
-            student: Datos del estudiante para reemplazar
-            
-        Returns:
-            Dict: Contenido con marcadores reemplazados
-        """
-        try:
-            # Crear una copia del contenido para no modificar el original
-            personalized_content = content.copy()
-            
-            # Función auxiliar para reemplazar marcadores en texto
-            def replace_markers_in_text(text: str) -> str:
-                if not isinstance(text, str):
-                    return text
-                    
-                def replace_marker(match):
-                    marker = match.group(1).strip()
-                    
-                    # Soportar notación de punto para acceder a campos anidados
-                    if marker.startswith('student.'):
-                        field_path = marker[8:]  # Remover 'student.'
-                        value = cls._get_nested_value(student, field_path)
-                        return str(value) if value is not None else f"{{{{{marker}}}}}"
-                    
-                    # Marcadores directos del estudiante
-                    if marker in student:
-                        return str(student[marker])
-                    
-                    # Si no se encuentra el marcador, mantenerlo sin cambios
-                    return f"{{{{{marker}}}}}"
-                
-                return cls.marker_pattern.sub(replace_marker, text)
-            
-            # Función auxiliar para procesar recursivamente estructuras de datos
-            def process_data_structure(data):
-                if isinstance(data, str):
-                    return replace_markers_in_text(data)
-                elif isinstance(data, dict):
-                    return {key: process_data_structure(value) for key, value in data.items()}
-                elif isinstance(data, list):
-                    return [process_data_structure(item) for item in data]
-                else:
-                    return data
-            
-            # Aplicar reemplazo a todos los campos del contenido
-            for key, value in personalized_content.items():
-                personalized_content[key] = process_data_structure(value)
-            
-            return personalized_content
-            
-        except Exception as e:
-            logging.error(f"Error aplicando marcadores de personalización: {str(e)}")
-            return content  # Retornar contenido original en caso de error
-    
-    @classmethod
-    def _get_nested_value(cls, data: Dict, field_path: str):
-        """
-        Obtiene un valor anidado usando notación de punto (ej: 'profile.name')
-        """
-        try:
-            keys = field_path.split('.')
-            value = data
-            for key in keys:
-                if isinstance(value, dict) and key in value:
-                    value = value[key]
-                else:
-                    return None
-            return value
-        except Exception:
-            return None

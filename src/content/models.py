@@ -80,7 +80,7 @@ class TopicContent:
                  generation_prompt: Optional[str] = None,
                  ai_credits: bool = True,
                  personalization_markers: Optional[Dict] = None,
-                 slide_template: Optional[Dict] = None,  # Plantilla de fondo para diapositivas
+                 slide_template: Optional[str] = None,  # Prompt para generar plantilla de diapositivas
                  # Nuevos campos para sistema de plantillas
                  render_engine: str = "legacy",  # legacy | html_template
                  instance_id: Optional[str] = None,  # Referencia a TemplateInstance
@@ -113,7 +113,7 @@ class TopicContent:
         self.generation_prompt = generation_prompt
         self.ai_credits = ai_credits
         self.personalization_markers = personalization_markers or {}
-        self.slide_template = slide_template or {}
+        self.slide_template = slide_template or ""
         # Nuevos campos de plantillas
         self.render_engine = render_engine
         self.instance_id = ObjectId(instance_id) if instance_id else None
@@ -321,8 +321,8 @@ class ContentTypes:
     NARRATED_PRESENTATION = "narrated_presentation"
     
     # Contenido Interactivo
-    GAME = "game"
-    SIMULATION = "simulation"
+    GAME = "game"  # DEPRECATED: Usar templates interactivos (ver DeprecatedContentTypes)
+    SIMULATION = "simulation"  # DEPRECATED: Usar templates interactivos (ver DeprecatedContentTypes)
     VIRTUAL_LAB = "virtual_lab"
     AR = "ar"
     MINI_GAME = "mini_game"
@@ -344,19 +344,28 @@ class ContentTypes:
 
     @classmethod
     def get_categories(cls):
-        return {
+        """
+        Retorna las categorías de tipos de contenido. Los tipos marcados como deprecated
+        (p.ej. game y simulation) se agrupan bajo la categoría 'deprecated' para
+        facilitar su visibilidad y control por parte de servicios y endpoints.
+        """
+        categories = {
             "theoretical": [cls.TEXT, cls.FEYNMAN, cls.STORY, cls.SUMMARY, cls.GLOSSARY, 
                           cls.GUIDED_QUESTIONS, cls.EXAMPLES, cls.DOCUMENTS, cls.LINK],
             "visual": [cls.DIAGRAM, cls.INFOGRAPHIC, cls.MINDMAP, cls.TIMELINE, 
                      cls.ILLUSTRATION, cls.CHART, cls.PICTOGRAM, cls.IMAGE, cls.SLIDE],
             "multimedia": [cls.VIDEO, cls.AUDIO, cls.MUSIC, cls.ANIMATION, 
                          cls.SCREENCAST, cls.NARRATED_PRESENTATION],
-            "interactive": [cls.GAME, cls.SIMULATION, cls.VIRTUAL_LAB, cls.AR, 
-                          cls.MINI_GAME, cls.INTERACTIVE_EXERCISE, cls.COMPLETION_EXERCISE, 
-                          cls.MATH_EXERCISE, cls.CHALLENGE, cls.FLASHCARDS, cls.GEMINI_LIVE],
+            "interactive": [cls.VIRTUAL_LAB, cls.AR, cls.MINI_GAME, cls.INTERACTIVE_EXERCISE, 
+                          cls.COMPLETION_EXERCISE, cls.MATH_EXERCISE, cls.CHALLENGE, cls.FLASHCARDS, cls.GEMINI_LIVE],
             "evaluation": [cls.QUIZ, cls.EXAM, cls.PROJECT, cls.RUBRIC, 
                          cls.FORMATIVE_TEST, cls.PEER_REVIEW, cls.PORTFOLIO]
         }
+        # Agregar categoría específica para tipos deprecated para que los servicios puedan manejarla de forma separada
+        deprecated = cls.get_deprecated_types()
+        if deprecated:
+            categories["deprecated"] = deprecated
+        return categories
         
     @classmethod
     def get_all_types(cls):
@@ -365,15 +374,66 @@ class ContentTypes:
             types.extend(category)
         return types
 
+    @classmethod
+    def get_deprecated_types(cls) -> List[str]:
+        """
+        Retorna la lista de tipos de contenido marcados como deprecated.
+        Esto facilita la validación en servicios y la migración de contenidos existentes.
+        """
+        # Actualmente los tipos deprecated se mantienen para compatibilidad pero no deben crearse nuevos.
+        return [cls.GAME, cls.SIMULATION]
+
+class DeprecatedContentTypes:
+    """
+    Clase que contiene metadatos y mensajes de migración para tipos de contenido deprecated.
+    Proporciona información que puede ser usada por servicios y endpoints para mostrar
+    mensajes coherentes al usuario y sugerir reemplazos.
+    """
+    # Estructura interna: type_code -> metadata
+    _DATA = {
+        ContentTypes.GAME: {
+            "type": ContentTypes.GAME,
+            "replacement": "interactive_template",  # Recomendación genérica de plantilla interactiva
+            "deprecated_at": datetime(2024, 7, 1),
+            "sunset_date": datetime(2025, 12, 31),
+            "message": "El tipo 'game' está en desuso. Se recomienda migrar a templates interactivos "
+                       "o instancias de plantillas (interactive_template). Para casos excepcionales, "
+                       "use los endpoints legacy con el flag 'force_legacy=true' (administradores)."
+        },
+        ContentTypes.SIMULATION: {
+            "type": ContentTypes.SIMULATION,
+            "replacement": "interactive_simulation_template",
+            "deprecated_at": datetime(2024, 7, 1),
+            "sunset_date": datetime(2025, 12, 31),
+            "message": "El tipo 'simulation' está en desuso. Se recomienda migrar a plantillas de simulación "
+                       "o instancias de Template. Para casos excepcionales, use los endpoints legacy con 'force_legacy=true'."
+        }
+    }
+
+    @classmethod
+    def list_all(cls) -> List[Dict]:
+        """Retorna lista de metadatos para todos los tipos deprecated."""
+        return list(cls._DATA.values())
+
+    @classmethod
+    def info_for(cls, type_code: str) -> Optional[Dict]:
+        """Retorna metadatos para un tipo deprecated específico, o None si no está en deprecados."""
+        return cls._DATA.get(type_code)
+
+    @classmethod
+    def is_deprecated(cls, type_code: str) -> bool:
+        """Indica si un tipo de contenido está marcado como deprecated."""
+        return type_code in cls._DATA
+
 class LearningMethodologyTypes:
     # Estilos de aprendizaje sensoriales
     VISUAL = "visual"
     AUDITORY = "auditory"
     READ_WRITE = "read_write"
-    KINESTHETIC = "kinesthetic"
+    KINESTHETIC = "kinesthetic"  # DEPRECATED MAPPING: ahora se mapea a templates interactivos / kinesthetic templates
     
     # Enfoques pedagógicos
-    GAMIFICATION = "gamification"
+    GAMIFICATION = "gamification"  # DEPRECATED MAPPING: mapear a templates interactivos (p. ej. challenge/points templates)
     PROBLEM_BASED = "problem_based"
     POMODORO = "pomodoro"
     CONCEPT_MAPPING = "concept_mapping"
@@ -405,4 +465,50 @@ class LearningMethodologyTypes:
             "memory": [cls.SPACED_REPETITION, cls.RETRIEVAL_PRACTICE, cls.FEYNMAN,
                      cls.MIND_MAP, cls.SOCRATIC],
             "adaptations": [cls.ADHD_ADAPTED, cls.DYSLEXIA_ADAPTED, cls.AUTISM_ADAPTED]
+        }
+
+    @classmethod
+    def get_template_compatible_methodologies(cls) -> List[str]:
+        """
+        Retorna las metodologías que son compatibles o recomendadas para ser representadas
+        mediante templates interactivos (templates HTML/JS, instancias de Template, etc.).
+        Incluye metodologías que anteriormente se mapeaban principalmente a games/simulations.
+        """
+        # Incluir kinesthetic y gamification (que antes se apoyaban en games/simulations),
+        # además de enfoques colaborativos y project_based que también se benefician de templates interactivos.
+        return [
+            cls.KINESTHETIC,
+            cls.GAMIFICATION,
+            cls.COLLABORATIVE,
+            cls.PROJECT_BASED,
+            cls.DISCOVERY
+        ]
+
+    @classmethod
+    def map_kinesthetic_to_templates(cls) -> Dict[str, List[str]]:
+        """
+        Provee un mapeo explícito de metodologías kinestésicas/pedagógicas a tipos de templates
+        recomendados. Los valores son identificadores de plantillas recomendadas que los
+        servicios de creación y migración pueden usar como sugerencia.
+        """
+        # Los nombres de template son recomendaciones genéricas; los servicios deben mapear a IDs concretos.
+        return {
+            cls.KINESTHETIC: [
+                "kinesthetic_interactive_template",    # Plantilla para actividades físicas/hands-on
+                "virtual_lab_template",                # Plantilla que simula laboratorios / interacción directa
+                "interactive_exercise_template"        # Plantilla genérica de ejercicios interactivos
+            ],
+            cls.GAMIFICATION: [
+                "gamified_challenge_template",         # Plantilla con sistema de puntos/retos
+                "leaderboard_template",                # Plantilla con ranking/insignias
+                "interactive_exercise_template"
+            ],
+            cls.COLLABORATIVE: [
+                "collaborative_workspace_template",
+                "shared_project_template"
+            ],
+            cls.PROJECT_BASED: [
+                "project_based_template",
+                "portfolio_template"
+            ]
         }

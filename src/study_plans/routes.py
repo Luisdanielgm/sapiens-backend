@@ -523,6 +523,207 @@ def list_topic_evaluations_route(topic_id):
     evaluations = ensure_json_serializable(evaluations)
     return APIRoute.success(data={"evaluations": evaluations})
 
+# New endpoints: Slides completeness for topic, slides completeness for module, and auto-publish topic
+
+@study_plan_bp.route('/topic/<topic_id>/slides-completeness', methods=['GET'])
+@APIRoute.standard(auth_required_flag=True, roles=[ROLES["TEACHER"], ROLES["INSTITUTE_ADMIN"], ROLES["ADMIN"]])
+def get_topic_slides_completeness(topic_id):
+    """
+    Retorna el estado detallado de las diapositivas de un tema específico,
+    incluyendo conteos por estado, porcentaje de completitud y listas de
+    diapositivas que requieren HTML o narrativa.
+    """
+    try:
+        # Verificar existencia del topic
+        topic = topic_service.get_topic(topic_id)
+        if not topic:
+            return APIRoute.error(ErrorCodes.NOT_FOUND, "Tema no encontrado")
+
+        db = get_db()
+        try:
+            topic_obj_id = ObjectId(topic_id)
+        except Exception:
+            return APIRoute.error(ErrorCodes.INVALID_DATA, "ID de topic inválido")
+
+        slides = list(db.topic_contents.find({
+            "topic_id": topic_obj_id,
+            "content_type": "slide",
+            "status": {"$ne": "deleted"}
+        }, {
+            "_id": 1,
+            "status": 1,
+            "content_html": 1,
+            "narrative_text": 1,
+            "title": 1,
+            "order": 1
+        }))
+
+        total_slides = len(slides)
+        slides_by_status = {"skeleton": 0, "html_ready": 0, "narrative_ready": 0}
+        needing_html = []
+        needing_narrative = []
+        slide_summaries = []
+
+        for s in slides:
+            status = s.get("status", "skeleton")
+            slides_by_status[status] = slides_by_status.get(status, 0) + 1
+
+            slide_summary = {
+                "slide_id": str(s.get("_id")),
+                "status": status,
+                "title": s.get("title"),
+                "order": s.get("order")
+            }
+            slide_summaries.append(slide_summary)
+
+            if status == "skeleton":
+                needing_html.append(slide_summary)
+            elif status == "html_ready":
+                needing_narrative.append(slide_summary)
+
+        narrative_ready = slides_by_status.get("narrative_ready", 0)
+        completion_percentage = (narrative_ready / total_slides * 100) if total_slides > 0 else 0.0
+
+        response = {
+            "topic_id": topic_id,
+            "topic_name": topic.get("name"),
+            "total_slides": total_slides,
+            "slides_by_status": slides_by_status,
+            "completion_percentage": round(completion_percentage, 2),
+            "needing_html_count": len(needing_html),
+            "needing_narrative_count": len(needing_narrative),
+            "needing_html": needing_html,
+            "needing_narrative": needing_narrative,
+            "slides": slide_summaries
+        }
+
+        return APIRoute.success(data=response)
+
+    except Exception as e:
+        logging.error(f"get_topic_slides_completeness: Error para topic {topic_id}: {str(e)}")
+        return APIRoute.error(ErrorCodes.SERVER_ERROR, str(e), status_code=500)
+
+
+@study_plan_bp.route('/module/<module_id>/slides-completeness', methods=['GET'])
+@APIRoute.standard(auth_required_flag=True, roles=[ROLES["TEACHER"], ROLES["INSTITUTE_ADMIN"], ROLES["ADMIN"]])
+def get_module_slides_completeness(module_id):
+    """
+    Retorna un resumen de completitud de diapositivas para todos los temas de un módulo,
+    reutiliza la lógica de ModuleService.check_slides_completeness_for_module.
+    """
+    try:
+        # Verificar existencia del módulo
+        module = module_service.get_module(module_id)
+        if not module:
+            return APIRoute.error(ErrorCodes.NOT_FOUND, "Módulo no encontrado")
+
+        stats = module_service.check_slides_completeness_for_module(module_id)
+        # Enriquecer con nombre del módulo
+        stats["module_id"] = module_id
+        stats["module_name"] = module.get("name")
+
+        return APIRoute.success(data=stats)
+    except Exception as e:
+        logging.error(f"get_module_slides_completeness: Error para módulo {module_id}: {str(e)}")
+        return APIRoute.error(ErrorCodes.SERVER_ERROR, str(e), status_code=500)
+
+
+@study_plan_bp.route('/topic/<topic_id>/auto-publish', methods=['PUT'])
+@APIRoute.standard(auth_required_flag=True, roles=[ROLES["TEACHER"], ROLES["INSTITUTE_ADMIN"], ROLES["ADMIN"]])
+def auto_publish_topic(topic_id):
+    """
+    Verifica automáticamente si un tema cumple los criterios para publicarse:
+     - theory_content presente
+     - al menos una diapositiva en estado 'narrative_ready'
+     - al menos una evaluación asociada (quiz)
+    Si cumple, marca published=true y retorna información detallada.
+    """
+    try:
+        topic = topic_service.get_topic(topic_id)
+        if not topic:
+            return APIRoute.error(ErrorCodes.NOT_FOUND, "Tema no encontrado")
+
+        db = get_db()
+        try:
+            topic_obj_id = ObjectId(topic_id)
+        except Exception:
+            return APIRoute.error(ErrorCodes.INVALID_DATA, "ID de topic inválido")
+
+        # Evaluar condiciones
+        has_theory = bool(topic.get("theory_content"))
+        narrative_ready_count = db.topic_contents.count_documents({
+            "topic_id": topic_obj_id,
+            "content_type": "slide",
+            "status": "narrative_ready"
+        })
+        has_complete_slides = narrative_ready_count > 0
+
+        has_evaluation = db.evaluations.count_documents({"topic_ids": topic_obj_id}) > 0
+
+        missing = []
+        if not has_theory:
+            missing.append("theory_content")
+        if not has_complete_slides:
+            missing.append("narrative_ready_slide")
+        if not has_evaluation:
+            missing.append("evaluation_quiz")
+
+        already_published = bool(topic.get("published", False))
+
+        if missing:
+            return APIRoute.success(data={
+                "topic_id": topic_id,
+                "published": already_published,
+                "auto_published": False,
+                "missing_requirements": missing,
+                "narrative_ready_slides": narrative_ready_count,
+                "has_theory": has_theory,
+                "has_evaluation": has_evaluation
+            }, message="Requisitos no cumplidos para auto-publicación")
+
+        # Si ya está publicado, informar al cliente
+        if already_published:
+            return APIRoute.success(data={
+                "topic_id": topic_id,
+                "published": True,
+                "auto_published": False,
+                "reason": "already_published"
+            }, message="El tema ya estaba publicado")
+
+        # Proceder a marcar como publicado
+        try:
+            updated = db.topics.update_one(
+                {"_id": topic_obj_id},
+                {"$set": {"published": True, "auto_published_at": datetime.now(), "updated_at": datetime.now()}}
+            )
+            if updated.modified_count > 0:
+                logging.info(f"auto_publish_topic: Tema {topic_id} publicado automáticamente por usuario {request.user_id}")
+                return APIRoute.success(data={
+                    "topic_id": topic_id,
+                    "published": True,
+                    "auto_published": True,
+                    "narrative_ready_slides": narrative_ready_count,
+                    "has_theory": has_theory,
+                    "has_evaluation": has_evaluation
+                }, message="Tema publicado automáticamente")
+            else:
+                # Si no se modificó, puede deberse a condiciones de carrera; devolver estado actual
+                topic_after = topic_service.get_topic(topic_id)
+                return APIRoute.success(data={
+                    "topic_id": topic_id,
+                    "published": topic_after.get("published", False),
+                    "auto_published": False,
+                    "note": "No se modificó el documento (posible condición de carrera)"
+                }, message="No se pudo publicar el tema automáticamente")
+        except Exception as e:
+            logging.error(f"auto_publish_topic: Error al actualizar topic {topic_id}: {str(e)}")
+            return APIRoute.error(ErrorCodes.SERVER_ERROR, str(e), status_code=500)
+
+    except Exception as e:
+        logging.error(f"auto_publish_topic: Error procesando auto-publicación para topic {topic_id}: {str(e)}")
+        return APIRoute.error(ErrorCodes.SERVER_ERROR, str(e), status_code=500)
+
+
 # Rutas para Evaluaciones
 @study_plan_bp.route('/evaluation', methods=['POST'])
 @APIRoute.standard(auth_required_flag=True, roles=[ROLES["TEACHER"]], required_fields=['topic_ids', 'title', 'description', 'weight', 'criteria', 'due_date'])
