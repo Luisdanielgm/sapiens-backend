@@ -697,11 +697,21 @@ class ContentService(VerificationBaseService):
                 # Validaciones específicas para diapositivas
                 if content_type == "slide":
                     slide_template = content_data.get("slide_template", "")
-                    if not slide_template:
-                        raise ValueError(f"Contenido {i+1}: El contenido de tipo 'slide' requiere un campo 'slide_template'")
-
-                    if not self.slide_style_service.validate_slide_template(slide_template):
-                        raise ValueError(f"Contenido {i+1}: El slide_template no es un prompt válido")
+                    
+                    # Log the received data for debugging
+                    logging.info(f"Contenido {i+1}: Procesando slide con slide_template='{slide_template[:100] if slide_template else 'EMPTY'}...'")
+                    
+                    # Auto-generate slide_template if not provided or invalid
+                    if not slide_template or not self.slide_style_service.validate_slide_template(slide_template):
+                        if not slide_template:
+                            logging.info(f"Contenido {i+1}: slide_template no proporcionado, generando automáticamente")
+                        else:
+                            logging.warning(f"Contenido {i+1}: slide_template inválido, regenerando automáticamente")
+                        
+                        # Generate a default slide template
+                        slide_template = self.slide_style_service.generate_slide_template()
+                        content_data["slide_template"] = slide_template
+                        logging.info(f"Contenido {i+1}: slide_template generado automáticamente")
 
                     # Detectar caso skeleton: full_text presente sin content_html ni narrative_text
                     ft = content_data.get("full_text")
@@ -912,6 +922,12 @@ class ContentService(VerificationBaseService):
                     content_for_markers or json.dumps(slide.get("interactive_data", {}))
                 )
 
+                # Auto-generate slide_template if not provided or invalid
+                slide_template = slide.get("slide_template", "")
+                if not slide_template or not self.slide_style_service.validate_slide_template(slide_template):
+                    slide_template = self.slide_style_service.generate_slide_template()
+                    logging.info(f"create_bulk_slides_skeleton: slide_template generado automáticamente para slide {slide.get('order', 'N/A')}")
+
                 content_obj = TopicContent(
                     topic_id=slide.get("topic_id"),
                     content_type="slide",
@@ -924,7 +940,7 @@ class ContentService(VerificationBaseService):
                     generation_prompt=slide.get("generation_prompt"),
                     ai_credits=slide.get("ai_credits", True),
                     personalization_markers=markers,
-                    slide_template=slide.get("slide_template", ""),
+                    slide_template=slide_template,
                     # Force skeleton status regardless of provided status
                     status="skeleton",
                     order=slide.get("order"),

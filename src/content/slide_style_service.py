@@ -209,13 +209,9 @@ La diapositiva debe ser visualmente atractiva, educativa y seguir principios de 
                 self.logger.warning("El slide_template no puede estar vacío")
                 return False
             
-            # Validar longitud mínima y máxima razonable para un prompt
+            # Validar longitud mínima para un prompt
             if len(slide_template.strip()) < 10:
                 self.logger.warning("El slide_template es demasiado corto (mínimo 10 caracteres)")
-                return False
-                
-            if len(slide_template) > 5000:
-                self.logger.warning("El slide_template es demasiado largo (máximo 5000 caracteres)")
                 return False
             
             return True
