@@ -16,6 +16,7 @@ from src.ai_monitoring.services import AIMonitoringService
 from .structured_sequence_service import StructuredSequenceService
 from .template_recommendation_service import TemplateRecommendationService
 from .embedded_content_service import EmbeddedContentService
+from .content_personalization_service import ContentPersonalizationService
 import bleach
 
 class ContentTypeService(VerificationBaseService):
