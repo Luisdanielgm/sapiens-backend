@@ -198,10 +198,53 @@ def create_bulk_content():
                 "Se requiere al menos un contenido en el array 'contents'"
             )
         
+        # Verificar duplicados para slides
+        slides_data = [content for content in contents_data if content.get('content_type') == 'slide']
+        if slides_data:
+            # Agrupar slides por topic_id para verificar duplicados
+            topic_groups = {}
+            for slide in slides_data:
+                topic_id = slide.get('topic_id')
+                order = slide.get('order')
+                # Validate order is present and valid
+                if order is None or not isinstance(order, int) or order < 1:
+                    return APIRoute.error(
+                        ErrorCodes.VALIDATION_ERROR,
+                        "Todas las slides deben tener un campo 'order' con valor entero positivo"
+                    )
+                if topic_id:
+                    if topic_id not in topic_groups:
+                        topic_groups[topic_id] = []
+                    topic_groups[topic_id].append(order)
+
+            # Verificar duplicados en cada topic
+            for topic_id, orders in topic_groups.items():
+                # Check for duplicate orders within the request
+                unique_orders = set(orders)
+                if len(unique_orders) != len(orders):
+                    duplicates = [o for o in unique_orders if orders.count(o) > 1]
+                    return APIRoute.error(
+                        ErrorCodes.VALIDATION_ERROR,
+                        f"Se encontraron órdenes duplicados en la petición para el topic {topic_id}: {duplicates}"
+                    )
+
+                # Check for duplicates against existing database records
+                duplicate_check = content_service.check_existing_skeletons(topic_id, list(unique_orders))
+                if duplicate_check.get('has_duplicates'):
+                    return APIRoute.error(
+                        ErrorCodes.RESOURCE_ALREADY_EXISTS,
+                        f"Se encontraron {duplicate_check['count']} skeletons duplicados para el topic {topic_id} en las posiciones: {duplicate_check['existing_orders']}. IDs existentes: {duplicate_check['existing_ids']}",
+                        status_code=409,
+                        data={
+                            "duplicates_found": duplicate_check,
+                            "suggestion": "Use GET /api/content/topic/{topicId}/check-duplicates para verificar duplicados antes de crear"
+                        }
+                    )
+
         # Agregar creator_id a todos los contenidos
         for content_data in contents_data:
             content_data['creator_id'] = request.user_id
-        
+
         success, result = content_service.create_bulk_content(contents_data)
 
         if success:
@@ -378,6 +421,103 @@ def get_topic_content_by_type(topic_id, content_type):
         return APIRoute.success(data={"contents": contents})
     except Exception as e:
         logging.error(f"Error obteniendo contenido por tipo: {str(e)}")
+        return APIRoute.error(
+            ErrorCodes.SERVER_ERROR,
+            "Error interno del servidor",
+            status_code=500,
+        )
+
+@content_bp.route('/topic/<topic_id>/check-duplicates', methods=['GET'])
+@APIRoute.standard(auth_required_flag=True)
+def check_topic_duplicates(topic_id):
+    """
+    Verifica si existen skeletons duplicados para un topic específico.
+
+    Query params:
+    - orders: lista de órdenes a verificar (ej: "1,2,3" o "1" multiple veces)
+
+    Retorna:
+    {
+        "topic_id": "...",
+        "requested_orders": [1, 2, 3],
+        "duplicates_found": {
+            "has_duplicates": true,
+            "existing_orders": [1, 3],
+            "existing_ids": ["...", "..."],
+            "count": 2
+        },
+        "recommendation": "Los órdenes [1, 3] ya existen. Considere usar órdenes disponibles: [2, 4, 5]"
+    }
+    """
+    try:
+        # Validar topic_id
+        if not ObjectId.is_valid(topic_id):
+            return APIRoute.error(ErrorCodes.VALIDATION_ERROR, "ID de tema inválido")
+
+        # Verify topic exists
+        if not content_service.check_topic_exists(topic_id):
+            return APIRoute.error(ErrorCodes.NOT_FOUND, "Topic no encontrado", status_code=404)
+
+        # Obtener parámetro orders
+        orders_param = request.args.get('orders', '')
+        if not orders_param:
+            return APIRoute.error(ErrorCodes.VALIDATION_ERROR, "Parámetro 'orders' es requerido")
+
+        # Parsear órdenes
+        try:
+            orders = []
+            for order_str in orders_param.split(','):
+                order = int(order_str.strip())
+                if order < 1:
+                    return APIRoute.error(ErrorCodes.VALIDATION_ERROR, "Los órdenes deben ser números positivos")
+                orders.append(order)
+        except ValueError:
+            return APIRoute.error(ErrorCodes.VALIDATION_ERROR, "El parámetro 'orders' debe contener números separados por comas")
+
+        if not orders:
+            return APIRoute.error(ErrorCodes.VALIDATION_ERROR, "Debe proporcionar al menos un orden válido")
+
+        # Verificar duplicados
+        duplicate_check = content_service.check_existing_skeletons(topic_id, orders)
+
+        # Obtener órdenes disponibles si hay duplicados
+        recommendation = None
+        if duplicate_check.get('has_duplicates'):
+            try:
+                # Obtener todos los skeletons del topic
+                existing_slides = content_service.get_topic_content(topic_id, content_type='slide')
+                existing_orders = set(slide.get('order', 0) for slide in existing_slides if slide.get('status') == 'skeleton')
+
+                # Encontrar órdenes disponibles
+                requested_set = set(orders)
+                available_orders = []
+                max_order = max(max(existing_orders), max(requested_set)) if existing_orders or requested_set else 10
+
+                for i in range(1, max_order + 10):
+                    if i not in existing_orders and i not in requested_set:
+                        available_orders.append(i)
+                        if len(available_orders) >= len(duplicate_check.get('existing_orders', [])):
+                            break
+
+                if available_orders:
+                    recommendation = f"Los órdenes {duplicate_check.get('existing_orders', [])} ya existen. Considere usar órdenes disponibles: {available_orders[:len(duplicate_check.get('existing_orders', []))]}"
+            except Exception as e:
+                logging.error(f"Error generando recomendación: {e}")
+                recommendation = "Se encontraron duplicados. Verifique los órdenes existentes antes de crear."
+
+        response_data = {
+            "topic_id": topic_id,
+            "requested_orders": orders,
+            "duplicates_found": duplicate_check
+        }
+
+        if recommendation:
+            response_data["recommendation"] = recommendation
+
+        return APIRoute.success(data=response_data)
+
+    except Exception as e:
+        logging.error(f"Error verificando duplicados para topic {topic_id}: {str(e)}")
         return APIRoute.error(
             ErrorCodes.SERVER_ERROR,
             "Error interno del servidor",

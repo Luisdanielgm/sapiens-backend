@@ -655,6 +655,50 @@ class ContentService(VerificationBaseService):
             logging.error(f"Error en check_deprecated_content_usage: {e}")
             return {"error": str(e)}
 
+    def check_existing_skeletons(self, topic_id: str, orders: List[int]) -> Dict[str, Any]:
+        """
+        Verifica si ya existen skeletons con el mismo topic_id y order.
+
+        Args:
+            topic_id: ID del tema a verificar
+            orders: Lista de órdenes a verificar
+
+        Returns:
+            Dict con información sobre duplicados encontrados
+        """
+        try:
+            existing_skeletons = list(self.collection.find({
+                "topic_id": ObjectId(topic_id),
+                "order": {"$in": orders},
+                "status": "skeleton"
+            }, {"_id": 1, "order": 1}))
+
+            if existing_skeletons:
+                existing_orders = [doc["order"] for doc in existing_skeletons]
+                existing_ids = [str(doc["_id"]) for doc in existing_skeletons]
+                return {
+                    "has_duplicates": True,
+                    "existing_orders": existing_orders,
+                    "existing_ids": existing_ids,
+                    "count": len(existing_skeletons)
+                }
+
+            return {
+                "has_duplicates": False,
+                "existing_orders": [],
+                "existing_ids": [],
+                "count": 0
+            }
+        except Exception as e:
+            logging.error(f"Error verificando skeletons existentes: {e}")
+            return {
+                "has_duplicates": False,
+                "existing_orders": [],
+                "existing_ids": [],
+                "count": 0,
+                "error": str(e)
+            }
+
     def create_bulk_content(self, contents_data: List[Dict]) -> Tuple[bool, List[str]]:
         """
         Crea múltiples contenidos en una sola transacción.
@@ -1849,13 +1893,13 @@ class ContentService(VerificationBaseService):
                 return False, f"content_html inválido después de sanitización: {msg}"
 
             update_data = {
-                "content_html": sanitized_html,
+                "content.content_html": sanitized_html,
                 "updated_at": datetime.now(),
                 "render_engine": "raw_html"
             }
 
             # Determinar nuevo estado
-            existing_narrative = current.get("narrative_text")
+            existing_narrative = current.get("content", {}).get("narrative_text")
             if existing_narrative:
                 update_data["status"] = "narrative_ready"
             else:
@@ -1919,12 +1963,12 @@ class ContentService(VerificationBaseService):
                 return False, "El contenido no es una diapositiva"
 
             update_data = {
-                "narrative_text": narrative_trim,
+                "content.narrative_text": narrative_trim,
                 "updated_at": datetime.now()
             }
 
             # Si ya existe HTML, marcar como narrative_ready
-            existing_html = current.get("content_html")
+            existing_html = current.get("content", {}).get("content_html")
             if existing_html:
                 update_data["status"] = "narrative_ready"
             else:
