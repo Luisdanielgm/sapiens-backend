@@ -1178,7 +1178,6 @@ class ModuleService(VerificationBaseService):
             "slides_details": slides_stats
         }
 
-
 class TopicService(VerificationBaseService):
     def __init__(self):
         super().__init__(collection_name="topics")
@@ -3458,7 +3457,6 @@ class EvaluationResourceService(VerificationBaseService):
         except Exception as e:
             log_error(f"Error al eliminar vinculación recurso {resource_id} evaluación {evaluation_id}: {str(e)}")
             return False, str(e)
-
 
 class AutomaticGradingService:
     """
