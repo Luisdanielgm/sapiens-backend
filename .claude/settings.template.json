@@ -1,0 +1,15 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(git stash:*)",
+      "Bash(git checkout:*)",
+      "Bash(python:*)",
+      "Bash(git add:*)",
+      "Bash(git commit:*)",
+      "Bash(powershell:*)",
+      "Read(./SapiensAI/**)"
+    ],
+    "deny": [],
+    "ask": []
+  }
+}

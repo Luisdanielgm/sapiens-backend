@@ -9,7 +9,7 @@ import warnings
 from src.shared.decorators import role_required
 from src.shared.database import get_db
 from src.shared.standardization import APIRoute, ErrorCodes
-from src.content.services import (
+from .services import (
     ContentService,
     ContentTypeService,
 )
@@ -116,17 +116,46 @@ def create_content():
         "content_type": "game|simulation|quiz|diagram|text|video|slide|...",
         "title": "Título del contenido",
         "description": "Descripción",
-        "content_data": {...},  // Contenido específico según tipo
-        "interactive_config": {...},  // Para tipos interactivos
+        "content": "Contenido principal (string o dict según tipo)",
+        "interactive_data": {...},  // Para tipos interactivos
         "difficulty": "easy|medium|hard",
         "estimated_duration": 15,
         "learning_objectives": [...],
         "tags": [...],
         "resources": [...],
         "generation_prompt": "...",  // Para contenido generado por IA
+        "slide_template": "...",  // (opcional para slides) string prompt para IA, se autogenera si no se proporciona
         "order": 1,  // Orden secuencial del contenido (opcional)
         "parent_content_id": "ObjectId"  // ID del contenido padre (opcional)
     }
+    
+    Para diapositivas (content_type: "slide"), los campos específicos deben enviarse dentro del objeto "content":
+    {
+        "topic_id": "...",
+        "content_type": "slide",
+        "content": {
+            "full_text": "...",
+            "slide_plan": "...",
+            "content_html": "...",
+            "narrative_text": "...",
+            "template_snapshot": {...}
+        },
+        "slide_template": "...",  // (opcional) string prompt para IA, se autogenera si no se proporciona
+        "order": 1
+    }
+    
+    POLÍTICAS DE VALIDACIÓN:
+    - Los campos 'provider' y 'model' NO están permitidos en el payload. El sistema gestiona automáticamente la selección de proveedores.
+    - Para slides: 'slide_plan' debe ser una cadena de texto (Markdown/texto plano), no un objeto JSON.
+    - Para slides: 'slide_template' es opcional. Si no se proporciona o es inválido, el sistema generará uno automáticamente.
+    - El HTML de slides tiene un límite de 150 KB (150,000 caracteres).
+    
+    COMPORTAMIENTO ESPECIAL PARA QUIZ:
+    - Solo puede existir UN quiz por topic.
+    - Si ya existen uno o más quizes para el topic_id especificado, TODOS se eliminarán automáticamente antes de crear el nuevo.
+    - Esto garantiza que regenerar un quiz no cree duplicados ni deje residuos.
+    - El ID retornado será siempre de un quiz nuevo (todos los anteriores se eliminan).
+    - Se crea un nuevo documento con insert_one() después de eliminar todos los quizes previos con delete_many().
     """
     try:
         data = request.json
@@ -141,7 +170,7 @@ def create_content():
                 status_code=201,
             )
         else:
-            return APIRoute.error(ErrorCodes.CREATION_ERROR, result)
+            return APIRoute.error(ErrorCodes.VALIDATION_ERROR, result)
             
     except Exception as e:
         logging.error(f"Error creando contenido: {str(e)}")
@@ -160,19 +189,22 @@ def create_bulk_content():
     Soporte mejorado para slides:
     - Para creación masiva de diapositivas skeleton considere usar el endpoint dedicado:
       POST /api/content/bulk/slides
-    - Si se incluyen diapositivas en el array 'contents', los campos relevantes son:
-        - template_snapshot: objeto JSON con estructura de estilos (obligatorio para skeleton slides).
-          Ejemplo de estructura esperada:
-          {
-              "palette": {"primary": "#112233", "secondary": "#FFFFFF"},
-              "grid": {"columns": 12, "gap": 16},
-              "fontFamilies": ["Inter", "Roboto"],
-              "spacing": {"small": 8, "medium": 16, "large": 32},
-              "breakpoints": {"mobile": 480, "tablet": 768, "desktop": 1024}
+    - Si se incluyen diapositivas en el array 'contents', los campos específicos de slide deben enviarse dentro del objeto "content":
+        - content: {
+            "full_text": texto plano usado para generar HTML/narrativa (obligatorio para skeleton slides)
+            "content_html": contenido HTML (opcional, para slides no-skeleton)
+            "narrative_text": texto narrativo (opcional, para slides no-skeleton)
+            "slide_plan": (opcional)
+            "template_snapshot": objeto JSON con estructura de estilos (obligatorio para skeleton slides).
+              Ejemplo de estructura esperada:
+              {
+                  "palette": {"primary": "#112233", "secondary": "#FFFFFF"},
+                  "grid": {"columns": 12, "gap": 16},
+                  "fontFamilies": ["Inter", "Roboto"],
+                  "spacing": {"small": 8, "medium": 16, "large": 32},
+                  "breakpoints": {"mobile": 480, "tablet": 768, "desktop": 1024}
+              }
           }
-        - full_text: texto plano usado para generar HTML/narrativa (obligatorio para skeleton slides)
-        - content_html: contenido HTML (opcional, para slides no-skeleton)
-        - narrative_text: texto narrativo (opcional, para slides no-skeleton)
         - order: entero positivo indicando posición secuencial
         - parent_content_id: ObjectId del contenido padre (opcional)
         - Otros campos permitidos: slide_template (string prompt para IA), interactive_data, resources, metadata, generation_prompt
@@ -187,6 +219,16 @@ def create_bulk_content():
     Responde con:
     - 201 + lista de IDs insertados en caso de éxito
     - 400 con mensaje de validación en caso de datos inválidos
+    
+    POLÍTICAS DE VALIDACIÓN:
+    - Los campos 'provider' y 'model' NO están permitidos en ningún elemento del array.
+    - 'slide_plan' debe ser string (texto/Markdown), no objeto JSON o array.
+    - Límite de HTML por slide: 150 KB.
+    
+    COMPORTAMIENTO PARA QUIZ EN BULK:
+    - Si el batch incluye uno o más quizzes, se eliminará cualquier quiz existente para cada topic_id antes de crear el nuevo.
+    - Para múltiples quizzes del mismo topic_id en el batch, solo el último se persistirá (comportamiento "último gana").
+    - Los quizzes anteriores en el batch serán reemplazados por el último quiz del mismo topic_id.
     """
     try:
         data = request.json
@@ -200,6 +242,9 @@ def create_bulk_content():
         
         # Verificar duplicados para slides
         slides_data = [content for content in contents_data if content.get('content_type') == 'slide']
+        quiz_data = [content for content in contents_data if content.get('content_type') == 'quiz']
+
+        
         if slides_data:
             # Agrupar slides por topic_id para verificar duplicados
             topic_groups = {}
@@ -222,7 +267,7 @@ def create_bulk_content():
                 # Check for duplicate orders within the request
                 unique_orders = set(orders)
                 if len(unique_orders) != len(orders):
-                    duplicates = [o for o in unique_orders if orders.count(o) > 1]
+                    duplicates = [order for order in set(orders) if orders.count(order) > 1]
                     return APIRoute.error(
                         ErrorCodes.VALIDATION_ERROR,
                         f"Se encontraron órdenes duplicados en la petición para el topic {topic_id}: {duplicates}"
@@ -254,7 +299,13 @@ def create_bulk_content():
                 status_code=201,
             )
         else:
-            return APIRoute.error(ErrorCodes.CREATION_ERROR, result)
+            # Usar VALIDATION_ERROR para fallos de validación (ej: "Violación de política")
+            # y CREATION_ERROR para otros errores internos del servidor
+            error_msg = result or "Error desconocido"
+            if "Violación de política" in error_msg:
+                return APIRoute.error(ErrorCodes.VALIDATION_ERROR, error_msg)
+            else:
+                return APIRoute.error(ErrorCodes.CREATION_ERROR, error_msg)
             
     except Exception as e:
         logging.error(f"Error creando contenidos en lote: {str(e)}")
@@ -275,17 +326,19 @@ def create_bulk_slides():
     - Cada slide_object debe contener:
         - topic_id: ObjectId (todas las slides deben pertenecer al mismo topic_id)
         - content_type: "slide" (estrictamente)
+        - content: objeto con campos específicos de slide:
+            - full_text: texto no vacío (se usará como base para la generación skeleton)
+            - slide_plan: (opcional)
+            - template_snapshot: objeto JSON con la estructura de estilos (obligatorio).
+              Ejemplo mínimo:
+                {
+                  "palette": {"primary": "#112233", "secondary": "#FFFFFF"},
+                  "grid": {"columns": 12, "gap": 16},
+                  "fontFamilies": ["Inter", "Roboto"],
+                  "spacing": {"small": 8, "medium": 16, "large": 32},
+                  "breakpoints": {"mobile": 480, "tablet": 768, "desktop": 1024}
+                }
         - order: entero positivo. La secuencia debe ser consecutiva comenzando en 1 sin gaps.
-        - full_text: texto no vacío (se usará como base para la generación skeleton)
-        - template_snapshot: objeto JSON con la estructura de estilos (obligatorio).
-          Ejemplo mínimo (template_snapshot debe ser un dict, no un string):
-            {
-              "palette": {"primary": "#112233", "secondary": "#FFFFFF"},
-              "grid": {"columns": 12, "gap": 16},
-              "fontFamilies": ["Inter", "Roboto"],
-              "spacing": {"small": 8, "medium": 16, "large": 32},
-              "breakpoints": {"mobile": 480, "tablet": 768, "desktop": 1024}
-            }
         - parent_content_id: ObjectId (opcional)
         - Otros campos permitidos: slide_template (string prompt para IA), interactive_data, resources, metadata, generation_prompt
 
@@ -299,6 +352,30 @@ def create_bulk_slides():
     Responde con:
     - 201 + lista de IDs insertados en caso de éxito
     - 400 con mensaje de validación en caso de datos inválidos
+    
+    POLÍTICAS DE VALIDACIÓN ADICIONALES:
+    - NO incluir campos 'provider' o 'model' en el payload.
+    - 'slide_plan' (si se proporciona) debe ser string, no objeto.
+    - HTML limitado a 150 KB por slide.
+    - Cualquier violación de políticas resultará en error 400 con mensaje descriptivo.
+    
+    COMPORTAMIENTO IDEMPOTENTE (REGENERACIÓN):
+    - Este endpoint implementa upsert por (topic_id, order): si ya existe un slide con el mismo topic_id y order, se actualizará en lugar de crear uno duplicado.
+    - Si el nuevo lote tiene MENOS slides que una generación previa (ej: antes 10 slides, ahora 7), los slides sobrantes (8, 9, 10) se eliminarán automáticamente.
+    - Esto permite regenerar contenido sin acumular slides duplicados o obsoletos.
+    - Los IDs retornados pueden ser una mezcla de slides nuevos y actualizados.
+
+    EJEMPLO DE REGENERACIÓN:
+    1. Primera generación: crea slides con order 1-10 (10 slides)
+    2. Segunda generación: envía slides con order 1-7 (7 slides)
+       - Resultado: slides 1-7 se actualizan, slides 8-10 se eliminan
+       - Retorna 7 IDs (algunos pueden ser los mismos de la primera generación si se reutilizaran)
+
+    BREAKING CHANGE NOTICE:
+    - Response field renamed from 'slide_ids' to 'content_ids' for consistency
+    - 'slide_ids' field is deprecated and will be removed after 2025-12-31
+    - During transition period (until 2025-12-31), both fields are returned with identical values
+    - Update clients to use 'content_ids' instead of 'slide_ids' as soon as possible
     """
     try:
         data = request.json or {}
@@ -337,13 +414,18 @@ def create_bulk_slides():
                 return APIRoute.error(ErrorCodes.VALIDATION_ERROR, f"Slide {idx+1}: order es requerido y debe ser un entero positivo")
             seen_orders.append(order)
 
+            # content validations for slide fields
+            content_obj = slide.get('content', {})
+            if not isinstance(content_obj, dict):
+                return APIRoute.error(ErrorCodes.VALIDATION_ERROR, f"Slide {idx+1}: 'content' debe ser un objeto")
+
             # full_text requirement for skeleton slides
-            full_text = slide.get('full_text')
+            full_text = content_obj.get('full_text')
             if full_text is None or not isinstance(full_text, str) or not full_text.strip():
                 return APIRoute.error(ErrorCodes.VALIDATION_ERROR, f"Slide {idx+1}: full_text es requerido y debe ser una cadena no vacía para crear skeleton")
 
             # template_snapshot must be an object/dict
-            ts = slide.get('template_snapshot')
+            ts = content_obj.get('template_snapshot')
             if ts is None or not isinstance(ts, dict):
                 return APIRoute.error(ErrorCodes.VALIDATION_ERROR, f"Slide {idx+1}: template_snapshot es requerido y debe ser un objeto JSON (no string)")
 
@@ -362,7 +444,7 @@ def create_bulk_slides():
 
         # Log a compact example of the template_snapshot for debugging (capped)
         try:
-            example_ts = slides_data[0].get('template_snapshot')
+            example_ts = slides_data[0].get('content', {}).get('template_snapshot')
             logging.info(f"create_bulk_slides: Recibiendo {len(slides_data)} slides para topic {first_topic}. Ejemplo template_snapshot: {json.dumps(example_ts, ensure_ascii=False)[:400]}")
         except Exception:
             logging.debug("create_bulk_slides: no fue posible serializar template_snapshot para logging")
@@ -371,11 +453,23 @@ def create_bulk_slides():
         success, result = content_service.create_bulk_slides_skeleton(slides_data)
 
         if success:
-            return APIRoute.success(
-                data={"slide_ids": result},
+            response_data = {
+                "content_ids": result,
+                "slide_ids": result  # deprecated field for backward compatibility
+            }
+
+            resp = APIRoute.success(
+                data=response_data,
                 message=f"Se crearon {len(result)} slides skeleton exitosamente",
                 status_code=201,
             )
+
+            # Add deprecation headers for slide_ids field
+            resp.headers['Deprecation'] = 'true'
+            resp.headers['Sunset'] = '2025-12-31'
+            resp.headers['Warning'] = '299 - "Field slide_ids is deprecated and will be removed. Use content_ids instead"'
+
+            return resp
         else:
             # The service returns descriptive error strings; map to validation when applicable
             err_msg = result or "Error creando slides"
@@ -571,6 +665,10 @@ def get_content_by_id(content_id):
 def update_content(content_id):
     """
     Actualiza contenido existente.
+    
+    POLÍTICAS:
+    - No se permiten campos 'provider' o 'model' en actualizaciones.
+    - 'slide_plan' debe ser string si se proporciona.
     """
     try:
         data = request.json
@@ -1096,10 +1194,7 @@ def track_interaction():
                 message="Interacción registrada exitosamente",
             )
         else:
-            return APIRoute.error(
-                ErrorCodes.OPERATION_FAILED,
-                "Error registrando interacción",
-            )
+            return APIRoute.error(ErrorCodes.OPERATION_FAILED, "Error registrando interacción")
             
     except Exception as e:
         logging.error(f"Error registrando interacción: {str(e)}")

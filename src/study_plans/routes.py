@@ -21,6 +21,7 @@ from src.resources.services import ResourceService, ResourceFolderService
 import logging
 from src.shared.constants import ROLES
 from bson import ObjectId
+from bson.errors import InvalidId
 from src.shared.utils import ensure_json_serializable
 from datetime import datetime
 from src.shared.database import get_db
@@ -542,7 +543,7 @@ def get_topic_slides_completeness(topic_id):
         db = get_db()
         try:
             topic_obj_id = ObjectId(topic_id)
-        except Exception:
+        except InvalidId:
             return APIRoute.error(ErrorCodes.INVALID_DATA, "ID de topic inválido")
 
         slides = list(db.topic_contents.find({
@@ -552,8 +553,8 @@ def get_topic_slides_completeness(topic_id):
         }, {
             "_id": 1,
             "status": 1,
-            "content_html": 1,
-            "narrative_text": 1,
+            "content.content_html": 1,
+            "content.narrative_text": 1,
             "title": 1,
             "order": 1
         }))
@@ -637,87 +638,55 @@ def auto_publish_topic(topic_id):
      - al menos una diapositiva en estado 'narrative_ready'
      - al menos una evaluación asociada (quiz)
     Si cumple, marca published=true y retorna información detallada.
+
+    Refactored to use service layer methods for consistency and maintainability.
     """
     try:
+        # Verify topic exists first
         topic = topic_service.get_topic(topic_id)
         if not topic:
             return APIRoute.error(ErrorCodes.NOT_FOUND, "Tema no encontrado")
 
-        db = get_db()
-        try:
-            topic_obj_id = ObjectId(topic_id)
-        except Exception:
-            return APIRoute.error(ErrorCodes.INVALID_DATA, "ID de topic inválido")
+        # Use service layer methods to centralize business logic
+        result = topic_service.publish_topic(topic_id, user_id=request.user_id)
 
-        # Evaluar condiciones
-        has_theory = bool(topic.get("theory_content"))
-        narrative_ready_count = db.topic_contents.count_documents({
-            "topic_id": topic_obj_id,
-            "content_type": "slide",
-            "status": "narrative_ready"
-        })
-        has_complete_slides = narrative_ready_count > 0
-
-        has_evaluation = db.evaluations.count_documents({"topic_ids": topic_obj_id}) > 0
-
-        missing = []
-        if not has_theory:
-            missing.append("theory_content")
-        if not has_complete_slides:
-            missing.append("narrative_ready_slide")
-        if not has_evaluation:
-            missing.append("evaluation_quiz")
-
-        already_published = bool(topic.get("published", False))
-
-        if missing:
-            return APIRoute.success(data={
-                "topic_id": topic_id,
-                "published": already_published,
-                "auto_published": False,
-                "missing_requirements": missing,
-                "narrative_ready_slides": narrative_ready_count,
-                "has_theory": has_theory,
-                "has_evaluation": has_evaluation
-            }, message="Requisitos no cumplidos para auto-publicación")
-
-        # Si ya está publicado, informar al cliente
-        if already_published:
-            return APIRoute.success(data={
-                "topic_id": topic_id,
-                "published": True,
-                "auto_published": False,
-                "reason": "already_published"
-            }, message="El tema ya estaba publicado")
-
-        # Proceder a marcar como publicado
-        try:
-            updated = db.topics.update_one(
-                {"_id": topic_obj_id},
-                {"$set": {"published": True, "auto_published_at": datetime.now(), "updated_at": datetime.now()}}
+        if result.get("success", False):
+            return APIRoute.success(
+                data={
+                    "topic_id": topic_id,
+                    "published": result.get("published", False),
+                    "auto_published": result.get("auto_published", False),
+                    "missing_requirements": result.get("missing_requirements", []),
+                    "narrative_ready_slides": result.get("narrative_ready_slides", 0),
+                    "has_theory": result.get("has_theory", False),
+                    "has_evaluation": result.get("has_evaluation", False),
+                    **({"reason": result.get("reason")} if result.get("reason") else {}),
+                    **({"note": result.get("note")} if result.get("note") else {})
+                },
+                message=result.get("message", "Operación completada")
             )
-            if updated.modified_count > 0:
-                logging.info(f"auto_publish_topic: Tema {topic_id} publicado automáticamente por usuario {request.user_id}")
-                return APIRoute.success(data={
-                    "topic_id": topic_id,
-                    "published": True,
-                    "auto_published": True,
-                    "narrative_ready_slides": narrative_ready_count,
-                    "has_theory": has_theory,
-                    "has_evaluation": has_evaluation
-                }, message="Tema publicado automáticamente")
+        else:
+            # Handle different error scenarios
+            if "error" in result:
+                if "inválido" in result["error"].lower():
+                    return APIRoute.error(ErrorCodes.INVALID_DATA, result["error"])
+                elif "no encontrado" in result["error"].lower():
+                    return APIRoute.error(ErrorCodes.NOT_FOUND, result["error"])
+                else:
+                    return APIRoute.error(ErrorCodes.SERVER_ERROR, result["error"])
             else:
-                # Si no se modificó, puede deberse a condiciones de carrera; devolver estado actual
-                topic_after = topic_service.get_topic(topic_id)
-                return APIRoute.success(data={
-                    "topic_id": topic_id,
-                    "published": topic_after.get("published", False),
-                    "auto_published": False,
-                    "note": "No se modificó el documento (posible condición de carrera)"
-                }, message="No se pudo publicar el tema automáticamente")
-        except Exception as e:
-            logging.error(f"auto_publish_topic: Error al actualizar topic {topic_id}: {str(e)}")
-            return APIRoute.error(ErrorCodes.SERVER_ERROR, str(e), status_code=500)
+                return APIRoute.success(
+                    data={
+                        "topic_id": topic_id,
+                        "published": result.get("published", False),
+                        "auto_published": False,
+                        "missing_requirements": result.get("missing_requirements", []),
+                        "narrative_ready_slides": result.get("narrative_ready_slides", 0),
+                        "has_theory": result.get("has_theory", False),
+                        "has_evaluation": result.get("has_evaluation", False)
+                    },
+                    message=result.get("message", "Requisitos no cumplidos para auto-publicación")
+                )
 
     except Exception as e:
         logging.error(f"auto_publish_topic: Error procesando auto-publicación para topic {topic_id}: {str(e)}")

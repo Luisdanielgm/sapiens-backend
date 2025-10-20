@@ -21,8 +21,30 @@ import json
 from flask_jwt_extended import create_access_token, decode_token
 
 # Reemplazar la importación circular y la redeclaración
-__all__ = ['parse_date', 'generate_token', 'verify_token', 
-           'serialize_object_id', 'ensure_json_serializable']
+__all__ = ['parse_date', 'generate_token', 'verify_token',
+           'serialize_object_id', 'ensure_json_serializable', 'normalize_objectid']
+
+def normalize_objectid(value):
+    """
+    Normaliza un valor a ObjectId.
+    Si ya es ObjectId, lo retorna tal cual.
+    Si es string, lo convierte a ObjectId.
+
+    Args:
+        value: El valor a normalizar (ObjectId o str)
+
+    Returns:
+        ObjectId: El valor normalizado como ObjectId
+
+    Raises:
+        Exception: Si no se puede convertir a ObjectId
+    """
+    if isinstance(value, ObjectId):
+        return value
+    elif isinstance(value, str):
+        return ObjectId(value)
+    else:
+        raise Exception(f"Valor no válido para ObjectId: {type(value)}")
 
 def parse_date(date_string: str) -> str:
     """Parsea diferentes formatos de fecha a formato estándar"""

@@ -22,6 +22,7 @@ from src.content.models import (
 from src.resources.services import ResourceService, ResourceFolderService
 from src.content.services import ContentService
 # from src.content.services import ContentResultService  # No existe aún
+from src.virtual.services import ContentChangeDetector
 from src.shared.logging import log_error
 import inspect # <--- Añadir import
 
@@ -910,9 +911,9 @@ class ModuleService(VerificationBaseService):
             slides = list(db.topic_contents.find(slides_query, {
                 "topic_id": 1,
                 "status": 1,
-                "content_html": 1,
-                "narrative_text": 1,
-                "full_text": 1
+                "content.content_html": 1,
+                "content.narrative_text": 1,
+                "content.full_text": 1
             }))
             
             # Estadísticas por estado
@@ -1611,6 +1612,211 @@ class TopicService(VerificationBaseService):
                 "topic_id": topic_id
             }
 
+    def check_publish_prerequisites(self, topic_id: str) -> Dict[str, Any]:
+        """
+        Verifica si un tema cumple con los requisitos para ser publicado.
+
+        Args:
+            topic_id: ID del tema a verificar
+
+        Returns:
+            Diccionario con información sobre los requisitos de publicación:
+            - meets_requirements: bool, indica si cumple todos los requisitos
+            - missing_requirements: list, lista de requisitos faltantes
+            - has_theory: bool, si tiene contenido teórico
+            - has_complete_slides: bool, si tiene diapositivas completas
+            - narrative_ready_slides: int, cantidad de diapositivas narrativas listas
+            - has_evaluation: bool, si tiene evaluaciones asociadas
+        """
+        try:
+            from bson import ObjectId
+            from bson.errors import InvalidId
+
+            # Validar ID
+            try:
+                topic_obj_id = ObjectId(topic_id)
+            except InvalidId:
+                return {
+                    "meets_requirements": False,
+                    "error": "ID de topic inválido",
+                    "topic_id": topic_id
+                }
+
+            # Obtener el tema
+            topic = self.collection.find_one({"_id": topic_obj_id})
+            if not topic:
+                return {
+                    "meets_requirements": False,
+                    "error": "Tema no encontrado",
+                    "topic_id": topic_id
+                }
+
+            db = get_db()
+
+            # Evaluar condiciones
+            has_theory = bool(topic.get("theory_content"))
+
+            # Contar diapositivas en estado narrative_ready
+            narrative_ready_count = db.topic_contents.count_documents({
+                "topic_id": topic_obj_id,
+                "content_type": "slide",
+                "status": "narrative_ready"
+            })
+            has_complete_slides = narrative_ready_count > 0
+
+            # Verificar si tiene evaluaciones asociadas
+            has_evaluation = db.evaluations.count_documents({"topic_ids": topic_obj_id}) > 0
+
+            # Identificar requisitos faltantes
+            missing_requirements = []
+            if not has_theory:
+                missing_requirements.append("theory_content")
+            if not has_complete_slides:
+                missing_requirements.append("narrative_ready_slide")
+            if not has_evaluation:
+                missing_requirements.append("evaluation_quiz")
+
+            meets_requirements = len(missing_requirements) == 0
+
+            return {
+                "meets_requirements": meets_requirements,
+                "missing_requirements": missing_requirements,
+                "has_theory": has_theory,
+                "has_complete_slides": has_complete_slides,
+                "narrative_ready_slides": narrative_ready_count,
+                "has_evaluation": has_evaluation,
+                "already_published": bool(topic.get("published", False)),
+                "topic_id": topic_id
+            }
+
+        except Exception as e:
+            logging.error(f"check_publish_prerequisites: Error para topic {topic_id}: {str(e)}")
+            return {
+                "meets_requirements": False,
+                "error": f"Error interno: {str(e)}",
+                "topic_id": topic_id
+            }
+
+    def publish_topic(self, topic_id: str, user_id: str = None) -> Dict[str, Any]:
+        """
+        Publica un tema si cumple con los requisitos necesarios.
+
+        Args:
+            topic_id: ID del tema a publicar
+            user_id: ID del usuario que realiza la acción (opcional, para logging)
+
+        Returns:
+            Diccionario con el resultado de la operación:
+            - success: bool, si la operación fue exitosa
+            - published: bool, estado final de publicación
+            - auto_published: bool, si fue publicado automáticamente
+            - message: str, mensaje descriptivo
+            - error: str, error si ocurrió alguno
+        """
+        try:
+            from bson import ObjectId
+            from bson.errors import InvalidId
+            from datetime import datetime
+
+            # Validar ID
+            try:
+                topic_obj_id = ObjectId(topic_id)
+            except InvalidId:
+                return {
+                    "success": False,
+                    "published": False,
+                    "auto_published": False,
+                    "error": "ID de topic inválido",
+                    "topic_id": topic_id
+                }
+
+            # Verificar requisitos de publicación
+            prerequisites = self.check_publish_prerequisites(topic_id)
+
+            if not prerequisites.get("meets_requirements", False):
+                return {
+                    "success": False,
+                    "published": prerequisites.get("already_published", False),
+                    "auto_published": False,
+                    "message": "Requisitos no cumplidos para publicación",
+                    "missing_requirements": prerequisites.get("missing_requirements", []),
+                    "topic_id": topic_id,
+                    **prerequisites
+                }
+
+            # Si ya está publicado, retornar estado actual
+            if prerequisites.get("already_published", False):
+                return {
+                    "success": True,
+                    "published": True,
+                    "auto_published": False,
+                    "message": "El tema ya estaba publicado",
+                    "reason": "already_published",
+                    "topic_id": topic_id,
+                    **prerequisites
+                }
+
+            # Publicar el tema - actualización atómica para evitar condiciones de carrera
+            db = get_db()
+            try:
+                update_data = {
+                    "published": True,
+                    "updated_at": datetime.now()
+                }
+
+                # Añadir timestamp de auto-publicación si se proporciona user_id
+                if user_id:
+                    update_data["auto_published_at"] = datetime.now()
+
+                updated = db.topics.update_one(
+                    {"_id": topic_obj_id, "published": {"$ne": True}},  # Solo actualizar si no está publicado
+                    {"$set": update_data}
+                )
+
+                if updated.modified_count > 0:
+                    logging.info(f"publish_topic: Tema {topic_id} publicado exitosamente" +
+                               (f" por usuario {user_id}" if user_id else ""))
+                    return {
+                        "success": True,
+                        "published": True,
+                        "auto_published": True,
+                        "message": "Tema publicado exitosamente",
+                        "topic_id": topic_id,
+                        **prerequisites
+                    }
+                else:
+                    # Si no se modificó, puede deberse a condiciones de carrera
+                    topic_after = self.collection.find_one({"_id": topic_obj_id})
+                    return {
+                        "success": True,
+                        "published": topic_after.get("published", False) if topic_after else False,
+                        "auto_published": False,
+                        "message": "No se modificó el documento (posible condición de carrera)",
+                        "note": "El tema puede haber sido publicado por otro proceso",
+                        "topic_id": topic_id,
+                        **prerequisites
+                    }
+
+            except Exception as e:
+                logging.error(f"publish_topic: Error al actualizar topic {topic_id}: {str(e)}")
+                return {
+                    "success": False,
+                    "published": False,
+                    "auto_published": False,
+                    "error": f"Error al actualizar tema: {str(e)}",
+                    "topic_id": topic_id
+                }
+
+        except Exception as e:
+            logging.error(f"publish_topic: Error procesando publicación para topic {topic_id}: {str(e)}")
+            return {
+                "success": False,
+                "published": False,
+                "auto_published": False,
+                "error": f"Error interno: {str(e)}",
+                "topic_id": topic_id
+            }
+
 class EvaluationService(VerificationBaseService):
     def __init__(self):
         super().__init__(collection_name="evaluations")
@@ -2005,7 +2211,7 @@ class EvaluationService(VerificationBaseService):
             try:
                 # Intentar buscar por ObjectId primero
                 student = db.users.find_one({"_id": ObjectId(student_id)})
-            except:
+            except (TypeError, ValueError):
                 # Si falla, buscar por string (email u otro identificador)
                 student = db.users.find_one({"email": student_id}) or db.users.find_one({"_id": student_id})
             
@@ -2081,7 +2287,7 @@ class EvaluationService(VerificationBaseService):
                 try:
                     # Intentar buscar por ObjectId si student_id puede convertirse
                     student = db.users.find_one({"_id": ObjectId(submission["student_id"])})
-                except:
+                except (TypeError, ValueError):
                     # Si falla, buscar por string
                     student = db.users.find_one({"_id": submission["student_id"]})
                 
@@ -2138,7 +2344,7 @@ class EvaluationService(VerificationBaseService):
                 try:
                     # Intentar buscar por ObjectId si student_id puede convertirse
                     student = db.users.find_one({"_id": ObjectId(submission["student_id"])})
-                except:
+                except (TypeError, ValueError):
                     # Si falla, buscar por string
                     student = db.users.find_one({"_id": submission["student_id"]})
                 
@@ -2188,7 +2394,7 @@ class EvaluationService(VerificationBaseService):
                         "evaluation_id": ObjectId(evaluation_id),
                         "student_id": ObjectId(student_id)
                     })
-                except:
+                except (TypeError, ValueError):
                     # Si student_id no puede convertirse a ObjectId, mantener como None
                     pass
             
@@ -3136,7 +3342,7 @@ class TopicContentService(VerificationBaseService):
                 module = get_db().modules.find_one({"_id": ObjectId(topic["module_id"])})
                 if module and "name" in module:
                     keywords.append(module["name"])
-            except:
+            except (TypeError, ValueError):
                 pass
                 
         return list(set(keywords))  # Eliminar duplicados

@@ -67,6 +67,16 @@ class TopicContent:
     """
     Almacena un tipo específico de contenido para un tema.
     Permite tener múltiples representaciones del mismo tema.
+
+    Note sobre el campo legacy_raw en content:
+    Para content_type 'slide' y 'quiz', si el campo original 'content' no era un dict,
+    se preserva el valor original en content['legacy_raw']. Este campo temporal
+    mantiene datos históricos que fueron convertidos durante la migración.
+
+    Plan de limpieza:
+    - legacy_raw debe ser eliminado después de verificar que los datos han sido migrados correctamente
+    - Se recomienda implementar un script de limpieza que ejecute después de un período de prueba
+    - El script debe verificar que no hay referencias activas a legacy_raw antes de eliminarlo
     """
     def __init__(self,
                  topic_id: str,
@@ -94,12 +104,6 @@ class TopicContent:
                  _id: Optional[ObjectId] = None,
                  created_at: Optional[datetime] = None,
                  updated_at: Optional[datetime] = None,
-                 # Nuevos campos para soporte de diapositivas HTML - Fase 2A
-                 content_html: Optional[str] = None,
-                 narrative_text: Optional[str] = None,
-                 full_text: Optional[str] = None,
-                 # Campo para snapshot de plantilla de estilos
-                 template_snapshot: Optional[Dict] = None,
                  **kwargs):
         self._id = _id or ObjectId()
         self.topic_id = ObjectId(topic_id)
@@ -127,11 +131,42 @@ class TopicContent:
         self.created_at = created_at or datetime.now()
         self.updated_at = updated_at or datetime.now()
 
-        # Nuevos campos para diapositivas HTML (Fase 2A)
-        self.content_html = content_html
-        self.narrative_text = narrative_text
-        self.full_text = full_text
-        self.template_snapshot = template_snapshot
+        # Manejo de campos específicos de slides y quizzes
+        if content_type in ['slide', 'quiz']:
+            if not isinstance(self.content, dict):
+                if self.content is None or (isinstance(self.content, str) and not self.content.strip()):
+                    logging.warning(f"TopicContent {self._id} has empty/None content for type {content_type}")
+                # Preservar valor original como legacy_raw antes de convertir a dict
+                original_content = self.content
+                self.content = {
+                    'legacy_raw': original_content
+                }
+                logging.info(f"TopicContent {self._id}: Converting content to dict for {content_type}, preserving original as legacy_raw")
+            if 'full_text' in kwargs:
+                if 'full_text' not in self.content:
+                    self.content['full_text'] = kwargs.pop('full_text')
+                else:
+                    kwargs.pop('full_text')
+            if 'content_html' in kwargs:
+                if 'content_html' not in self.content:
+                    self.content['content_html'] = kwargs.pop('content_html')
+                else:
+                    kwargs.pop('content_html')
+            if 'narrative_text' in kwargs:
+                if 'narrative_text' not in self.content:
+                    self.content['narrative_text'] = kwargs.pop('narrative_text')
+                else:
+                    kwargs.pop('narrative_text')
+            if 'slide_plan' in kwargs:
+                if 'slide_plan' not in self.content:
+                    self.content['slide_plan'] = kwargs.pop('slide_plan')
+                else:
+                    kwargs.pop('slide_plan')
+            if 'template_snapshot' in kwargs:
+                if 'template_snapshot' not in self.content:
+                    self.content['template_snapshot'] = kwargs.pop('template_snapshot')
+                else:
+                    kwargs.pop('template_snapshot')
 
         if kwargs:
             logging.warning(f"TopicContent received unexpected arguments, which were ignored: {list(kwargs.keys())}")
@@ -157,11 +192,6 @@ class TopicContent:
             "status": self.status,
             "created_at": self.created_at,
             "updated_at": self.updated_at,
-            # Campos nuevos para diapositivas HTML
-            "content_html": self.content_html,
-            "narrative_text": self.narrative_text,
-            "full_text": self.full_text,
-            "template_snapshot": self.template_snapshot,
         }
         # Campos opcionales de plantillas
         if self.instance_id:
@@ -172,7 +202,28 @@ class TopicContent:
             data["template_version"] = self.template_version
         if self.parent_content_id:
             data["parent_content_id"] = self.parent_content_id
+
+        # Fix content field duplication: ensure content-specific fields are only inside content object
+        if self.content_type in ['slide', 'quiz'] and isinstance(self.content, dict):
+            # Remove any root-level copies of these fields to prevent duplication
+            content_specific_fields = ['content_html', 'narrative_text', 'full_text', 'slide_plan', 'template_snapshot']
+            # Only iterate if any of the content-specific fields exist at root level
+            if any(field in data for field in content_specific_fields):
+                for field in content_specific_fields:
+                    if field in data and field in self.content:
+                        # If field exists both at root and in content, remove the root-level copy
+                        del data[field]
+
         return data
+
+    def _get_slide_field(self, field_name):
+        """
+        Helper method for backward compatibility during transition.
+        Looks for the field first in self.content[field_name], then at root level.
+        """
+        if isinstance(self.content, dict) and field_name in self.content:
+            return self.content[field_name]
+        return getattr(self, field_name, None)
 
 class VirtualTopicContent:
     """

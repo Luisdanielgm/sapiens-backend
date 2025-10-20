@@ -4,11 +4,14 @@ from datetime import datetime, timedelta
 import json
 import logging
 import threading
+from pymongo import ReturnDocument
+from pymongo.errors import DuplicateKeyError
 
 from src.shared.database import get_db
 from src.shared.constants import STATUS
 from src.shared.standardization import VerificationBaseService, ErrorCodes
 from src.shared.exceptions import AppException
+from src.shared.utils import normalize_objectid
 from .models import ContentType, TopicContent, VirtualTopicContent, ContentResult, ContentTypes, DeprecatedContentTypes, LearningMethodologyTypes
 from .slide_style_service import SlideStyleService
 import re
@@ -18,6 +21,11 @@ from .template_recommendation_service import TemplateRecommendationService
 from .embedded_content_service import EmbeddedContentService
 from .content_personalization_service import ContentPersonalizationService
 import bleach
+
+# Constants for policy validation error messages
+FORBIDDEN_KEYS_ERROR_MSG = "Los campos 'provider' y 'model' no están permitidos en payloads de contenido. El sistema gestiona automáticamente la selección de proveedores."
+FORBIDDEN_KEYS_ERROR_MSG_SHORT = "Los campos 'provider' y 'model' no están permitidos en payloads de contenido."
+SLIDE_PLAN_TYPE_ERROR_MSG = "El campo 'slide_plan' debe ser una cadena de texto (Markdown/texto plano), no un objeto JSON o array."
 
 class ContentTypeService(VerificationBaseService):
     """
@@ -106,6 +114,18 @@ class ContentService(VerificationBaseService):
         # Default TTL (seconds) for stats cache
         self._stats_cache_ttl = 10
 
+    def _normalize_content_field(self, doc: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Normaliza el campo 'content' de un documento para asegurar que sea un dict.
+        Previene errores cuando el campo contiene datos no migrados o corruptos.
+        """
+        content = doc.get("content")
+        if isinstance(content, dict):
+            return content
+        else:
+            # Si content no es dict (None, str, list, etc.), usar dict vacío
+            return {}
+
     def check_topic_exists(self, topic_id: str) -> bool:
         """Verifica si un tema existe."""
         try:
@@ -136,11 +156,12 @@ class ContentService(VerificationBaseService):
                 logging.debug("validate_slide_html_content: contenido vacío o solo espacios")
                 return False, "HTML no debe estar vacío"
 
-            # Tamaño razonable para una slide individual
-            max_len = 15000
-            if len(raw) > max_len:
-                logging.warning(f"validate_slide_html_content: HTML demasiado largo ({len(raw)} > {max_len})")
-                return False, f"HTML excede el tamaño máximo permitido de {max_len} caracteres"
+            # Tamaño razonable para una slide individual (150 KB = 153,600 bytes)
+            max_bytes = 150 * 1024  # 153,600 bytes
+            current_bytes = len(html_content.encode('utf-8'))
+            if current_bytes > max_bytes:
+                logging.warning(f"validate_slide_html_content: HTML demasiado largo ({current_bytes} bytes > {max_bytes} bytes)")
+                return False, f"HTML excede el tamaño máximo permitido de 150 KB ({current_bytes:,} bytes de {max_bytes:,} bytes permitidos)"
 
             low = raw.lower()
 
@@ -234,6 +255,235 @@ class ContentService(VerificationBaseService):
             logging.error(f"Error sanitizando HTML: {str(e)}")
             return ""  # Retornar vacío en caso de error para evitar inyección
 
+    def _is_path_whitelisted_for_forbidden_keys(self, path: str) -> bool:
+        """
+        Determina si una ruta está en la lista blanca donde provider/model son permitidos.
+        Estas rutas corresponden a datos históricos o plantillas donde estos campos son legítimos.
+
+        Args:
+            path: Ruta actual en formato "a.b.c" o "a[0].b"
+
+        Returns:
+            bool: True si la ruta está en lista blanca (permitida), False si debe validarse
+        """
+        # Lista blanca de rutas donde provider/model son permitidos
+        # Normalizar la ruta quitando índices de array para comparación
+        # Usar regex para reemplazar cualquier índice de array [número] con un punto
+        normalized_path = re.sub(r'\[\d+\]', '.', path)
+        # Eliminar puntos consecutivos que puedan resultar de la normalización
+        normalized_path = re.sub(r'\.+', '.', normalized_path)
+        # Eliminar punto final si existe (excepto si es el único carácter)
+        if normalized_path.endswith('.') and len(normalized_path) > 1:
+            normalized_path = normalized_path.rstrip('.')
+
+        whitelist_patterns = [
+            'content.template_snapshot',
+            'contents.content.template_snapshot',  # para bulk payloads
+            'slides.content.template_snapshot'      # para bulk slides
+        ]
+
+        return any(normalized_path.startswith(pattern) for pattern in whitelist_patterns)
+
+    def _is_path_allowed_for_detection(self, path: str) -> bool:
+        """
+        Determina si una ruta debe ser validada para detección de provider/model.
+
+        Args:
+            path: Ruta actual en formato "a.b.c" o "a[0].b"
+
+        Returns:
+            bool: Siempre retorna True para cualquier ruta
+        """
+        return True
+
+    def _detect_forbidden_keys_recursive(self, data: Any, forbidden_fields: List[str], current_path: str = "", context: str = "", user_id: Optional[str] = None, topic_id: Optional[str] = None) -> Tuple[bool, str]:
+        """
+        Función auxiliar recursiva que recorre dicts y listas para detectar claves prohibidas.
+        Aplica restricciones de ruta específicas para evitar falsos positivos.
+        Registra el context y ruta de clave en el log para auditoría.
+
+        RUTAS INCLUIDAS PARA DETECCIÓN:
+        - Raíz (sin prefijo): provider, model
+        - content.*: provider, model (excepto en rutas excluidas específicas)
+        - contents[*].*: provider, model (para bulk payloads)
+        - slides[*].*: provider, model (para bulk slides)
+
+        RUTAS EXCLUIDAS (lista blanca donde no se aplica detección):
+        - content.template_snapshot.*: permite provider/model como datos históricos
+        - contents[*].content.template_snapshot.*: bulk payloads
+        - slides[*].content.template_snapshot.*: bulk slides
+
+        Args:
+            data: Estructura de datos a analizar (dict, list, o cualquier tipo)
+            forbidden_fields: Lista de campos prohibidos a buscar
+            current_path: Ruta actual dentro de la estructura (para logging)
+            context: Contexto de la operación para auditoría
+            user_id: ID del usuario para auditoría
+            topic_id: ID del topic para auditoría
+
+        Returns:
+            Tuple[bool, str]: (True, "") si no se encontraron claves prohibidas,
+                             (False, "Campo prohibido encontrado en ruta: X") si se encontraron
+        """
+        try:
+            if isinstance(data, dict):
+                for key, value in data.items():
+                    # Construir nueva ruta
+                    new_path = f"{current_path}.{key}" if current_path else key
+
+                    # Verificar si la clave actual está prohibida Y está en una ruta permitida
+                    if key in forbidden_fields:
+                        # Verificar si la ruta actual está en la lista blanca (excluida de detección)
+                        if self._is_path_whitelisted_for_forbidden_keys(new_path):
+                            # Está en lista blanca, permitir y continuar recursión
+                            is_valid, error_msg = self._detect_forbidden_keys_recursive(
+                                value, forbidden_fields, new_path, context, user_id, topic_id
+                            )
+                            if not is_valid:
+                                return False, error_msg
+                            continue
+
+                        # Cualquier aparición de clave prohibida fuera de lista blanca dispara violación
+                        full_path = new_path
+                        logging.warning(f"POLICY_VIOLATION: Intento de enviar campo prohibido '{key}' en ruta '{full_path}' en {context}. user_id={user_id}, topic_id={topic_id}, timestamp={datetime.now().isoformat()}")
+                        return False, f"Campo prohibido '{key}' encontrado en ruta: {full_path}"
+
+                    # Recursión para valores anidados
+                    is_valid, error_msg = self._detect_forbidden_keys_recursive(
+                        value, forbidden_fields, new_path, context, user_id, topic_id
+                    )
+                    if not is_valid:
+                        return False, error_msg
+
+            elif isinstance(data, list):
+                # Para listas, iterar sobre cada elemento con índice en la ruta
+                for index, item in enumerate(data):
+                    new_path = f"{current_path}[{index}]" if current_path else f"[{index}]"
+
+                    # Recursión para elementos de la lista
+                    is_valid, error_msg = self._detect_forbidden_keys_recursive(
+                        item, forbidden_fields, new_path, context, user_id, topic_id
+                    )
+                    if not is_valid:
+                        return False, error_msg
+
+            # Para otros tipos (str, int, etc.), no hacer nada - no pueden contener claves prohibidas
+
+            return True, ""
+
+        except Exception as e:
+            logging.error(f"Error en detección recursiva de claves prohibidas en ruta '{current_path}' en {context}: {str(e)}")
+            return False, f"Error interno validando estructura anidada en ruta {current_path}: {str(e)}"
+
+    def _validate_content_payload_policy(self, payload_data: Dict, context: str, user_id: Optional[str] = None, topic_id: Optional[str] = None) -> Tuple[bool, str]:
+        """
+        Valida que los payloads de contenido cumplan con las políticas establecidas.
+
+        Políticas implementadas:
+        1. Detección restringida de campos prohibidos ('provider', 'model')
+           - Rutas permitidas: raíz, content.*, contents[*].*, slides[*].*
+           - Rutas excluidas (lista blanca): content.template_snapshot.*,
+             contents[*].content.template_snapshot.*, slides[*].content.template_snapshot.*
+        2. Validación de tipos de datos específicos (slide_plan debe ser string)
+        3. Validaciones adicionales para payloads bulk
+
+        Esta implementación evita falsos positivos en datos históricos mientras
+        mantiene la seguridad en rutas críticas del payload.
+        """
+        try:
+            # Definir campos prohibidos
+            forbidden_fields = ['provider', 'model']
+
+            # Validación recursiva con restricciones de ruta para detectar campos prohibidos solo en ubicaciones específicas
+            # Evita falsos positivos en datos históricos como template_snapshot
+            is_recursive_valid, recursive_error = self._detect_forbidden_keys_recursive(
+                payload_data, forbidden_fields, "", context, user_id, topic_id
+            )
+            if not is_recursive_valid:
+                return False, f"Violación de política: {recursive_error}. El sistema gestiona automáticamente la selección de proveedores. Los campos 'provider'/'model' solo están permitidos en rutas específicas como content.template_snapshot.*"
+
+            # Validación específica a nivel raíz (solo slide_plan)
+            # Las validaciones de provider/model ya están cubiertas por _detect_forbidden_keys_recursive
+
+            # Validar tipo de 'slide_plan'
+            slide_plan = payload_data.get('content', {}).get('slide_plan') or payload_data.get('slide_plan')
+            if slide_plan is not None:
+                if not isinstance(slide_plan, str):
+                    logging.warning(f"POLICY_VIOLATION: slide_plan debe ser string, recibido {type(slide_plan).__name__} en {context}. user_id={user_id}, topic_id={topic_id}")
+                    return False, SLIDE_PLAN_TYPE_ERROR_MSG
+                # Validar que slide_plan no sea una cadena vacía después de strip()
+                if slide_plan.strip() == "":
+                    logging.warning(f"POLICY_VIOLATION: slide_plan no puede ser una cadena vacía en {context}. user_id={user_id}, topic_id={topic_id}")
+                    return False, "El campo 'slide_plan' no puede ser una cadena vacía"
+
+            # Validar tipo de slide_plan en payloads bulk
+            if 'contents' in payload_data:
+                for item in payload_data['contents']:
+                    if not isinstance(item, dict):
+                        continue
+                    # Validar slide_plan en cada item (provider/model ya validados recursivamente)
+                    slide_plan_item = item.get('content', {}).get('slide_plan') or item.get('slide_plan')
+                    if slide_plan_item is not None:
+                        if not isinstance(slide_plan_item, str):
+                            logging.warning(f"POLICY_VIOLATION: slide_plan debe ser string en bulk item, recibido {type(slide_plan_item).__name__} en {context}. user_id={user_id}, topic_id={topic_id}")
+                            return False, SLIDE_PLAN_TYPE_ERROR_MSG
+                        # Validar que slide_plan no sea una cadena vacía después de strip()
+                        if slide_plan_item.strip() == "":
+                            logging.warning(f"POLICY_VIOLATION: slide_plan no puede ser una cadena vacía en bulk item en {context}. user_id={user_id}, topic_id={topic_id}")
+                            return False, "El campo 'slide_plan' no puede ser una cadena vacía"
+
+            if 'slides' in payload_data:
+                for item in payload_data['slides']:
+                    if not isinstance(item, dict):
+                        continue
+                    # Validar slide_plan en cada item (provider/model ya validados recursivamente)
+                    slide_plan_item = item.get('content', {}).get('slide_plan') or item.get('slide_plan')
+                    if slide_plan_item is not None:
+                        if not isinstance(slide_plan_item, str):
+                            logging.warning(f"POLICY_VIOLATION: slide_plan debe ser string en bulk slides item, recibido {type(slide_plan_item).__name__} en {context}. user_id={user_id}, topic_id={topic_id}")
+                            return False, SLIDE_PLAN_TYPE_ERROR_MSG
+                        # Validar que slide_plan no sea una cadena vacía después de strip()
+                        if slide_plan_item.strip() == "":
+                            logging.warning(f"POLICY_VIOLATION: slide_plan no puede ser una cadena vacía en bulk slides item en {context}. user_id={user_id}, topic_id={topic_id}")
+                            return False, "El campo 'slide_plan' no puede ser una cadena vacía"
+
+            # Validar tipo de slide_plan en content
+            content = payload_data.get('content', {})
+            if isinstance(content, dict):
+                # Validar slide_plan en content (provider/model ya validados recursivamente)
+                slide_plan_content = content.get('slide_plan')
+                if slide_plan_content is not None:
+                    if not isinstance(slide_plan_content, str):
+                        logging.warning(f"POLICY_VIOLATION: slide_plan debe ser string en content, recibido {type(slide_plan_content).__name__} en {context}. user_id={user_id}, topic_id={topic_id}")
+                        return False, SLIDE_PLAN_TYPE_ERROR_MSG
+                    # Validar que slide_plan no sea una cadena vacía después de strip()
+                    if slide_plan_content.strip() == "":
+                        logging.warning(f"POLICY_VIOLATION: slide_plan no puede ser una cadena vacía en content en {context}. user_id={user_id}, topic_id={topic_id}")
+                        return False, "El campo 'slide_plan' no puede ser una cadena vacía"
+
+            # Validar tipo de slide_plan en content_data.slides
+            content_data = payload_data.get('content_data', {})
+            if isinstance(content_data, dict):
+                slides = content_data.get('slides', [])
+                if isinstance(slides, list):
+                    for slide in slides:
+                        if isinstance(slide, dict):
+                            # Validar slide_plan en cada slide (provider/model ya validados recursivamente)
+                            slide_plan_nested = slide.get('slide_plan')
+                            if slide_plan_nested is not None:
+                                if not isinstance(slide_plan_nested, str):
+                                    logging.warning(f"POLICY_VIOLATION: slide_plan debe ser string en content_data.slides, recibido {type(slide_plan_nested).__name__} en {context}. user_id={user_id}, topic_id={topic_id}")
+                                    return False, SLIDE_PLAN_TYPE_ERROR_MSG
+                                # Validar que slide_plan no sea una cadena vacía después de strip()
+                                if slide_plan_nested.strip() == "":
+                                    logging.warning(f"POLICY_VIOLATION: slide_plan no puede ser una cadena vacía en content_data.slides en {context}. user_id={user_id}, topic_id={topic_id}")
+                                    return False, "El campo 'slide_plan' no puede ser una cadena vacía"
+
+            return True, ""
+        except Exception as e:
+            logging.error(f"Error validando política de payload en {context}: {str(e)}")
+            return False, f"Error interno validando política: {str(e)}"
+
     def create_content(self, content_data: Dict, allow_deprecated: bool = False, creator_roles: Optional[List[str]] = None) -> Tuple[bool, str]:
         """
         Crea contenido de cualquier tipo (estático o interactivo).
@@ -270,27 +520,106 @@ class ContentService(VerificationBaseService):
                 logging.warning(f"create_content: intento de crear contenido deprecated type='{content_type}' topic='{topic_id}' allowed={allow_deprecated}")
                 return False, message
 
+            # Validar políticas de payload (campos prohibidos, tipos)
+            user_id = content_data.get('creator_id')
+            topic_id = content_data.get('topic_id')
+            valid_policy, policy_msg = self._validate_content_payload_policy(
+                content_data,
+                context='create_content',
+                user_id=user_id,
+                topic_id=topic_id
+            )
+            if not valid_policy:
+                return False, policy_msg
+
+            # Validar que topic_id exista y sea válido para crear quizzes
+            if content_type == "quiz":
+                if not topic_id:
+                    return False, "El campo 'topic_id' es requerido para crear un quiz"
+                if not ObjectId.is_valid(topic_id):
+                    return False, "El campo 'topic_id' debe ser un ObjectId válido para crear un quiz"
+
+            # Para quiz, necesitaremos manejar la transacción más tarde después de crear el objeto content
+            # topic_id_obj se inicializará en la sección específica para quiz
+            topic_id_obj = ObjectId(topic_id) if topic_id else None
+
             # Validaciones específicas para diapositivas
             if content_type == "slide":
                 slide_template = content_data.get("slide_template", "")
-                if not slide_template:
-                    return False, f"El contenido de tipo '{content_type}' requiere un campo 'slide_template' con el prompt para la plantilla"
-                
-                # Validar estructura del slide_template usando el servicio
-                if not self.slide_style_service.validate_slide_template(slide_template):
-                    return False, "El slide_template no es un prompt válido"
+
+                # Auto-generate slide_template if not provided or invalid (igual que en bulk)
+                if not slide_template or not self.slide_style_service.validate_slide_template(slide_template):
+                    if not slide_template:
+                        logging.info(f"create_content: slide_template no proporcionado para slide, generando automáticamente")
+                    else:
+                        logging.warning(f"create_content: slide_template inválido para slide, regenerando automáticamente")
+
+                    # Generate a default slide template
+                    slide_template = self.slide_style_service.generate_slide_template()
+                    content_data["slide_template"] = slide_template
+                    logging.info(f"create_content: slide_template generado automáticamente para slide")
+
+                # Extraer campos de slide desde content_data['content'] en lugar de raíz
+                slide_fields = (content_data.get('content') or {})
 
                 # If client provided template_snapshot (new field), validate it too
-                template_snapshot = content_data.get("template_snapshot")
+                # Priorizar slide_fields, fallback a raíz para backward compatibility
+                template_snapshot = slide_fields.get("template_snapshot")
+                if template_snapshot is None:
+                    template_snapshot = content_data.get("template_snapshot")
                 if template_snapshot is not None:
                     valid_ts, ts_msg = self.validate_template_snapshot(template_snapshot)
                     if not valid_ts:
                         return False, f"template_snapshot inválido: {ts_msg}"
 
+            # Extraer campos de slide desde content_data['content'] para todos los tipos de contenido
+            # (solo se usará para slides, pero se define aquí para disponibilidad general)
+            slide_fields = (content_data.get('content') or {})
+
+            # Validaciones específicas para diapositivas
+            if content_type == "slide":
                 # Validar nuevos campos de diapositiva si se proporcionan
-                content_html = content_data.get("content_html")
-                narrative_text = content_data.get("narrative_text")
-                full_text = content_data.get("full_text")
+                content_html = slide_fields.get("content_html")
+                narrative_text = slide_fields.get("narrative_text")
+                full_text = slide_fields.get("full_text")
+                slide_plan = slide_fields.get("slide_plan")
+                template_snapshot = slide_fields.get("template_snapshot")
+
+                # Backward compatibility: si no existen en content, intentar raíz temporalmente
+                deprecated_fields_used = []
+                if content_html is None:
+                    content_html = content_data.get("content_html")
+                    if content_html is not None:
+                        deprecated_fields_used.append("content_html")
+                if narrative_text is None:
+                    narrative_text = content_data.get("narrative_text")
+                    if narrative_text is not None:
+                        deprecated_fields_used.append("narrative_text")
+                if full_text is None:
+                    full_text = content_data.get("full_text")
+                    if full_text is not None:
+                        deprecated_fields_used.append("full_text")
+                if slide_plan is None:
+                    slide_plan = content_data.get("slide_plan")
+                    if slide_plan is not None:
+                        deprecated_fields_used.append("slide_plan")
+                if template_snapshot is None:
+                    template_snapshot = content_data.get("template_snapshot")
+                    if template_snapshot is not None:
+                        deprecated_fields_used.append("template_snapshot")
+
+                # Log warnings for deprecated root field usage
+                for field in deprecated_fields_used:
+                    logging.warning(
+                        f"create_content: Uso de campo raíz '{field}' está deprecado. "
+                        f"Migre a usar content.{field} dentro del objeto content. "
+                        f"Topic ID: {topic_id}, Content type: {content_type}"
+                    )
+
+                # NOTA: Para mantener compatibilidad con la API existente (Tuple[bool, str]),
+                # no se puede agregar un flag "deprecated_fields_used" en la respuesta.
+                # Los clientes deben monitorear los logs para detectar uso de campos deprecados
+                # y planificar la migración a la estructura content.{field}
 
                 if content_html is not None:
                     valid, msg = self.validate_slide_html_content(content_html)
@@ -302,6 +631,10 @@ class ContentService(VerificationBaseService):
 
                 if full_text is not None and not isinstance(full_text, str):
                     return False, "full_text debe ser una cadena de texto si se proporciona"
+
+                if slide_plan is not None:
+                    if not isinstance(slide_plan, str):
+                        return False, SLIDE_PLAN_TYPE_ERROR_MSG
 
             # Crear contenido explícitamente para mapear campos
             # Convertir content a string si es dict para el extractor de marcadores
@@ -316,10 +649,18 @@ class ContentService(VerificationBaseService):
             # SOLO si el cliente no proporcionó un status explícito, salvo que el caso sea skeleton
             initial_status = content_data.get("status", "draft")
             if content_type == "slide":
-                # Derivar status automáticamente
-                ch = content_data.get("content_html")
-                nt = content_data.get("narrative_text")
-                ft = content_data.get("full_text")
+                # Derivar status automáticamente usando slide_fields
+                ch = slide_fields.get("content_html")
+                nt = slide_fields.get("narrative_text")
+                ft = slide_fields.get("full_text")
+
+                # Backward compatibility: si no existen en slide_fields, intentar raíz temporalmente
+                if ch is None:
+                    ch = content_data.get("content_html")
+                if nt is None:
+                    nt = content_data.get("narrative_text")
+                if ft is None:
+                    ft = content_data.get("full_text")
 
                 # If it's clearly a skeleton (only full_text present and no html/narrative),
                 # force status to 'skeleton' regardless of client-provided status.
@@ -339,10 +680,44 @@ class ContentService(VerificationBaseService):
                         else:
                             initial_status = "draft"
 
+            # Prepare kwargs for slide fields
+            kwargs = {}
+            if content_type == "slide":
+                # Usar slide_fields con backward compatibility
+                full_text = slide_fields.get("full_text")
+                content_html = slide_fields.get("content_html")
+                narrative_text = slide_fields.get("narrative_text")
+                slide_plan = slide_fields.get("slide_plan")
+                template_snapshot = slide_fields.get("template_snapshot")
+
+                # Backward compatibility: si no existen en slide_fields, intentar raíz temporalmente
+                if full_text is None:
+                    full_text = content_data.get("full_text")
+                if content_html is None:
+                    content_html = content_data.get("content_html")
+                if narrative_text is None:
+                    narrative_text = content_data.get("narrative_text")
+                if slide_plan is None:
+                    slide_plan = content_data.get("slide_plan")
+                if template_snapshot is None:
+                    template_snapshot = content_data.get("template_snapshot")
+
+                # Agregar a kwargs si no son None
+                if full_text is not None:
+                    kwargs["full_text"] = full_text
+                if content_html is not None:
+                    kwargs["content_html"] = content_html
+                if narrative_text is not None:
+                    kwargs["narrative_text"] = narrative_text
+                if slide_plan is not None:
+                    kwargs["slide_plan"] = slide_plan
+                if template_snapshot is not None:
+                    kwargs["template_snapshot"] = template_snapshot
+
             content = TopicContent(
                 topic_id=topic_id,
-                content_type=content_type,
                 content=content_data.get("content", ""),
+                content_type=content_type,
                 interactive_data=content_data.get("interactive_data"),
                 learning_methodologies=content_data.get("learning_methodologies"),
                 adaptation_options=content_data.get("metadata"), # Mapeo clave
@@ -353,27 +728,76 @@ class ContentService(VerificationBaseService):
                 personalization_markers=markers,
                 slide_template=content_data.get("slide_template", ""),  # Incluir slide_template
                 status=initial_status,
-                content_html=content_data.get("content_html"),
-                narrative_text=content_data.get("narrative_text"),
-                full_text=content_data.get("full_text"),
-                template_snapshot=content_data.get("template_snapshot"),  # Incluir template_snapshot
                 order=content_data.get("order"),
-                parent_content_id=content_data.get("parent_content_id")
+                parent_content_id=content_data.get("parent_content_id"),
+                **kwargs
             )
-            result = self.collection.insert_one(content.to_dict())
-            
-            # Logging específico para creación de diapositivas con nuevos campos
-            if content_type == "slide":
-                logging.info(f"Slide creado para topic {topic_id} con id {result.inserted_id}. status={initial_status}, has_html={'content_html' in content_data}, has_narrative={'narrative_text' in content_data}")
+
+            # Para quiz, usar transacción para garantizar atomicidad en delete+insert
+            if content_type == "quiz" and topic_id_obj:
+                # Iniciar transacción para operación atómica
+                with self.db.client.start_session() as session:
+                    with session.start_transaction():
+                        try:
+                            # Eliminar todos los quizzes existentes para este topic dentro de la transacción
+                            delete_result = self.collection.delete_many(
+                                {
+                                    "topic_id": topic_id_obj,
+                                    "content_type": "quiz"
+                                },
+                                session=session
+                            )
+
+                            if delete_result.deleted_count > 0:
+                                logging.warning(
+                                    f"create_content: Eliminados {delete_result.deleted_count} quizzes previos para topic {topic_id} en transacción."
+                                )
+
+                            # Insertar el nuevo quiz dentro de la misma transacción
+                            result = self.collection.insert_one(content.to_dict(), session=session)
+                            content_id = str(result.inserted_id)
+
+                            logging.info(
+                                f"create_content: Nuevo quiz creado exitosamente para topic {topic_id} con id {content_id} en transacción. "
+                                f"Todos los quizzes previos fueron eliminados atómicamente."
+                            )
+
+                            # La transacción se confirma automáticamente al salir del bloque with
+
+                        except DuplicateKeyError:
+                            # En caso de condición de carrera, reintentar o retornar error consistente
+                            logging.warning(f"create_content: Detección de condición de carrera al crear quiz para topic {topic_id}")
+                            return False, "No se puede crear el quiz: ya existe un quiz para este tema. Por favor, inténtelo nuevamente."
+
+                        except Exception as e:
+                            # La transacción se revertirá automáticamente
+                            logging.error(f"create_content: Error en transacción de quiz para topic {topic_id}: {str(e)}")
+                            return False, f"Error al crear quiz: {str(e)}"
+            else:
+                # Para otros tipos de contenido, usar inserción normal
+                result = self.collection.insert_one(content.to_dict())
+                content_id = str(result.inserted_id)
+
+                # Logging específico para creación de diapositivas con nuevos campos
+                if content_type == "slide":
+                    # Check both slide_fields and root for backward compatibility
+                    has_html = 'content_html' in slide_fields or 'content_html' in content_data
+                    has_narrative = 'narrative_text' in slide_fields or 'narrative_text' in content_data
+                    logging.info(f"Slide creado para topic {topic_id} con id {content_id}. status={initial_status}, has_html={has_html}, has_narrative={has_narrative}")
 
             # Actualizar métricas del tipo de contenido
-            self.content_type_service.collection.update_one(
-                {"code": content_type},
-                {"$inc": {"usage_count": 1}}
-            )
-            
-            return True, str(result.inserted_id)
-            
+            # Para quiz, siempre incrementar usage_count ya que siempre es una inserción nueva
+            # Para otros tipos, siempre incrementar
+            should_increment_usage = True
+
+            if should_increment_usage:
+                self.content_type_service.collection.update_one(
+                    {"code": content_type},
+                    {"$inc": {"usage_count": 1}}
+                )
+
+            return True, content_id
+
         except Exception as e:
             logging.error(f"Error creando contenido: {str(e)}")
             return False, f"Error interno: {str(e)}"
@@ -423,7 +847,7 @@ class ContentService(VerificationBaseService):
                 is_deprecated = DeprecatedContentTypes.is_deprecated(content_type)
                 if is_deprecated:
                     logging.warning(f"validate_content_type_deprecation: error de validación para tipo deprecated '{content_type}', bloqueando creación por seguridad")
-                    return False, {'message': 'Tipo en desuso; no se permite creación por error de validación'}
+                    return False, {'message': 'Tipo en uso; no se permite creación por error de validación'}
                 else:
                     logging.warning(f"validate_content_type_deprecation: error de validación para tipo no deprecated '{content_type}', permitiendo creación por seguridad")
                     return True, None
@@ -722,7 +1146,66 @@ class ContentService(VerificationBaseService):
             
             created_ids = []
             content_types_usage = {}
-            
+            quiz_deleted_topics = set()  # Local variable to track quiz deletions in this batch (thread-safe)
+
+            # IMPLEMENTACIÓN "ÚLTIMO GANA": Preprocesar quizzes para mantener solo el último por topic_id
+            # Esto evita conflictos con el índice único idx_unique_quiz_per_topic y asegura el comportamiento documentado
+            last_quiz_index_by_topic = {}
+            filtered_contents_data = []
+            quiz_replacements = {}  # Para logging de reemplazos intra-batch
+
+            for i, content_data in enumerate(contents_data):
+                if content_data.get("content_type") == "quiz":
+                    topic_id = content_data.get("topic_id")
+                    if topic_id:
+                        # Si ya vimos un quiz para este topic, reemplazamos con el último
+                        if topic_id in last_quiz_index_by_topic:
+                            previous_index = last_quiz_index_by_topic[topic_id]
+                            quiz_replacements[topic_id] = {
+                                "previous_index": previous_index + 1,
+                                "new_index": i + 1,
+                                "previous_item": contents_data[previous_index],
+                                "new_item": content_data
+                            }
+                            logging.info(
+                                f"create_bulk_content: Reemplazando quiz en batch para topic_id '{topic_id}'. "
+                                f"Elemento {previous_index + 1} será reemplazado por elemento {i + 1} (comportamiento 'último gana')."
+                            )
+
+                        # Guardar el índice del último quiz para este topic
+                        last_quiz_index_by_topic[topic_id] = i
+
+                # Agregar siempre al filtrado (no-quizzes siempre se incluyen)
+                filtered_contents_data.append(content_data)
+
+            # Eliminar quizzes anteriores que fueron reemplazados (mantener solo el último de cada topic)
+            # Reconstruir la lista final filtrada excluyendo quizzes reemplazados
+            final_contents_data = []
+            for i, content_data in enumerate(filtered_contents_data):
+                if content_data.get("content_type") != "quiz":
+                    # No-quizzes siempre se incluyen
+                    final_contents_data.append(content_data)
+                else:
+                    topic_id = content_data.get("topic_id")
+                    # Incluir solo si es el último quiz para este topic
+                    if topic_id and last_quiz_index_by_topic.get(topic_id) == i:
+                        final_contents_data.append(content_data)
+                    elif not topic_id:
+                        # Si no tiene topic_id (inválido), incluir para que falle en validación posterior
+                        final_contents_data.append(content_data)
+
+            # Reemplazar contents_data con la versión filtrada
+            contents_data = final_contents_data
+
+            # Logging del resumen de reemplazos
+            if quiz_replacements:
+                affected_topics = list(quiz_replacements.keys())
+                logging.info(
+                    f"create_bulk_content: Resumen de reemplazos 'último gana' en batch: "
+                    f"{len(quiz_replacements)} topic(s) afectados: {affected_topics}. "
+                    f"Total de elementos en batch después de filtrado: {len(contents_data)}."
+                )
+
             # Validaciones previas
             for i, content_data in enumerate(contents_data):
                 topic_id = content_data.get("topic_id")
@@ -738,9 +1221,23 @@ class ContentService(VerificationBaseService):
                 content_type_def = self.content_type_service.get_content_type(content_type)
                 if not content_type_def:
                     raise ValueError(f"Contenido {i+1}: Tipo de contenido '{content_type}' no válido")
-                
+
+                # Validar políticas de payload (campos prohibidos, tipos) - Early validation
+                user_id = content_data.get('creator_id')
+                valid_policy, policy_msg = self._validate_content_payload_policy(
+                    content_data,
+                    context=f'create_bulk_content[{i+1}]',
+                    user_id=user_id,
+                    topic_id=topic_id
+                )
+                if not valid_policy:
+                    raise ValueError(f"Contenido {i+1}: {policy_msg}")
+
                 # Validaciones específicas para diapositivas
                 if content_type == "slide":
+                    # Define slide_fields from content object with fallback to root for compatibility
+                    slide_fields = (content_data.get('content') or {})
+
                     slide_template = content_data.get("slide_template", "")
                     
                     # Log the received data for debugging
@@ -759,14 +1256,47 @@ class ContentService(VerificationBaseService):
                         logging.info(f"Contenido {i+1}: slide_template generado automáticamente")
 
                     # Detectar caso skeleton: full_text presente sin content_html ni narrative_text
-                    ft = content_data.get("full_text")
-                    ch = content_data.get("content_html")
-                    nt = content_data.get("narrative_text")
+                    ft = slide_fields.get("full_text")
+                    ch = slide_fields.get("content_html")
+                    nt = slide_fields.get("narrative_text")
 
-                    is_skeleton = ft and not ch and not nt
+                    # Backward compatibility: si no existen en content, intentar raíz temporalmente
+                    deprecated_fields_used = []
+                    if ft is None:
+                        ft = content_data.get("full_text")
+                        if ft is not None:
+                            deprecated_fields_used.append("full_text")
+                    if ch is None:
+                        ch = content_data.get("content_html")
+                        if ch is not None:
+                            deprecated_fields_used.append("content_html")
+                    if nt is None:
+                        nt = content_data.get("narrative_text")
+                        if nt is not None:
+                            deprecated_fields_used.append("narrative_text")
 
                     # Validar template_snapshot según el tipo de slide
-                    template_snapshot = content_data.get("template_snapshot")
+                    template_snapshot = slide_fields.get("template_snapshot")
+                    # Backward compatibility: si no existe en content, intentar raíz temporalmente
+                    if template_snapshot is None:
+                        template_snapshot = content_data.get("template_snapshot")
+                        if template_snapshot is not None:
+                            deprecated_fields_used.append("template_snapshot")
+
+                    # Log warnings for deprecated root field usage
+                    for field in deprecated_fields_used:
+                        logging.warning(
+                            f"create_bulk_content: Uso de campo raíz '{field}' está deprecado en elemento {i+1}. "
+                            f"Migre a usar content.{field} dentro del objeto content. "
+                            f"Topic ID: {topic_id}, Content type: {content_type}"
+                        )
+
+                    # NOTA: Para mantener compatibilidad con la API existente (Tuple[bool, List[str]]),
+                    # no se puede agregar un flag "deprecated_fields_used" en la respuesta.
+                    # Los clientes deben monitorear los logs para detectar uso de campos deprecados
+                    # y planificar la migración a la estructura content.{field}
+
+                    is_skeleton = ft and not ch and not nt
                     if is_skeleton:
                         # Para skeleton slides, template_snapshot es obligatorio
                         if template_snapshot is None:
@@ -801,13 +1331,26 @@ class ContentService(VerificationBaseService):
                                 raise ValueError(f"Contenido {i+1}, slide {j+1}: full_text debe ser una cadena de texto")
 
                     # Validar campos a nivel de contenido (cuando se usan como single slide entries)
-                    if "content_html" in content_data and content_data.get("content_html") is not None:
-                        valid, msg = self.validate_slide_html_content(content_data.get("content_html"))
+                    # Priorizar slide_fields, fallback a raíz para backward compatibility
+                    content_html = slide_fields.get("content_html")
+                    narrative_text = slide_fields.get("narrative_text")
+                    full_text = slide_fields.get("full_text")
+
+                    # Backward compatibility: si no existen en content, intentar raíz temporalmente
+                    if content_html is None:
+                        content_html = content_data.get("content_html")
+                    if narrative_text is None:
+                        narrative_text = content_data.get("narrative_text")
+                    if full_text is None:
+                        full_text = content_data.get("full_text")
+
+                    if content_html is not None:
+                        valid, msg = self.validate_slide_html_content(content_html)
                         if not valid:
                             raise ValueError(f"Contenido {i+1}: content_html inválido: {msg}")
-                    if "narrative_text" in content_data and content_data.get("narrative_text") is not None and not isinstance(content_data.get("narrative_text"), str):
+                    if narrative_text is not None and not isinstance(narrative_text, str):
                         raise ValueError(f"Contenido {i+1}: narrative_text debe ser una cadena de texto")
-                    if "full_text" in content_data and content_data.get("full_text") is not None and not isinstance(content_data.get("full_text"), str):
+                    if full_text is not None and not isinstance(full_text, str):
                         raise ValueError(f"Contenido {i+1}: full_text debe ser una cadena de texto")
                 
                 # Contar uso de tipos de contenido
@@ -818,6 +1361,37 @@ class ContentService(VerificationBaseService):
             
             # Crear contenidos uno por uno dentro de la transacción
             for i, content_data in enumerate(contents_data):
+                # Garantizar un solo quiz por topic en bulk creation
+                if content_data.get("content_type") == "quiz":
+                    topic_id_for_quiz = content_data.get("topic_id")
+                    if topic_id_for_quiz:
+                        topic_id_obj = ObjectId(topic_id_for_quiz) if not isinstance(topic_id_for_quiz, ObjectId) else topic_id_for_quiz
+                        
+                        # Verificar si ya procesamos eliminación de quiz para este topic en este batch
+                        # (para evitar múltiples deletes si el batch tiene múltiples quizzes del mismo topic)
+                        topic_key = str(topic_id_obj)
+                        if topic_key not in quiz_deleted_topics:
+                            # Eliminar quiz(zes) existente(s) para este topic
+                            existing_count = self.collection.count_documents({
+                                "topic_id": topic_id_obj,
+                                "content_type": "quiz"
+                            }, session=session)
+                            
+                            if existing_count > 0:
+                                delete_result = self.collection.delete_many({
+                                    "topic_id": topic_id_obj,
+                                    "content_type": "quiz"
+                                }, session=session)
+                                
+                                logging.warning(
+                                    f"create_bulk_content: Eliminado(s) {delete_result.deleted_count} quiz(zes) existente(s) "
+                                    f"para topic {topic_id_for_quiz} antes de crear nuevo quiz en batch. "
+                                    f"Elemento {i+1} del batch."
+                                )
+                            
+                            # Marcar que ya eliminamos quiz para este topic en este batch
+                            quiz_deleted_topics.add(topic_key)
+
                 # Extraer marcadores de personalización
                 content_for_markers = content_data.get("content", "")
                 if isinstance(content_for_markers, dict):
@@ -830,9 +1404,20 @@ class ContentService(VerificationBaseService):
                 # SOLO si el cliente no proporcionó un status explícito, salvo que el caso sea skeleton
                 initial_status = content_data.get("status", "draft")
                 if content_data.get("content_type") == "slide":
-                    ch = content_data.get("content_html")
-                    nt = content_data.get("narrative_text")
-                    ft = content_data.get("full_text")
+                    # Define slide_fields from content object with fallback to root for compatibility
+                    slide_fields = (content_data.get('content') or {})
+
+                    ch = slide_fields.get("content_html")
+                    nt = slide_fields.get("narrative_text")
+                    ft = slide_fields.get("full_text")
+
+                    # Backward compatibility: si no existen en content, intentar raíz temporalmente
+                    if ch is None:
+                        ch = content_data.get("content_html")
+                    if nt is None:
+                        nt = content_data.get("narrative_text")
+                    if ft is None:
+                        ft = content_data.get("full_text")
 
                     # If clearly skeleton -> force skeleton regardless of provided status
                     if ft and not ch and not nt:
@@ -849,6 +1434,43 @@ class ContentService(VerificationBaseService):
                                 initial_status = "skeleton"
                             else:
                                 initial_status = "draft"
+                
+                # Prepare kwargs for slide fields
+                kwargs = {}
+                if content_data.get("content_type") == "slide":
+                    # Use slide_fields already defined above, or define again if needed
+                    if 'slide_fields' not in locals():
+                        slide_fields = (content_data.get('content') or {})
+
+                    # Priorizar slide_fields, fallback a raíz para backward compatibility
+                    full_text = slide_fields.get("full_text")
+                    content_html = slide_fields.get("content_html")
+                    narrative_text = slide_fields.get("narrative_text")
+                    slide_plan = slide_fields.get("slide_plan")
+                    template_snapshot = slide_fields.get("template_snapshot")
+
+                    # Backward compatibility: si no existen en content, intentar raíz temporalmente
+                    if full_text is None:
+                        full_text = content_data.get("full_text")
+                    if content_html is None:
+                        content_html = content_data.get("content_html")
+                    if narrative_text is None:
+                        narrative_text = content_data.get("narrative_text")
+                    if slide_plan is None:
+                        slide_plan = content_data.get("slide_plan")
+                    if template_snapshot is None:
+                        template_snapshot = content_data.get("template_snapshot")
+
+                    if full_text is not None:
+                        kwargs["full_text"] = full_text
+                    if content_html is not None:
+                        kwargs["content_html"] = content_html
+                    if narrative_text is not None:
+                        kwargs["narrative_text"] = narrative_text
+                    if slide_plan is not None:
+                        kwargs["slide_plan"] = slide_plan
+                    if template_snapshot is not None:
+                        kwargs["template_snapshot"] = template_snapshot
                 
                 # Crear objeto de contenido
                 content = TopicContent(
@@ -867,10 +1489,7 @@ class ContentService(VerificationBaseService):
                     status=initial_status,
                     order=content_data.get("order"),
                     parent_content_id=content_data.get("parent_content_id"),
-                    content_html=content_data.get("content_html"),
-                    narrative_text=content_data.get("narrative_text"),
-                    full_text=content_data.get("full_text"),
-                    template_snapshot=content_data.get("template_snapshot")  # Incluir template_snapshot
+                    **kwargs
                 )
                 
                 # Insertar en la base de datos
@@ -888,14 +1507,14 @@ class ContentService(VerificationBaseService):
                     {"$inc": {"usage_count": count}},
                     session=session
                 )
-            
+  
             # Confirmar transacción
             session.commit_transaction()
             transaction_active = False
-            
+
             logging.info(f"Creados {len(created_ids)} contenidos en lote exitosamente")
             return True, created_ids
-            
+
         except Exception as e:
             # Solo hacer rollback si la transacción está activa
             if transaction_active:
@@ -903,11 +1522,11 @@ class ContentService(VerificationBaseService):
                     session.abort_transaction()
                 except Exception:
                     pass  # Ignorar errores en abort si ya fue abortada
-            
+
             error_msg = str(e)
             logging.error(f"Error en creación bulk: {error_msg}")
             return False, error_msg
-            
+
         finally:
             session.end_session()
     
@@ -917,7 +1536,7 @@ class ContentService(VerificationBaseService):
         Requisitos estrictos:
          - Todos los items deben tener content_type == 'slide'
          - Todos deben pertenecer al mismo topic_id
-         - Cada slide debe incluir full_text (string) y template_snapshot (objeto/dict)
+         - Cada slide debe incluir full_text (string) y template_snapshot (objeto/dict) en el campo content
          - El orden (order) debe existir para cada slide y ser una secuencia consecutiva comenzando en 1
          - Las diapositivas serán creadas con status='skeleton' sin importar lo que envíe el cliente
         """
@@ -933,14 +1552,21 @@ class ContentService(VerificationBaseService):
                 return False, "Todas las diapositivas deben pertenecer al mismo topic_id"
             if "order" not in slide or not isinstance(slide.get("order"), int) or slide.get("order") < 1:
                 return False, f"Elemento {i+1}: order es requerido y debe ser entero positivo"
-            if "full_text" not in slide or not isinstance(slide.get("full_text"), str) or not slide.get("full_text").strip():
-                return False, f"Elemento {i+1}: full_text es requerido para crear una slide skeleton y debe ser una cadena no vacía"
-            ts = slide.get("template_snapshot")
+            # Get payload from content field
+            payload = slide.get('content') or {}
+
+            # Validate full_text from payload
+            full_text = payload.get('full_text')
+            if not full_text or not isinstance(full_text, str) or not full_text.strip():
+                return False, f"Elemento {i+1}: full_text es requerido en payload.content para crear una slide skeleton y debe ser una cadena no vacía"
+
+            # Validate template_snapshot from payload
+            ts = payload.get('template_snapshot')
             if ts is None:
-                return False, f"Elemento {i+1}: template_snapshot es requerido y debe ser un objeto con estilos"
+                return False, f"Elemento {i+1}: template_snapshot es requerido en payload.content y debe ser un objeto con estilos"
             valid_ts, ts_msg = self.validate_template_snapshot(ts)
             if not valid_ts:
-                return False, f"Elemento {i+1}: template_snapshot inválido: {ts_msg}"
+                return False, f"Elemento {i+1}: template_snapshot inválido en payload.content: {ts_msg}"
 
         # Validar secuencia de orders: deben ser únicos y consecutivos comenzando en 1
         orders = sorted([s["order"] for s in slides_data])
@@ -957,10 +1583,35 @@ class ContentService(VerificationBaseService):
             session.start_transaction()
             transaction_active = True
 
-            docs = []
+            logging.info(
+                f"create_bulk_slides_skeleton: Iniciando upsert de {len(slides_data)} slides para topic {first_topic}. "
+                f"Modo idempotente: actualizará slides existentes por (topic_id, order)"
+            )
+
+            upserted_count = 0
+            inserted_count = 0
+            updated_count = 0
+            final_ids = []
+            sentinel_ids = []  # Track IDs that had the _was_inserted sentinel for cleanup
+
             for slide in slides_data:
+                # Validar políticas de payload
+                user_id = slide.get('creator_id')
+                topic_id = slide.get('topic_id')
+                valid_policy, policy_msg = self._validate_content_payload_policy(
+                    slide,
+                    context=f'create_bulk_slides_skeleton[{slide.get("order", "N/A")}]',
+                    user_id=user_id,
+                    topic_id=topic_id
+                )
+                if not valid_policy:
+                    return False, f"Elemento {slide.get('order', 'N/A')}: {policy_msg}"
+
+                # Get payload from content field
+                payload = slide.get('content') or {}
+
                 # Extract markers
-                content_for_markers = slide.get("content", "")
+                content_for_markers = payload
                 if isinstance(content_for_markers, dict):
                     content_for_markers = json.dumps(content_for_markers, ensure_ascii=False)
                 markers = ContentPersonalizationService.extract_markers(
@@ -973,10 +1624,19 @@ class ContentService(VerificationBaseService):
                     slide_template = self.slide_style_service.generate_slide_template()
                     logging.info(f"create_bulk_slides_skeleton: slide_template generado automáticamente para slide {slide.get('order', 'N/A')}")
 
+                # Prepare kwargs for slide fields from payload
+                kwargs = {}
+                if payload.get("full_text") is not None:
+                    kwargs["full_text"] = payload.get("full_text")
+                if payload.get("slide_plan") is not None:
+                    kwargs["slide_plan"] = payload.get("slide_plan")
+                if payload.get("template_snapshot") is not None:
+                    kwargs["template_snapshot"] = payload.get("template_snapshot")
+
                 content_obj = TopicContent(
                     topic_id=slide.get("topic_id"),
                     content_type="slide",
-                    content=slide.get("content", ""),
+                    content=payload,
                     interactive_data=slide.get("interactive_data"),
                     learning_methodologies=slide.get("learning_methodologies"),
                     adaptation_options=slide.get("metadata"),
@@ -990,37 +1650,156 @@ class ContentService(VerificationBaseService):
                     status="skeleton",
                     order=slide.get("order"),
                     parent_content_id=slide.get("parent_content_id"),
-                    content_html=None,  # Ensure data consistency for skeleton slides
-                    narrative_text=None,  # Ensure data consistency for skeleton slides
-                    full_text=slide.get("full_text")
+                    **kwargs
                 )
                 d = content_obj.to_dict()
-                # Store template_snapshot explicitly as provided for later rendering use
-                d["template_snapshot"] = slide.get("template_snapshot")
-                docs.append(d)
 
-            # Insertar en bloque
-            result = self.collection.insert_many(docs, session=session)
-            inserted_ids = [str(_id) for _id in result.inserted_ids]
+                filter_query = {
+                    "topic_id": normalize_objectid(slide.get("topic_id")),
+                    "content_type": "slide",
+                    "order": slide.get("order")
+                }
+                
+                # Preparar documento para upsert separando campos de actualización e inserción
+                upsert_doc = d.copy()
+                if "_id" in upsert_doc:
+                    del upsert_doc["_id"]
+
+                # Eliminar updated_at si existe para evitar conflicto con $currentDate
+                if "updated_at" in upsert_doc:
+                    del upsert_doc["updated_at"]
+
+                # Campos que siempre se deben actualizar (excluyendo campos inmutables)
+                update_doc = {}
+                # Campos que solo se deben establecer en inserción (campos inmutables)
+                insert_only_doc = {}
+
+                # Lista de campos inmutables que no deben ser actualizados
+                immutable_fields = ["created_at", "status", "updated_at"]
+
+                # Extraer campos de content para actualización con notación punteada (solo skeleton)
+                content_updates = {}
+                content_data = upsert_doc.pop('content', {})
+
+                # Solo actualizar campos específicos de skeleton, preservando content_html y narrative_text
+                skeleton_fields = ['full_text', 'slide_plan', 'template_snapshot']
+                for field in skeleton_fields:
+                    if field in content_data:
+                        content_updates[f'content.{field}'] = content_data[field]
+
+                for key, value in upsert_doc.items():
+                    if key in immutable_fields:
+                        insert_only_doc[key] = value
+                    else:
+                        update_doc[key] = value
+
+                # Agregar actualizaciones de content con notación punteada
+                update_doc.update(content_updates)
+
+                # Para nuevos inserts, establecer created_at solo si no existe y agregar sentinel
+                insert_only_doc["created_at"] = datetime.now()
+                insert_only_doc["_was_inserted"] = True  # Sentinel to track insert vs update
+
+                # Usar find_one_and_update para obtener el _id en una sola operación
+                doc = self.collection.find_one_and_update(
+                    filter_query,
+                    {"$set": update_doc, "$setOnInsert": insert_only_doc, "$currentDate": {"updated_at": True}},
+                    upsert=True,
+                    return_document=ReturnDocument.AFTER,
+                    projection={"_id": 1, "_was_inserted": 1},
+                    session=session
+                )
+
+                # Siempre tenemos un documento con _id thanks to ReturnDocument.AFTER
+                doc_id = str(doc["_id"])
+                final_ids.append(doc_id)
+
+                # Determinar si fue insert o update usando el sentinel
+                if doc.get("_was_inserted"):
+                    inserted_count += 1
+                    sentinel_ids.append(doc_id)
+                    logging.info(f"create_bulk_slides_skeleton: Insertado nuevo slide order={slide.get('order')} para topic {first_topic}, id={doc_id}")
+                else:
+                    updated_count += 1
+                    logging.info(f"create_bulk_slides_skeleton: Actualizado slide existente order={slide.get('order')} para topic {first_topic}")
+                
+                upserted_count += 1
+
+            # Eliminar slides sobrantes si el nuevo lote tiene menos slides
+            max_order = max(s.get("order") for s in slides_data)
+            delete_filter = {
+                "topic_id": normalize_objectid(first_topic),
+                "content_type": "slide",
+                "order": {"$gt": max_order},
+                "$or": [
+                    {"parent_content_id": None},
+                    {"parent_content_id": {"$exists": False}}
+                ]
+            }
+            
+            delete_result = self.collection.delete_many(delete_filter, session=session)
+            
+            if delete_result.deleted_count > 0:
+                logging.warning(
+                    f"create_bulk_slides_skeleton: Eliminados {delete_result.deleted_count} slides sobrantes "
+                    f"con order > {max_order} para topic {first_topic} (regeneración con menos slides)"
+                )
+
+            # Limpiar los campos sentinel de las inserciones en una sola operación bulk
+            if sentinel_ids:
+                # Convertir string IDs a ObjectId para el query
+                sentinel_object_ids = []
+                for sid in sentinel_ids:
+                    try:
+                        sentinel_object_ids.append(ObjectId(sid))
+                    except Exception:
+                        # Skip invalid IDs but continue with valid ones
+                        continue
+
+                if sentinel_object_ids:
+                    cleanup_result = self.collection.update_many(
+                        {"_id": {"$in": sentinel_object_ids}},
+                        {"$unset": {"_was_inserted": ""}},
+                        session=session
+                    )
+                    if cleanup_result.modified_count > 0:
+                        logging.debug(f"create_bulk_slides_skeleton: Limpiados {cleanup_result.modified_count} campos _was_inserted")
 
             # Actualizar contador de uso para slides
             self.content_type_service.collection.update_one(
                 {"code": "slide"},
-                {"$inc": {"usage_count": len(inserted_ids)}},
+                {"$inc": {"usage_count": inserted_count}},  # Solo contar nuevas inserciones
                 session=session
             )
 
             session.commit_transaction()
             transaction_active = False
 
-            logging.info(f"create_bulk_slides_skeleton: Insertadas {len(inserted_ids)} slides skeleton para topic {first_topic}")
+            logging.info(
+                f"create_bulk_slides_skeleton: Procesados {upserted_count} slides para topic {first_topic}: "
+                f"{inserted_count} nuevos, {updated_count} actualizados, {delete_result.deleted_count if 'delete_result' in locals() else 0} eliminados"
+            )
             # Log structure of template_snapshot for debugging (capped verbosity)
             try:
-                logging.debug(f"create_bulk_slides_skeleton: template_snapshot ejemplo: {json.dumps(slides_data[0].get('template_snapshot'), ensure_ascii=False)[:200]}")
+                first_payload = slides_data[0].get('content') or {}
+                logging.debug(f"create_bulk_slides_skeleton: template_snapshot ejemplo: {json.dumps(first_payload.get('template_snapshot'), ensure_ascii=False)[:200]}")
             except Exception:
                 pass
 
-            return True, inserted_ids
+            return True, final_ids
+        except DuplicateKeyError as e:
+            if transaction_active:
+                try:
+                    session.abort_transaction()
+                except Exception:
+                    pass
+            error_msg = str(e)
+            if "idx_unique_topic_content_order" in error_msg:
+                logging.error(f"Error de índice único en create_bulk_slides_skeleton: {error_msg}")
+                return False, f"Error de índice único: ya existe una slide con este orden para el tema especificado"
+            else:
+                logging.error(f"Error de índice único en create_bulk_slides_skeleton: {error_msg}")
+                return False, f"Error de índice único: {error_msg}"
         except Exception as e:
             if transaction_active:
                 try:
@@ -1110,7 +1889,7 @@ class ContentService(VerificationBaseService):
                 query["content_type"] = content_type
 
             # Proyección: por defecto (include_metadata=True) devuelve documentos completos para compatibilidad hacia atrás
-            # Solo usar proyección mínima si include_metadata es explícitamente False
+            # Solo usar proyección mínima si include_metadata es explícito False
             if include_metadata:
                 # Documentos completos por defecto para mantener compatibilidad
                 projection = None
@@ -1196,7 +1975,7 @@ class ContentService(VerificationBaseService):
             topic_id: ID del tema
             
         Returns:
-            Tuple[bool, List[str]]: (es_válida, lista_de_errores)
+            Tuple[bool, str]: (es_válida, lista_de_errores)
         """
         try:
             return self.structured_sequence_service.validate_sequence_integrity(topic_id)
@@ -1490,6 +2269,18 @@ class ContentService(VerificationBaseService):
             if not current_content:
                 return False, "Contenido no encontrado"
 
+            # Validar políticas de payload para actualizaciones
+            user_id = update_data.get('creator_id') or current_content.get('creator_id')
+            topic_id = current_content.get('topic_id')
+            valid_policy, policy_msg = self._validate_content_payload_policy(
+                update_data,
+                context=f'update_content[{content_id}]',
+                user_id=user_id,
+                topic_id=topic_id
+            )
+            if not valid_policy:
+                return False, policy_msg
+
             # Validaciones específicas para diapositivas
             content_type = update_data.get("content_type", current_content.get("content_type"))
             if content_type == "slide" and "slide_template" in update_data:
@@ -1500,6 +2291,76 @@ class ContentService(VerificationBaseService):
                         return False, "El slide_template no es un prompt válido"
 
             update_data["updated_at"] = datetime.now()
+
+            # Extraer claves punteadas que comienzan con 'content.' temprano
+            dotted_content_updates = {}
+            keys_to_remove = [key for key in update_data.keys() if key.startswith('content.')]
+            for key in keys_to_remove:
+                # Extraer el subcampo (p.ej., 'content_html' de 'content.content_html')
+                subfield = key[len('content.'):]  # Remover el prefijo 'content.'
+                if subfield:  # Asegurarse que no esté vacío
+                    dotted_content_updates[subfield] = update_data[key]
+                del update_data[key]
+
+            # Validar y sanitizar content_html antes de normalizar si viene a nivel raíz
+            if 'content_html' in update_data and update_data.get('content_html') is not None:
+                valid, msg = self.validate_slide_html_content(update_data.get('content_html'))
+                if not valid:
+                    return False, f"content_html inválido: {msg}"
+                # Sanitizar y reemplazar el valor
+                update_data['content_html'] = self.sanitize_slide_html_content(update_data.get('content_html'))
+                # Establecer render_engine para HTML
+                update_data['render_engine'] = 'raw_html'
+                logging.info(f"Validación y sanitización de content_html a nivel raíz para slide {content_id}")
+
+            # Normalizar siempre los campos de slide al espacio content.*
+            # antes de construir el $set para evitar escribir campos raíz
+            root_fields_to_normalize = ['content_html', 'narrative_text', 'full_text', 'slide_plan', 'template_snapshot']
+
+            # Construir content_updates unificado fusionando en orden:
+            # 1. Existing content dict
+            # 2. Moved root fields
+            # 3. Dotted content keys
+            content_updates = update_data.get('content', {})
+            if not isinstance(content_updates, dict):
+                content_updates = {}
+
+            # Mover claves raíz a content_updates
+            moved_root_fields = {}
+            for field in root_fields_to_normalize:
+                if field in update_data:
+                    moved_root_fields[field] = update_data.pop(field)
+
+            # Fusionar todo en content_updates
+            content_updates = {**content_updates, **moved_root_fields, **dotted_content_updates}
+
+            # Aplicar validaciones en content_updates unificado
+            if content_updates.get('content_html') is not None:
+                valid, msg = self.validate_slide_html_content(content_updates.get('content_html'))
+                if not valid:
+                    return False, f"content_html inválido: {msg}"
+                # Sanitizar el valor
+                content_updates['content_html'] = self.sanitize_slide_html_content(content_updates.get('content_html'))
+                # Establecer render_engine para HTML
+                update_data['render_engine'] = 'raw_html'
+                logging.info(f"Validación y sanitización de content_html unificado para slide {content_id}")
+
+            # Validar tipos de datos en content_updates
+            if content_updates.get('narrative_text') is not None and not isinstance(content_updates.get('narrative_text'), str):
+                return False, "content.narrative_text debe ser una cadena de texto si se proporciona"
+            if content_updates.get('full_text') is not None and not isinstance(content_updates.get('full_text'), str):
+                return False, "content.full_text debe ser una cadena de texto si se proporciona"
+
+            # Validar template_snapshot si está presente en content_updates
+            if content_updates.get('template_snapshot') is not None:
+                valid_ts, ts_msg = self.validate_template_snapshot(content_updates.get('template_snapshot'))
+                if not valid_ts:
+                    return False, f"template_snapshot inválido: {ts_msg}"
+
+            # Asegurar que el $set final no incluya ninguna de estas claves a nivel raíz
+            for field in root_fields_to_normalize:
+                if field in update_data:
+                    del update_data[field]
 
             # Manejo de marcadores si cambia el contenido
             if "content" in update_data or "interactive_data" in update_data:
@@ -1512,26 +2373,24 @@ class ContentService(VerificationBaseService):
                 )
                 update_data["personalization_markers"] = markers
 
-            # Validaciones y lógica adicional para campos de diapositivas HTML/narrativa/full_text
+          # Validaciones y lógica adicional para campos de diapositivas HTML/narrativa/full_text
             if content_type == "slide":
-                # Determine prospective values after update
-                prospective_content_html = update_data.get("content_html", current_content.get("content_html"))
-                prospective_narrative = update_data.get("narrative_text", current_content.get("narrative_text"))
-                prospective_full_text = update_data.get("full_text", current_content.get("full_text"))
+                # Determinar valores prospectivos después de la actualización usando content_updates unificado
+                # Normalizar content de current_content para acceso seguro
+                current_content_normalized = self._normalize_content_field(current_content)
 
-                # If content_html provided in update_data, validate it
-                if "content_html" in update_data and update_data.get("content_html") is not None:
-                    valid, msg = self.validate_slide_html_content(update_data.get("content_html"))
-                    if not valid:
-                        return False, f"content_html inválido: {msg}"
-                    update_data["render_engine"] = "raw_html"
-                    logging.info(f"Actualizando content_html para slide {content_id}")
-
-                # Validate narrative_text / full_text types if provided
-                if "narrative_text" in update_data and update_data.get("narrative_text") is not None and not isinstance(update_data.get("narrative_text"), str):
-                    return False, "narrative_text debe ser una cadena de texto si se proporciona"
-                if "full_text" in update_data and update_data.get("full_text") is not None and not isinstance(update_data.get("full_text"), str):
-                    return False, "full_text debe ser una cadena de texto si se proporciona"
+                prospective_content_html = (
+                    content_updates.get('content_html') or
+                    current_content_normalized.get('content_html')
+                )
+                prospective_narrative = (
+                    content_updates.get('narrative_text') or
+                    current_content_normalized.get('narrative_text')
+                )
+                prospective_full_text = (
+                    content_updates.get('full_text') or
+                    current_content_normalized.get('full_text')
+                )
 
                 # Update status based on presence of fields (prospective)
                 new_status = current_content.get("status", "draft")
@@ -1550,9 +2409,34 @@ class ContentService(VerificationBaseService):
                 update_data["status"] = new_status
                 logging.info(f"update_content: slide {content_id} status será actualizado a '{new_status}'")
 
+                # Validar template_snapshot si viene en update_data (raíz o anidado)
+                template_snapshot = update_data.get("template_snapshot")
+                if template_snapshot is None:
+                    template_snapshot = content_updates.get("template_snapshot")
+                if template_snapshot is not None:
+                    valid_ts, ts_msg = self.validate_template_snapshot(template_snapshot)
+                    if not valid_ts:
+                        return False, f"template_snapshot inválido: {ts_msg}"
+
+            # Construir set_ops con claves punteadas para content_updates unificado
+            # Esto evita sobrescribir el subdocumento 'content' completo
+            set_ops = {}
+
+            # Expandir content_updates unificado en claves punteadas
+            if content_updates:
+                for k, v in content_updates.items():
+                    set_ops['content.' + k] = v
+
+            # Eliminar 'content' de update_data si existe para evitar sobrescribir el subdocumento completo
+            if 'content' in update_data:
+                del update_data['content']
+
+            # Fusionar set_ops con el resto de update_data para el $set final
+            final_set_data = {**update_data, **set_ops}
+
             result = self.collection.update_one(
                 {"_id": ObjectId(content_id)},
-                {"$set": update_data}
+                {"$set": final_set_data}
             )
             
             if result.modified_count > 0:
@@ -1656,8 +2540,8 @@ class ContentService(VerificationBaseService):
             slides_cursor = self.collection.find(base_query, {
                 "_id": 1,
                 "status": 1,
-                "content_html": 1,
-                "narrative_text": 1,
+                "content.content_html": 1,
+                "content.narrative_text": 1,
                 "created_at": 1,
                 "updated_at": 1,
                 "render_engine": 1,
@@ -1702,15 +2586,16 @@ class ContentService(VerificationBaseService):
                 status = s.get("status") or "unknown"
                 by_status_counts[status] = by_status_counts.get(status, 0) + 1
 
-                has_html = bool(s.get("content_html"))
-                has_narr = bool(s.get("narrative_text"))
+                content = self._normalize_content_field(s)
+                has_html = bool(content.get("content_html"))
+                has_narr = bool(content.get("narrative_text"))
 
                 if has_html:
                     slides_with_html += 1
-                    html_lengths.append(len(s.get("content_html") or ""))
+                    html_lengths.append(len(content.get("content_html") or ""))
                 if has_narr:
                     slides_with_narrative += 1
-                    narrative_lengths.append(len(s.get("narrative_text") or ""))
+                    narrative_lengths.append(len(content.get("narrative_text") or ""))
                 if has_html and has_narr:
                     slides_complete += 1
                     # track last completed slide by updated_at
@@ -1738,9 +2623,9 @@ class ContentService(VerificationBaseService):
                 slides_by_render_engine[engine] = slides_by_render_engine.get(engine, 0) + 1
 
                 # parent grouping
-                parent_raw = s.get("parent_content_id")
+                parent = s.get("parent_content_id")
                 try:
-                    parent_key = str(parent_raw) if parent_raw is not None else "root"
+                    parent_key = str(parent) if parent is not None else "root"
                 except Exception:
                     parent_key = "root"
                 pg = parent_groups.setdefault(parent_key, {"total": 0, "with_html": 0, "with_narrative": 0, "complete": 0})
@@ -1780,8 +2665,8 @@ class ContentService(VerificationBaseService):
                         "_id": 1,
                         "created_at": 1,
                         "updated_at": 1,
-                        "content_html": 1,
-                        "narrative_text": 1
+                        "content.content_html": 1,
+                        "content.narrative_text": 1
                     }},
                     {"$addFields": {
                         "gen_time_ms": {
@@ -1803,11 +2688,12 @@ class ContentService(VerificationBaseService):
                         gen_time_val = float(gen_time)
                     except Exception:
                         gen_time_val = None
+                    content_b = b.get("content", {})
                     bottleneck_analysis.append({
                         "content_id": str(b["_id"]),
                         "gen_time_ms": gen_time_val,
-                        "has_html": bool(b.get("content_html")),
-                        "has_narrative": bool(b.get("narrative_text"))
+                        "has_html": bool(content_b.get("content_html")),
+                        "has_narrative": bool(content_b.get("narrative_text"))
                     })
             except Exception:
                 bottleneck_analysis = []
@@ -2015,9 +2901,10 @@ class ContentService(VerificationBaseService):
                 return {}
 
             status = current.get("status", "unknown")
-            has_html = bool(current.get("content_html"))
-            has_narrative = bool(current.get("narrative_text"))
-            has_full_text = bool(current.get("full_text"))
+            content = self._normalize_content_field(current)
+            has_html = bool(content.get("content_html"))
+            has_narrative = bool(content.get("narrative_text"))
+            has_full_text = bool(content.get("full_text"))
 
             # Estimación simple de progreso (0-100)
             if has_html and has_narrative:
@@ -2047,9 +2934,9 @@ class ContentService(VerificationBaseService):
                 "has_content_html": has_html,
                 "has_narrative_text": has_narrative,
                 "has_full_text": has_full_text,
-                "content_html_length": len(current.get("content_html") or ""),
-                "narrative_text_length": len(current.get("narrative_text") or ""),
-                "full_text_length": len(current.get("full_text") or ""),
+                "content_html_length": len(content.get("content_html") or ""),
+                "narrative_text_length": len(content.get("narrative_text") or ""),
+                "full_text_length": len(content.get("full_text") or ""),
                 "progress_estimate": progress,
                 "created_at": iso(created_at),
                 "updated_at": iso(updated_at),
@@ -2080,8 +2967,8 @@ class ContentService(VerificationBaseService):
             }
             slides = list(self.collection.find(query, {
                 "_id": 1, "order": 1, "parent_content_id": 1,
-                "content_html": 1, "narrative_text": 1, "full_text": 1,
-                "template_snapshot": 1, "status": 1, "created_at": 1, "updated_at": 1
+                "content.content_html": 1, "content.narrative_text": 1, "content.full_text": 1,
+                "content.template_snapshot": 1, "status": 1, "created_at": 1, "updated_at": 1
             }).sort([("order", 1), ("created_at", 1)]))
 
             total = len(slides)
@@ -2112,9 +2999,10 @@ class ContentService(VerificationBaseService):
                 if parent_key not in per_parent:
                     per_parent[parent_key] = {"slides": [], "orders": []}
 
-                has_html = bool(s.get("content_html"))
-                has_narrative = bool(s.get("narrative_text"))
-                has_full_text = bool(s.get("full_text"))
+                content = self._normalize_content_field(s)
+                has_html = bool(content.get("content_html"))
+                has_narrative = bool(content.get("narrative_text"))
+                has_full_text = bool(content.get("full_text"))
                 status = s.get("status", "")
 
                 # Reasons for incomplete
@@ -2139,7 +3027,7 @@ class ContentService(VerificationBaseService):
                     })
 
                 # Track template_snapshot consistency: build a fingerprint of keys for simplicity
-                ts = s.get("template_snapshot")
+                ts = content.get("template_snapshot")
                 if ts is None:
                     # record missing template_snapshot
                     template_snapshots.setdefault("missing", []).append(sid)
@@ -2227,6 +3115,147 @@ class ContentService(VerificationBaseService):
             logging.error(f"Error verificando completitud de slides para topic {topic_id}: {e}")
             return {}
     
+    def get_complete_slides_only(self, topic_id: str) -> Dict:
+        """
+        Obtiene solo slides completos (con content_html y narrative_text no nulos).
+        Fast path optimizado para consultas que solo necesitan slides ya completados.
+
+        Args:
+            topic_id: ID del topic
+
+        Returns:
+            Dict con {
+                slides: [...],
+                last_completed_slide: {...},
+                completion_trend: [...],
+                generation_efficiency: {...}
+            }
+        """
+        try:
+            topic_obj_id = ObjectId(topic_id)
+
+            # Pipeline para obtener slides completos con métricas
+            pipeline = [
+                {
+                    "$match": {
+                        "topic_id": topic_obj_id,
+                        "content_type": "slide",
+                        "status": "narrative_ready",
+                        "content.content_html": {"$exists": True, "$ne": None},
+                        "content.narrative_text": {"$exists": True, "$ne": None}
+                    }
+                },
+                {
+                    "$project": {
+                        "_id": 1,
+                        "order": 1,
+                        "parent_content_id": 1,
+                        "status": 1,
+                        "content.content_html": 1,
+                        "content.narrative_text": 1,
+                        "created_at": 1,
+                        "updated_at": 1,
+                        "render_engine": 1,
+                        "gen_time_ms": {
+                            "$cond": [
+                                {"$and": [
+                                    {"$ifNull": ["$created_at", False]},
+                                    {"$ifNull": ["$updated_at", False]}
+                                ]},
+                                {"$subtract": ["$updated_at", "$created_at"]},
+                                None
+                            ]
+                        }
+                    }
+                },
+                {"$sort": {"order": 1}},
+                {
+                    "$group": {
+                        "_id": None,
+                        "slides": {"$push": "$$ROOT"},
+                        "total_gen_time": {"$sum": "$gen_time_ms"},
+                        "avg_gen_time": {"$avg": "$gen_time_ms"},
+                        "max_gen_time": {"$max": "$gen_time_ms"},
+                        "min_gen_time": {"$min": "$gen_time_ms"},
+                        "last_updated": {"$max": "$updated_at"},
+                        "last_order": {"$max": "$order"}
+                    }
+                }
+            ]
+
+            result = list(self.collection.aggregate(pipeline))
+
+            if not result:
+                return {
+                    "slides": [],
+                    "last_completed_slide": None,
+                    "completion_trend": [],
+                    "generation_efficiency": {
+                        "total_slides": 0,
+                        "avg_gen_time_ms": 0,
+                        "total_gen_time_ms": 0
+                    }
+                }
+
+            data = result[0]
+            slides = data.get("slides", [])
+
+            # Encontrar el último slide completado
+            last_completed_slide = None
+            if slides:
+                last_slide = max(slides, key=lambda x: x.get("order", 0))
+                last_completed_slide = {
+                    "id": str(last_slide["_id"]),
+                    "order": last_slide["order"],
+                    "status": last_slide["status"],
+                    "updated_at": last_slide["updated_at"]
+                }
+
+            # Calcular tendencia de completación (basada en updated_at)
+            completion_trend = []
+            if len(slides) > 1:
+                # Agrupar slides por día para mostrar tendencia
+                daily_counts = {}
+                for slide in slides:
+                    date = slide["updated_at"].strftime("%Y-%m-%d")
+                    daily_counts[date] = daily_counts.get(date, 0) + 1
+
+                # Convertir a lista ordenada para tendencia
+                completion_trend = [
+                    {"date": date, "completed_slides": count}
+                    for date, count in sorted(daily_counts.items())
+                ]
+
+            # Métricas de eficiencia de generación
+            generation_efficiency = {
+                "total_slides": len(slides),
+                "avg_gen_time_ms": int(data.get("avg_gen_time", 0) or 0),
+                "total_gen_time_ms": int(data.get("total_gen_time", 0) or 0),
+                "max_gen_time_ms": int(data.get("max_gen_time", 0) or 0),
+                "min_gen_time_ms": int(data.get("min_gen_time", 0) or 0)
+            }
+
+            return {
+                "slides": slides,
+                "last_completed_slide": last_completed_slide,
+                "completion_trend": completion_trend,
+                "generation_efficiency": generation_efficiency
+            }
+
+        except Exception as e:
+            logging.error(f"Error en get_complete_slides_only para topic {topic_id}: {e}")
+            # Retornar estructura vacía en caso de error para mantener compatibilidad
+            return {
+                "slides": [],
+                "last_completed_slide": None,
+                "completion_trend": [],
+                "generation_efficiency": {
+                    "total_slides": 0,
+                    "avg_gen_time_ms": 0,
+                    "total_gen_time_ms": 0
+                }
+            }
+
     def get_topic_slides_optimized(self, topic_id: str, status_filter: Optional[List[str]] = None,
                                    render_engine: Optional[str] = None, group_by_parent: bool = False,
                                    include_progress: bool = True, limit: Optional[int] = None, skip: int = 0) -> Dict:
@@ -2300,13 +3329,13 @@ class ContentService(VerificationBaseService):
                     "order": 1,
                     "parent_content_id": 1,
                     "status": 1,
-                    "content_html": 1,
-                    "narrative_text": 1,
+                    "content.content_html": 1,
+                    "content.narrative_text": 1,
                     "created_at": 1,
                     "updated_at": 1,
                     "render_engine": 1,
-                    "has_html": {"$cond": [{"$ifNull": ["$content_html", False]}, 1, 0]},
-                    "has_narrative": {"$cond": [{"$ifNull": ["$narrative_text", False]}, 1, 0]},
+                    "has_html": {"$cond": [{"$ifNull": ["$content.content_html", False]}, 1, 0]},
+                    "has_narrative": {"$cond": [{"$ifNull": ["$content.narrative_text", False]}, 1, 0]},
                     "gen_time_ms": {
                         "$cond": [
                             {"$and": [{"$ifNull": ["$created_at", False]}, {"$ifNull": ["$updated_at", False]}]},
@@ -2345,7 +3374,7 @@ class ContentService(VerificationBaseService):
                 slides_list.append(slide_item)
 
             # Stats: try to use cached aggregated stats
-            cache_key = f"slides_optimized_stats::{topic_id}::{render_engine}::{','.join(sorted(status_filter))}::{group_by_parent}"
+            cache_key = f"slides_optimized_stats::{topic_id}::{render_engine}::{','.join(sorted(status_filter))}::{group_by_parent}::{include_progress}"
             with self._cache_lock:
                 cached = self._stats_cache.get(cache_key)
                 if cached and (datetime.utcnow() - cached.get("ts")).total_seconds() < self._stats_cache_ttl:
@@ -2358,9 +3387,9 @@ class ContentService(VerificationBaseService):
                         {"$group": {
                             "_id": None,
                             "total": {"$sum": 1},
-                            "slides_with_html": {"$sum": {"$cond": [{"$ifNull": ["$content_html", False]}, 1, 0]}},
-                            "slides_with_narrative": {"$sum": {"$cond": [{"$ifNull": ["$narrative_text", False]}, 1, 0]}},
-                            "slides_complete": {"$sum": {"$cond": [{"$and": [{"$ifNull": ["$content_html", False]}, {"$ifNull": ["$narrative_text", False]}]}, 1, 0]}},
+                            "slides_with_html": {"$sum": {"$cond": [{"$ifNull": ["$content.content_html", False]}, 1, 0]}},
+                            "slides_with_narrative": {"$sum": {"$cond": [{"$ifNull": ["$content.narrative_text", False]}, 1, 0]}},
+                            "slides_complete": {"$sum": {"$cond": [{"$and": [{"$ifNull": ["$content.content_html", False]}, {"$ifNull": ["$content.narrative_text", False]}]}, 1, 0]}} ,
                             "avg_gen_time_ms": {"$avg": {"$cond": [
                                 {"$and": [{"$ifNull": ["$created_at", False]}, {"$ifNull": ["$updated_at", False]}]},
                                 {"$subtract": ["$updated_at", "$created_at"]},
@@ -2390,8 +3419,8 @@ class ContentService(VerificationBaseService):
                         last_doc = self.collection.find_one({
                             "topic_id": topic_obj_id,
                             "content_type": "slide",
-                            "content_html": {"$ne": None},
-                            "narrative_text": {"$ne": None},
+                            "content.content_html": {"$ne": None},
+                            "content.narrative_text": {"$ne": None},
                         }, sort=[("updated_at", -1)], projection={"_id": 1, "updated_at": 1})
                         if last_doc:
                             last_completed = {
@@ -2436,7 +3465,7 @@ class ContentService(VerificationBaseService):
                         "slides_complete": slides_complete,
                         "pending": pending,
                         "completion_percentage": completion_percentage,
-                        "average_generation_time_ms": float(avg_gen_time) if avg_gen_time is not None else None,
+                        "average_generation_time_ms": avg_gen_time,
                         "estimated_time_remaining_ms": estimated_time_remaining_ms,
                         "last_completed_slide": last_completed,
                         "completion_trend": progress_trend,
@@ -2469,9 +3498,9 @@ class ContentService(VerificationBaseService):
                     {"$match": match},
                     {"$project": {
                         "parent_content_id": {"$ifNull": ["$parent_content_id", None]},
-                        "has_html": {"$cond": [{"$ifNull": ["$content_html", False]}, 1, 0]},
-                        "has_narrative": {"$cond": [{"$ifNull": ["$narrative_text", False]}, 1, 0]},
-                        "complete": {"$cond": [{"$and": [{"$ifNull": ["$content_html", False]}, {"$ifNull": ["$narrative_text", False]}]}, 1, 0]},
+                        "has_html": {"$cond": [{"$ifNull": ["$content.content_html", False]}, 1, 0]},
+                        "has_narrative": {"$cond": [{"$ifNull": ["$content.narrative_text", False]}, 1, 0]},
+                        "complete": {"$cond": [{"$and": [{"$ifNull": ["$content.content_html", False]}, {"$ifNull": ["$content.narrative_text", False]}]}, 1, 0]},
                         "order": 1
                     }},
                     {"$group": {

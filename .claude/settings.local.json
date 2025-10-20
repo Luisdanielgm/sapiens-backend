@@ -6,7 +6,15 @@
       "Bash(python:*)",
       "Bash(git add:*)",
       "Bash(git commit:*)",
-      "Bash(powershell:*)"
+      "Bash(powershell:*)",
+      "Read(//c/Users/Orion/OneDrive/Desktop/sistemas/all_projects/SapiensAI/**)",
+      "Bash(pip install:*)",
+      "Bash(set PYTHONIOENCODING=utf-8:*)",
+      "Bash($env:PYTHONIOENCODING=\"utf-8\")",
+      "Bash(Out-String)",
+      "Bash(findstr:*)",
+      "Bash(del:*)",
+      "Bash(chcp:*)"
     ],
     "deny": [],
     "ask": []
