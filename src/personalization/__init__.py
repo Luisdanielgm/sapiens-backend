@@ -13,6 +13,5 @@ Endpoints principales:
 """
 
 from .services import AdaptivePersonalizationService
-from .routes import personalization_bp
 
 __all__ = ['AdaptivePersonalizationService', 'personalization_bp']

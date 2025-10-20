@@ -139,24 +139,47 @@ def create_app(config_object=active_config):
             
         return response
 
-    # Verificar conexión a la base de datos
+    # Verificar conexión a la base de datos con timeout
     try:
-        db = get_db()
-        logger.info("Conexión a MongoDB establecida")
+        # Configurar timeout para evitar bloqueos
+        import signal
         
-        # Configurar índices si estamos en modo de desarrollo o la variable de entorno lo indica
-        if app.config['DEBUG'] or os.getenv('SETUP_INDEXES', '0') == '1':
-            logger.info("Configurando índices de la base de datos...")
-            setup_result = setup_database_indexes()
-            if setup_result:
-                logger.info("Índices configurados correctamente")
-            else:
-                logger.warning("No se pudieron configurar todos los índices")
-    except Exception as e:
+        def timeout_handler(signum, frame):
+            raise TimeoutError("Timeout en conexión a MongoDB")
+        
+        # Solo en sistemas que soportan signal (no Windows)
+        if hasattr(signal, 'SIGALRM'):
+            signal.signal(signal.SIGALRM, timeout_handler)
+            signal.alarm(5)  # 5 segundos de timeout
+        
+        try:
+            db = get_db()
+            # Hacer una operación simple para verificar la conexión
+            db.command('ping')
+            logger.info("Conexión a MongoDB establecida y verificada")
+            
+            # Configurar índices si estamos en modo de desarrollo o la variable de entorno lo indica
+            if app.config['DEBUG'] or os.getenv('SETUP_INDEXES', '0') == '1':
+                logger.info("Configurando índices de la base de datos...")
+                try:
+                    setup_result = setup_database_indexes()
+                    if setup_result:
+                        logger.info("Índices configurados correctamente")
+                    else:
+                        logger.warning("No se pudieron configurar todos los índices")
+                except Exception as idx_error:
+                    logger.warning(f"Error configurando índices: {str(idx_error)}")
+        finally:
+            # Cancelar la alarma si se configuró
+            if hasattr(signal, 'SIGALRM'):
+                signal.alarm(0)
+                
+    except (TimeoutError, Exception) as e:
         logger.error(f"Error al conectar a MongoDB: {str(e)}")
         # No lanzar error para permitir ejecución aunque la BD no esté disponible
         # Pero registrar claramente que puede haber problemas
         logger.warning("La aplicación se está ejecutando sin conexión a la base de datos. Las operaciones pueden fallar.")
+        logger.info("Para conectar a MongoDB, asegúrese de que el servicio esté ejecutándose y la URI sea correcta.")
         
     # Registrar manejo de errores global
     @app.errorhandler(500)

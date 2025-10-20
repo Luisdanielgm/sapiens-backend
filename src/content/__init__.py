@@ -12,7 +12,6 @@ proporcionando una API unificada y consistente.
 
 from .models import ContentType, TopicContent, VirtualTopicContent, ContentResult
 from .services import ContentService, ContentTypeService
-from .routes import content_bp
 
 __all__ = [
     'ContentType',
