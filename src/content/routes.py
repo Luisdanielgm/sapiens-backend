@@ -124,7 +124,7 @@ def create_content():
         "tags": [...],
         "resources": [...],
         "generation_prompt": "...",  // Para contenido generado por IA
-        "slide_template": "...",  // (opcional para slides) string prompt para IA, se autogenera si no se proporciona
+
         "order": 1,  // Orden secuencial del contenido (opcional)
         "parent_content_id": "ObjectId"  // ID del contenido padre (opcional)
     }
@@ -137,17 +137,16 @@ def create_content():
             "full_text": "...",
             "slide_plan": "...",
             "content_html": "...",
-            "narrative_text": "...",
-            "template_snapshot": {...}
+            "narrative_text": "..."
         },
-        "slide_template": "...",  // (opcional) string prompt para IA, se autogenera si no se proporciona
+
         "order": 1
     }
     
     POLÍTICAS DE VALIDACIÓN:
     - Los campos 'provider' y 'model' NO están permitidos en el payload. El sistema gestiona automáticamente la selección de proveedores.
     - Para slides: 'slide_plan' debe ser una cadena de texto (Markdown/texto plano), no un objeto JSON.
-    - Para slides: 'slide_template' es opcional. Si no se proporciona o es inválido, el sistema generará uno automáticamente.
+
     - El HTML de slides tiene un límite de 150 KB (150,000 caracteres).
     
     COMPORTAMIENTO ESPECIAL PARA QUIZ:
@@ -195,25 +194,15 @@ def create_bulk_content():
             "content_html": contenido HTML (opcional, para slides no-skeleton)
             "narrative_text": texto narrativo (opcional, para slides no-skeleton)
             "slide_plan": (opcional)
-            "template_snapshot": objeto JSON con estructura de estilos (obligatorio para skeleton slides).
-              Ejemplo de estructura esperada:
-              {
-                  "palette": {"primary": "#112233", "secondary": "#FFFFFF"},
-                  "grid": {"columns": 12, "gap": 16},
-                  "fontFamilies": ["Inter", "Roboto"],
-                  "spacing": {"small": 8, "medium": 16, "large": 32},
-                  "breakpoints": {"mobile": 480, "tablet": 768, "desktop": 1024}
-              }
           }
         - order: entero positivo indicando posición secuencial
         - parent_content_id: ObjectId del contenido padre (opcional)
-        - Otros campos permitidos: slide_template (string prompt para IA), interactive_data, resources, metadata, generation_prompt
+        - Otros campos permitidos: interactive_data, resources, metadata, generation_prompt
 
     Validaciones realizadas por este endpoint (además de las del servicio):
     - Verifica que se haya enviado el array 'slides' y que no esté vacío
     - Todos los items deben ser content_type == 'slide'
     - Todas las slides deben compartir el mismo topic_id
-    - template_snapshot debe ser un objeto/dict (no string)
     - Verifica que order sea una secuencia única y consecutiva comenzando en 1
 
     Responde con:
@@ -329,24 +318,14 @@ def create_bulk_slides():
         - content: objeto con campos específicos de slide:
             - full_text: texto no vacío (se usará como base para la generación skeleton)
             - slide_plan: (opcional)
-            - template_snapshot: objeto JSON con la estructura de estilos (obligatorio).
-              Ejemplo mínimo:
-                {
-                  "palette": {"primary": "#112233", "secondary": "#FFFFFF"},
-                  "grid": {"columns": 12, "gap": 16},
-                  "fontFamilies": ["Inter", "Roboto"],
-                  "spacing": {"small": 8, "medium": 16, "large": 32},
-                  "breakpoints": {"mobile": 480, "tablet": 768, "desktop": 1024}
-                }
         - order: entero positivo. La secuencia debe ser consecutiva comenzando en 1 sin gaps.
         - parent_content_id: ObjectId (opcional)
-        - Otros campos permitidos: slide_template (string prompt para IA), interactive_data, resources, metadata, generation_prompt
+        - Otros campos permitidos: interactive_data, resources, metadata, generation_prompt
 
     Validaciones realizadas por este endpoint (además de las del servicio):
     - Verifica que se haya enviado el array 'slides' y que no esté vacío
     - Todos los items deben ser content_type == 'slide'
     - Todas las slides deben compartir el mismo topic_id
-    - template_snapshot debe ser un objeto/dict (no string)
     - Verifica que order sea una secuencia única y consecutiva comenzando en 1
 
     Responde con:
@@ -424,10 +403,7 @@ def create_bulk_slides():
             if full_text is None or not isinstance(full_text, str) or not full_text.strip():
                 return APIRoute.error(ErrorCodes.VALIDATION_ERROR, f"Slide {idx+1}: full_text es requerido y debe ser una cadena no vacía para crear skeleton")
 
-            # template_snapshot must be an object/dict
-            ts = content_obj.get('template_snapshot')
-            if ts is None or not isinstance(ts, dict):
-                return APIRoute.error(ErrorCodes.VALIDATION_ERROR, f"Slide {idx+1}: template_snapshot es requerido y debe ser un objeto JSON (no string)")
+            # template_snapshot validation removed - all configuration now in slide_plan
 
             # Attach creator_id for auditing
             slide['creator_id'] = user_id
@@ -442,12 +418,8 @@ def create_bulk_slides():
             if expected != actual:
                 return APIRoute.error(ErrorCodes.VALIDATION_ERROR, f"La secuencia de 'order' debe ser consecutiva sin gaps. Esperado {expected}, encontrado {actual}")
 
-        # Log a compact example of the template_snapshot for debugging (capped)
-        try:
-            example_ts = slides_data[0].get('content', {}).get('template_snapshot')
-            logging.info(f"create_bulk_slides: Recibiendo {len(slides_data)} slides para topic {first_topic}. Ejemplo template_snapshot: {json.dumps(example_ts, ensure_ascii=False)[:400]}")
-        except Exception:
-            logging.debug("create_bulk_slides: no fue posible serializar template_snapshot para logging")
+        # template_snapshot logging removed - all configuration now in slide_plan
+        logging.info(f"create_bulk_slides: Recibiendo {len(slides_data)} slides para topic {first_topic}")
 
         # Delegate to service optimized method
         success, result = content_service.create_bulk_slides_skeleton(slides_data)

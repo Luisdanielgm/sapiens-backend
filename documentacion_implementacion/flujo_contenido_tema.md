@@ -21,19 +21,23 @@ Content (contenedor de datos específicos del contenido).
 
 Para content_type = 'slide', dentro de Content intervienen:
 
-full_text: trozo de teoría correspondiente a la diapositiva (sin resumir ni alterar).
+content.full_text: trozo de teoría correspondiente a la diapositiva (sin resumir ni alterar).
 
-slide_plan: plan/estilos/estructura en string (texto/Markdown). No JSON.
+content.slide_plan: plan/estilos/estructura en string (texto/Markdown). NO JSON.
 
-content_html: HTML de la diapositiva.
+content.content_html: HTML de la diapositiva.
 
-narrative_text: texto narrativo asociado a la diapositiva.
+content.narrative_text: texto narrativo asociado a la diapositiva.
 
 Para content_type = 'quiz', el quiz se guarda dentro de Content conforme al esquema existente (sin definir subcampos aquí).
 
 Nota de nomenclatura: use la casing exacta del esquema para el campo contenedor (Content/content). Este documento lo nombra Content a efectos de claridad, pero se debe respetar lo que exista en la base real.
 
-Importante: Si actualmente algún dato propio del contenido (p. ej., narrative_text, slide_plan, content_html) se guarda fuera de Content, corregir para que viva dentro de Content.
+**IMPORTANTE**: Todos los datos específicos del contenido DEBEN estar dentro del objeto `content`. NO deben existir campos como `slide_plan`, `full_text`, `content_html`, o `narrative_text` al nivel raíz del documento.
+
+**CAMPOS OBSOLETOS ELIMINADOS**: 
+- `slide_template` - COMPLETAMENTE ELIMINADO
+- `template_snapshot` - COMPLETAMENTE ELIMINADO
 
 3) Políticas y restricciones
 
@@ -45,7 +49,7 @@ Nunca se llama a un LLM/proveedor de forma directa.
 
 No se pasan parámetros de proveedor/modelo al payload; el pool resuelve con la configuración del usuario.
 
-Formato de slide_plan:
+Formato de content.slide_plan:
 
 Debe ser string (texto o Markdown).
 
@@ -78,11 +82,11 @@ A partir de aquí, no se vuelve a tocar Topics en esta corrida.
 
 2. Secuencial (Worker) — Plan/estilos/estructura de diapositivas
 
-Encolar tarea: generar slide_plan.
+Encolar tarea: generar content.slide_plan.
 
 Resultado: string (texto/Markdown, sin JSON).
 
-No se guarda en Topics. Se mantendrá para poblar los esqueletos.
+No se guarda en Topics. Se mantendrá para poblar los esqueletos en content.slide_plan.
 
 3. Paralelo (lógica, sin LLM) — División
 
@@ -100,29 +104,29 @@ content_type = 'slide'.
 
 En Content:
 
-full_text = trozo i.
+content.full_text = trozo i.
 
-slide_plan = el mismo string para todas las diapositivas.
+content.slide_plan = el mismo string para todas las diapositivas.
 
-content_html = (vacío inicialmente).
+content.content_html = (vacío inicialmente).
 
-narrative_text = (vacío inicialmente).
+content.narrative_text = (vacío inicialmente).
 
 5. Paralelo (Workers) — HTML por diapositiva
 
 Encolar N tareas: generar HTML de diapositiva.
 
-Payload mínimo: full_text + slide_plan.
+Payload mínimo: content.full_text + content.slide_plan.
 
-Al completar, actualizar solo TopicContents.Content.content_html de la diapositiva correspondiente.
+Al completar, actualizar solo content.content_html de la diapositiva correspondiente.
 
 6. Paralelo (Workers) — Narrativa por diapositiva
 
 Encolar N tareas: generar narrativa de diapositiva.
 
-Payload mínimo: content_html + full_text.
+Payload mínimo: content.content_html + content.full_text.
 
-Al completar, actualizar solo TopicContents.Content.narrative_text.
+Al completar, actualizar solo content.narrative_text.
 
 7. Quiz (Worker, encolado al final)
 
@@ -136,7 +140,7 @@ Topics: contiene theory_content completo.
 
 TopicContents:
 
-Slides: Content.full_text, Content.slide_plan, Content.content_html, Content.narrative_text completos.
+Slides: content.full_text, content.slide_plan, content.content_html, content.narrative_text completos.
 
 Quiz: contenido guardado dentro de Content (según esquema vigente).
 
@@ -146,9 +150,9 @@ Al presionar Generar nuevamente para el mismo tema:
 
 Se re-genera la teoría y se re-escribe Topics.theory_content.
 
-Se re-genera el slide_plan (string).
+Se re-genera el content.slide_plan (string).
 
-Se vuelve a dividir el texto y se actualizan los TopicContents de tipo slide (población de Content.full_text y Content.slide_plan) y luego su Content.content_html y Content.narrative_text mediante workers.
+Se vuelve a dividir el texto y se actualizan los TopicContents de tipo slide (población de content.full_text y content.slide_plan) y luego su content.content_html y content.narrative_text mediante workers.
 
 Se encola y actualiza el quiz en TopicContents (content_type='quiz'), guardando el resultado dentro de Content.
 
@@ -166,17 +170,17 @@ TopicContents — Slides
 
  Existe un documento por cada diapositiva con content_type = 'slide'.
 
- En Content:
+ En content:
 
- full_text = trozo íntegro de la teoría (sin modificar).
+ content.full_text = trozo íntegro de la teoría (sin modificar).
 
- slide_plan = string de plan/estilos (mismo para todas; no JSON).
+ content.slide_plan = string de plan/estilos (mismo para todas; NO JSON).
 
- content_html = poblado por la tarea de HTML.
+ content.content_html = poblado por la tarea de HTML.
 
- narrative_text = poblado por la tarea de narrativa.
+ content.narrative_text = poblado por la tarea de narrativa.
 
- Ningún campo propio del contenido está fuera de Content.
+ **CRÍTICO**: Ningún campo propio del contenido está fuera del objeto content.
 
 TopicContents — Quiz
 
@@ -194,8 +198,8 @@ Ejecución por Workers
 
 Formato
 
- slide_plan es string (texto/Markdown).
+ content.slide_plan es string (texto/Markdown).
 
- No se utilizó JSON para slide_plan.
+ No se utilizó JSON para content.slide_plan.
 
- Los full_text son copia literal de los trozos de theory_content.
+ Los content.full_text son copia literal de los trozos de theory_content.

@@ -32,14 +32,7 @@ class TestSlideIdsBackwardCompatibility(unittest.TestCase):
                         "content_type": "slide",
                         "order": 1,
                         "content": {
-                            "full_text": "Test slide content",
-                            "template_snapshot": {
-                                "palette": {"primary": "#007bff", "secondary": "#6c757d"},
-                                "grid": {"columns": 12, "gap": 16},
-                                "fontFamilies": ["Arial", "Helvetica"],
-                                "spacing": {"small": 8, "medium": 16, "large": 24},
-                                "breakpoints": {"mobile": 480, "tablet": 768, "desktop": 1024}
-                            }
+                            "full_text": "Test slide content"
                         }
                     }
                 ]

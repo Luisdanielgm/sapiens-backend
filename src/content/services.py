@@ -277,9 +277,7 @@ class ContentService(VerificationBaseService):
             normalized_path = normalized_path.rstrip('.')
 
         whitelist_patterns = [
-            'content.template_snapshot',
-            'contents.content.template_snapshot',  # para bulk payloads
-            'slides.content.template_snapshot'      # para bulk slides
+            # No whitelist patterns needed for template_snapshot as it has been removed
         ]
 
         return any(normalized_path.startswith(pattern) for pattern in whitelist_patterns)
@@ -309,9 +307,7 @@ class ContentService(VerificationBaseService):
         - slides[*].*: provider, model (para bulk slides)
 
         RUTAS EXCLUIDAS (lista blanca donde no se aplica detección):
-        - content.template_snapshot.*: permite provider/model como datos históricos
-        - contents[*].content.template_snapshot.*: bulk payloads
-        - slides[*].content.template_snapshot.*: bulk slides
+        - Ninguna actualmente (template_snapshot ha sido eliminado)
 
         Args:
             data: Estructura de datos a analizar (dict, list, o cualquier tipo)
@@ -382,8 +378,7 @@ class ContentService(VerificationBaseService):
         Políticas implementadas:
         1. Detección restringida de campos prohibidos ('provider', 'model')
            - Rutas permitidas: raíz, content.*, contents[*].*, slides[*].*
-           - Rutas excluidas (lista blanca): content.template_snapshot.*,
-             contents[*].content.template_snapshot.*, slides[*].content.template_snapshot.*
+           - Rutas excluidas (lista blanca): Ninguna actualmente
         2. Validación de tipos de datos específicos (slide_plan debe ser string)
         3. Validaciones adicionales para payloads bulk
 
@@ -395,12 +390,11 @@ class ContentService(VerificationBaseService):
             forbidden_fields = ['provider', 'model']
 
             # Validación recursiva con restricciones de ruta para detectar campos prohibidos solo en ubicaciones específicas
-            # Evita falsos positivos en datos históricos como template_snapshot
             is_recursive_valid, recursive_error = self._detect_forbidden_keys_recursive(
                 payload_data, forbidden_fields, "", context, user_id, topic_id
             )
             if not is_recursive_valid:
-                return False, f"Violación de política: {recursive_error}. El sistema gestiona automáticamente la selección de proveedores. Los campos 'provider'/'model' solo están permitidos en rutas específicas como content.template_snapshot.*"
+                return False, f"Violación de política: {recursive_error}. El sistema gestiona automáticamente la selección de proveedores. Los campos 'provider'/'model' no están permitidos en payloads de contenido."
 
             # Validación específica a nivel raíz (solo slide_plan)
             # Las validaciones de provider/model ya están cubiertas por _detect_forbidden_keys_recursive
@@ -545,32 +539,11 @@ class ContentService(VerificationBaseService):
 
             # Validaciones específicas para diapositivas
             if content_type == "slide":
-                slide_template = content_data.get("slide_template", "")
-
-                # Auto-generate slide_template if not provided or invalid (igual que en bulk)
-                if not slide_template or not self.slide_style_service.validate_slide_template(slide_template):
-                    if not slide_template:
-                        logging.info(f"create_content: slide_template no proporcionado para slide, generando automáticamente")
-                    else:
-                        logging.warning(f"create_content: slide_template inválido para slide, regenerando automáticamente")
-
-                    # Generate a default slide template
-                    slide_template = self.slide_style_service.generate_slide_template()
-                    content_data["slide_template"] = slide_template
-                    logging.info(f"create_content: slide_template generado automáticamente para slide")
 
                 # Extraer campos de slide desde content_data['content'] en lugar de raíz
                 slide_fields = (content_data.get('content') or {})
 
-                # If client provided template_snapshot (new field), validate it too
-                # Priorizar slide_fields, fallback a raíz para backward compatibility
-                template_snapshot = slide_fields.get("template_snapshot")
-                if template_snapshot is None:
-                    template_snapshot = content_data.get("template_snapshot")
-                if template_snapshot is not None:
-                    valid_ts, ts_msg = self.validate_template_snapshot(template_snapshot)
-                    if not valid_ts:
-                        return False, f"template_snapshot inválido: {ts_msg}"
+
 
             # Extraer campos de slide desde content_data['content'] para todos los tipos de contenido
             # (solo se usará para slides, pero se define aquí para disponibilidad general)
@@ -583,7 +556,7 @@ class ContentService(VerificationBaseService):
                 narrative_text = slide_fields.get("narrative_text")
                 full_text = slide_fields.get("full_text")
                 slide_plan = slide_fields.get("slide_plan")
-                template_snapshot = slide_fields.get("template_snapshot")
+
 
                 # Backward compatibility: si no existen en content, intentar raíz temporalmente
                 deprecated_fields_used = []
@@ -603,10 +576,7 @@ class ContentService(VerificationBaseService):
                     slide_plan = content_data.get("slide_plan")
                     if slide_plan is not None:
                         deprecated_fields_used.append("slide_plan")
-                if template_snapshot is None:
-                    template_snapshot = content_data.get("template_snapshot")
-                    if template_snapshot is not None:
-                        deprecated_fields_used.append("template_snapshot")
+
 
                 # Log warnings for deprecated root field usage
                 for field in deprecated_fields_used:
@@ -688,7 +658,6 @@ class ContentService(VerificationBaseService):
                 content_html = slide_fields.get("content_html")
                 narrative_text = slide_fields.get("narrative_text")
                 slide_plan = slide_fields.get("slide_plan")
-                template_snapshot = slide_fields.get("template_snapshot")
 
                 # Backward compatibility: si no existen en slide_fields, intentar raíz temporalmente
                 if full_text is None:
@@ -699,8 +668,7 @@ class ContentService(VerificationBaseService):
                     narrative_text = content_data.get("narrative_text")
                 if slide_plan is None:
                     slide_plan = content_data.get("slide_plan")
-                if template_snapshot is None:
-                    template_snapshot = content_data.get("template_snapshot")
+
 
                 # Agregar a kwargs si no son None
                 if full_text is not None:
@@ -711,8 +679,7 @@ class ContentService(VerificationBaseService):
                     kwargs["narrative_text"] = narrative_text
                 if slide_plan is not None:
                     kwargs["slide_plan"] = slide_plan
-                if template_snapshot is not None:
-                    kwargs["template_snapshot"] = template_snapshot
+
 
             content = TopicContent(
                 topic_id=topic_id,
@@ -726,7 +693,6 @@ class ContentService(VerificationBaseService):
                 generation_prompt=content_data.get("generation_prompt"),
                 ai_credits=content_data.get("ai_credits", True),
                 personalization_markers=markers,
-                slide_template=content_data.get("slide_template", ""),  # Incluir slide_template
                 status=initial_status,
                 order=content_data.get("order"),
                 parent_content_id=content_data.get("parent_content_id"),
@@ -1238,22 +1204,8 @@ class ContentService(VerificationBaseService):
                     # Define slide_fields from content object with fallback to root for compatibility
                     slide_fields = (content_data.get('content') or {})
 
-                    slide_template = content_data.get("slide_template", "")
-                    
                     # Log the received data for debugging
-                    logging.info(f"Contenido {i+1}: Procesando slide con slide_template='{slide_template[:100] if slide_template else 'EMPTY'}...'")
-                    
-                    # Auto-generate slide_template if not provided or invalid
-                    if not slide_template or not self.slide_style_service.validate_slide_template(slide_template):
-                        if not slide_template:
-                            logging.info(f"Contenido {i+1}: slide_template no proporcionado, generando automáticamente")
-                        else:
-                            logging.warning(f"Contenido {i+1}: slide_template inválido, regenerando automáticamente")
-                        
-                        # Generate a default slide template
-                        slide_template = self.slide_style_service.generate_slide_template()
-                        content_data["slide_template"] = slide_template
-                        logging.info(f"Contenido {i+1}: slide_template generado automáticamente")
+                    logging.info(f"Contenido {i+1}: Procesando slide...")
 
                     # Detectar caso skeleton: full_text presente sin content_html ni narrative_text
                     ft = slide_fields.get("full_text")
@@ -1275,13 +1227,7 @@ class ContentService(VerificationBaseService):
                         if nt is not None:
                             deprecated_fields_used.append("narrative_text")
 
-                    # Validar template_snapshot según el tipo de slide
-                    template_snapshot = slide_fields.get("template_snapshot")
-                    # Backward compatibility: si no existe en content, intentar raíz temporalmente
-                    if template_snapshot is None:
-                        template_snapshot = content_data.get("template_snapshot")
-                        if template_snapshot is not None:
-                            deprecated_fields_used.append("template_snapshot")
+                    # template_snapshot has been removed - all configuration is now in slide_plan
 
                     # Log warnings for deprecated root field usage
                     for field in deprecated_fields_used:
@@ -1297,20 +1243,7 @@ class ContentService(VerificationBaseService):
                     # y planificar la migración a la estructura content.{field}
 
                     is_skeleton = ft and not ch and not nt
-                    if is_skeleton:
-                        # Para skeleton slides, template_snapshot es obligatorio
-                        if template_snapshot is None:
-                            raise ValueError(f"Contenido {i+1}: Las diapositivas skeleton requieren 'template_snapshot'. Use /api/content/bulk/slides para creación optimizada de skeleton slides.")
-
-                        valid_ts, ts_msg = self.validate_template_snapshot(template_snapshot)
-                        if not valid_ts:
-                            raise ValueError(f"Contenido {i+1}: template_snapshot inválido: {ts_msg}")
-                    else:
-                        # Para non-skeleton slides, template_snapshot es opcional pero se valida si se proporciona
-                        if template_snapshot is not None:
-                            valid_ts, ts_msg = self.validate_template_snapshot(template_snapshot)
-                            if not valid_ts:
-                                raise ValueError(f"Contenido {i+1}: template_snapshot inválido: {ts_msg}")
+                    # Skeleton slides validation removed - template_snapshot no longer used
 
                     # Validar estructura de slides en content_data
                     slides = content_data.get("content_data", {}).get("slides", [])
@@ -1447,7 +1380,7 @@ class ContentService(VerificationBaseService):
                     content_html = slide_fields.get("content_html")
                     narrative_text = slide_fields.get("narrative_text")
                     slide_plan = slide_fields.get("slide_plan")
-                    template_snapshot = slide_fields.get("template_snapshot")
+                    # template_snapshot removed - all configuration is now in slide_plan
 
                     # Backward compatibility: si no existen en content, intentar raíz temporalmente
                     if full_text is None:
@@ -1458,8 +1391,6 @@ class ContentService(VerificationBaseService):
                         narrative_text = content_data.get("narrative_text")
                     if slide_plan is None:
                         slide_plan = content_data.get("slide_plan")
-                    if template_snapshot is None:
-                        template_snapshot = content_data.get("template_snapshot")
 
                     if full_text is not None:
                         kwargs["full_text"] = full_text
@@ -1469,8 +1400,6 @@ class ContentService(VerificationBaseService):
                         kwargs["narrative_text"] = narrative_text
                     if slide_plan is not None:
                         kwargs["slide_plan"] = slide_plan
-                    if template_snapshot is not None:
-                        kwargs["template_snapshot"] = template_snapshot
                 
                 # Crear objeto de contenido
                 content = TopicContent(
@@ -1485,7 +1414,7 @@ class ContentService(VerificationBaseService):
                     generation_prompt=content_data.get("generation_prompt"),
                     ai_credits=content_data.get("ai_credits", True),
                     personalization_markers=markers,
-                    slide_template=content_data.get("slide_template", ""),
+
                     status=initial_status,
                     order=content_data.get("order"),
                     parent_content_id=content_data.get("parent_content_id"),
@@ -1536,7 +1465,7 @@ class ContentService(VerificationBaseService):
         Requisitos estrictos:
          - Todos los items deben tener content_type == 'slide'
          - Todos deben pertenecer al mismo topic_id
-         - Cada slide debe incluir full_text (string) y template_snapshot (objeto/dict) en el campo content
+         - Cada slide debe incluir full_text (string) y slide_plan (string) en el campo content
          - El orden (order) debe existir para cada slide y ser una secuencia consecutiva comenzando en 1
          - Las diapositivas serán creadas con status='skeleton' sin importar lo que envíe el cliente
         """
@@ -1560,13 +1489,7 @@ class ContentService(VerificationBaseService):
             if not full_text or not isinstance(full_text, str) or not full_text.strip():
                 return False, f"Elemento {i+1}: full_text es requerido en payload.content para crear una slide skeleton y debe ser una cadena no vacía"
 
-            # Validate template_snapshot from payload
-            ts = payload.get('template_snapshot')
-            if ts is None:
-                return False, f"Elemento {i+1}: template_snapshot es requerido en payload.content y debe ser un objeto con estilos"
-            valid_ts, ts_msg = self.validate_template_snapshot(ts)
-            if not valid_ts:
-                return False, f"Elemento {i+1}: template_snapshot inválido en payload.content: {ts_msg}"
+
 
         # Validar secuencia de orders: deben ser únicos y consecutivos comenzando en 1
         orders = sorted([s["order"] for s in slides_data])
@@ -1618,11 +1541,7 @@ class ContentService(VerificationBaseService):
                     content_for_markers or json.dumps(slide.get("interactive_data", {}))
                 )
 
-                # Auto-generate slide_template if not provided or invalid
-                slide_template = slide.get("slide_template", "")
-                if not slide_template or not self.slide_style_service.validate_slide_template(slide_template):
-                    slide_template = self.slide_style_service.generate_slide_template()
-                    logging.info(f"create_bulk_slides_skeleton: slide_template generado automáticamente para slide {slide.get('order', 'N/A')}")
+
 
                 # Prepare kwargs for slide fields from payload
                 kwargs = {}
@@ -1630,8 +1549,6 @@ class ContentService(VerificationBaseService):
                     kwargs["full_text"] = payload.get("full_text")
                 if payload.get("slide_plan") is not None:
                     kwargs["slide_plan"] = payload.get("slide_plan")
-                if payload.get("template_snapshot") is not None:
-                    kwargs["template_snapshot"] = payload.get("template_snapshot")
 
                 content_obj = TopicContent(
                     topic_id=slide.get("topic_id"),
@@ -1645,7 +1562,6 @@ class ContentService(VerificationBaseService):
                     generation_prompt=slide.get("generation_prompt"),
                     ai_credits=slide.get("ai_credits", True),
                     personalization_markers=markers,
-                    slide_template=slide_template,
                     # Force skeleton status regardless of provided status
                     status="skeleton",
                     order=slide.get("order"),
@@ -1682,7 +1598,7 @@ class ContentService(VerificationBaseService):
                 content_data = upsert_doc.pop('content', {})
 
                 # Solo actualizar campos específicos de skeleton, preservando content_html y narrative_text
-                skeleton_fields = ['full_text', 'slide_plan', 'template_snapshot']
+                skeleton_fields = ['full_text', 'slide_plan']  # template_snapshot removed
                 for field in skeleton_fields:
                     if field in content_data:
                         content_updates[f'content.{field}'] = content_data[field]
@@ -1779,12 +1695,7 @@ class ContentService(VerificationBaseService):
                 f"create_bulk_slides_skeleton: Procesados {upserted_count} slides para topic {first_topic}: "
                 f"{inserted_count} nuevos, {updated_count} actualizados, {delete_result.deleted_count if 'delete_result' in locals() else 0} eliminados"
             )
-            # Log structure of template_snapshot for debugging (capped verbosity)
-            try:
-                first_payload = slides_data[0].get('content') or {}
-                logging.debug(f"create_bulk_slides_skeleton: template_snapshot ejemplo: {json.dumps(first_payload.get('template_snapshot'), ensure_ascii=False)[:200]}")
-            except Exception:
-                pass
+            # template_snapshot logging removed - field no longer used
 
             return True, final_ids
         except DuplicateKeyError as e:
@@ -2016,23 +1927,7 @@ class ContentService(VerificationBaseService):
             logging.error(f"Error obteniendo estadísticas de secuencia: {str(e)}")
             return {}
     
-    def generate_slide_template(self, palette_name: str = None, font_family: str = None, custom_colors: Dict = None) -> str:
-        """
-        Genera un slide_template usando el servicio de estilo de diapositivas.
-        
-        Args:
-            palette_name: Nombre de la paleta predefinida (opcional)
-            font_family: Familia de fuente específica (opcional)
-            custom_colors: Colores personalizados (opcional)
-            
-        Returns:
-            String con el prompt para generar el slide_template
-        """
-        return self.slide_style_service.generate_slide_template(
-            palette_name=palette_name,
-            font_family=font_family,
-            custom_colors=custom_colors
-        )
+
     
     def get_available_slide_palettes(self) -> List[str]:
         """
@@ -2121,25 +2016,7 @@ class ContentService(VerificationBaseService):
             logging.error(f"Error aplicando recomendaciones de plantillas: {str(e)}")
             return False, f"Error interno: {str(e)}"
     
-    def get_slide_template_compatibility(self, slide_id: str, template_id: str) -> Dict:
-        """
-        Analiza la compatibilidad entre una diapositiva y una plantilla.
-        
-        Args:
-            slide_id: ID de la diapositiva
-            template_id: ID de la plantilla
-            
-        Returns:
-            Dict con análisis de compatibilidad
-        """
-        try:
-            return self.template_recommendation_service.analyze_slide_template_compatibility(
-                slide_id=slide_id,
-                template_id=template_id
-            )
-        except Exception as e:
-            logging.error(f"Error analizando compatibilidad de plantilla: {str(e)}")
-            return {}
+
     
     def submit_template_feedback(self, student_id: str, topic_id: str, slide_id: str,
                                template_id: str, feedback_data: Dict) -> Tuple[bool, str]:
@@ -2191,73 +2068,7 @@ class ContentService(VerificationBaseService):
         """
         return self.embedded_content_service.get_embedding_statistics(topic_id)
     
-    def validate_template_snapshot(self, template_snapshot: Any) -> Tuple[bool, str]:
-        """
-        Valida la estructura esperada del campo `template_snapshot` que describe estilos de slide.
-        Se espera un objeto/dict con campos como:
-            - palette: dict {primary: "#FFFFFF", secondary: "#000000", ...}
-            - grid: dict {columns: int, gap: int, rows: optional int}
-            - fontFamilies: list of str
-            - spacing: dict {small: int, medium: int, large: int}
-            - breakpoints: dict {mobile: int, tablet: int, desktop: int}
-        Retorna (True, "") si válido, o (False, "mensaje") si inválido.
-        """
-        try:
-            if not isinstance(template_snapshot, dict):
-                logging.debug("validate_template_snapshot: template_snapshot debe ser un objeto/dict")
-                return False, "template_snapshot debe ser un objeto JSON (no un string)"
-            
-            # Required top-level keys (flexible)
-            required_keys = ["palette", "grid", "fontFamilies", "spacing", "breakpoints"]
-            for key in required_keys:
-                if key not in template_snapshot:
-                    return False, f"Falta campo requerido en template_snapshot: '{key}'"
 
-            # Validate palette
-            palette = template_snapshot.get("palette")
-            if not isinstance(palette, dict) or not palette:
-                return False, "palette debe ser un objeto con al menos un color"
-            hex_color_re = re.compile(r'^#([A-Fa-f0-9]{6}|[A-Fa-f0-9]{3})$')
-            for name, color in palette.items():
-                if not isinstance(color, str) or not hex_color_re.match(color.strip()):
-                    return False, f"palette.{name} debe ser un color hex válido (ej. '#RRGGBB')"
-
-            # Validate grid
-            grid = template_snapshot.get("grid")
-            if not isinstance(grid, dict):
-                return False, "grid debe ser un objeto con configuración de grillas"
-            columns = grid.get("columns")
-            if not isinstance(columns, int) or columns < 1:
-                return False, "grid.columns debe ser un entero >= 1"
-            if "gap" in grid and (not isinstance(grid.get("gap"), int) or grid.get("gap") < 0):
-                return False, "grid.gap debe ser un entero >= 0 si se proporciona"
-
-            # Validate fontFamilies
-            font_families = template_snapshot.get("fontFamilies")
-            if not isinstance(font_families, list) or not font_families or not all(isinstance(f, str) for f in font_families):
-                return False, "fontFamilies debe ser una lista de cadenas de texto indicando familias de fuentes"
-
-            # Validate spacing
-            spacing = template_snapshot.get("spacing")
-            if not isinstance(spacing, dict):
-                return False, "spacing debe ser un objeto con valores numéricos"
-            for k, v in spacing.items():
-                if not isinstance(v, (int, float)) or v < 0:
-                    return False, f"spacing.{k} debe ser un número >= 0"
-
-            # Validate breakpoints
-            breakpoints = template_snapshot.get("breakpoints")
-            if not isinstance(breakpoints, dict) or not breakpoints:
-                return False, "breakpoints debe ser un objeto con al menos un punto de ruptura"
-            for name, val in breakpoints.items():
-                if not isinstance(val, int) or val <= 0:
-                    return False, f"breakpoints.{name} debe ser un entero positivo"
-
-            logging.debug("validate_template_snapshot: estructura válida")
-            return True, ""
-        except Exception as e:
-            logging.error(f"Error validando template_snapshot: {e}")
-            return False, f"Error validando template_snapshot: {str(e)}"
 
     def update_content(self, content_id: str, update_data: Dict) -> Tuple[bool, str]:
         """
@@ -2283,12 +2094,6 @@ class ContentService(VerificationBaseService):
 
             # Validaciones específicas para diapositivas
             content_type = update_data.get("content_type", current_content.get("content_type"))
-            if content_type == "slide" and "slide_template" in update_data:
-                slide_template = update_data.get("slide_template", "")
-                if slide_template:  # Solo validar si se proporciona slide_template
-                    # Validar que slide_template sea un prompt válido
-                    if not self.slide_style_service.validate_slide_template(slide_template):
-                        return False, "El slide_template no es un prompt válido"
 
             update_data["updated_at"] = datetime.now()
 
@@ -2315,7 +2120,7 @@ class ContentService(VerificationBaseService):
 
             # Normalizar siempre los campos de slide al espacio content.*
             # antes de construir el $set para evitar escribir campos raíz
-            root_fields_to_normalize = ['content_html', 'narrative_text', 'full_text', 'slide_plan', 'template_snapshot']
+            root_fields_to_normalize = ['content_html', 'narrative_text', 'full_text', 'slide_plan']
 
             # Construir content_updates unificado fusionando en orden:
             # 1. Existing content dict
@@ -2351,11 +2156,7 @@ class ContentService(VerificationBaseService):
             if content_updates.get('full_text') is not None and not isinstance(content_updates.get('full_text'), str):
                 return False, "content.full_text debe ser una cadena de texto si se proporciona"
 
-            # Validar template_snapshot si está presente en content_updates
-            if content_updates.get('template_snapshot') is not None:
-                valid_ts, ts_msg = self.validate_template_snapshot(content_updates.get('template_snapshot'))
-                if not valid_ts:
-                    return False, f"template_snapshot inválido: {ts_msg}"
+            # template_snapshot validation removed - field no longer used
 
             # Asegurar que el $set final no incluya ninguna de estas claves a nivel raíz
             for field in root_fields_to_normalize:
@@ -2409,14 +2210,7 @@ class ContentService(VerificationBaseService):
                 update_data["status"] = new_status
                 logging.info(f"update_content: slide {content_id} status será actualizado a '{new_status}'")
 
-                # Validar template_snapshot si viene en update_data (raíz o anidado)
-                template_snapshot = update_data.get("template_snapshot")
-                if template_snapshot is None:
-                    template_snapshot = content_updates.get("template_snapshot")
-                if template_snapshot is not None:
-                    valid_ts, ts_msg = self.validate_template_snapshot(template_snapshot)
-                    if not valid_ts:
-                        return False, f"template_snapshot inválido: {ts_msg}"
+                # template_snapshot validation removed - field no longer used
 
             # Construir set_ops con claves punteadas para content_updates unificado
             # Esto evita sobrescribir el subdocumento 'content' completo
@@ -2956,7 +2750,6 @@ class ContentService(VerificationBaseService):
             - Calcula porcentajes de completitud (html + narrative)
             - Identifica slides faltantes o incompletas con razones
             - Valida orden secuencial correcto por parent_content_id
-            - Valida consistencia de template_snapshot entre slides (si aplica)
         Retorna un reporte detallado.
         """
         try:
@@ -2968,7 +2761,7 @@ class ContentService(VerificationBaseService):
             slides = list(self.collection.find(query, {
                 "_id": 1, "order": 1, "parent_content_id": 1,
                 "content.content_html": 1, "content.narrative_text": 1, "content.full_text": 1,
-                "content.template_snapshot": 1, "status": 1, "created_at": 1, "updated_at": 1
+                "status": 1, "created_at": 1, "updated_at": 1
             }).sort([("order", 1), ("created_at", 1)]))
 
             total = len(slides)
@@ -2978,12 +2771,10 @@ class ContentService(VerificationBaseService):
                     "percent_complete": 0.0,
                     "missing_or_incomplete": [],
                     "sequence_errors": [],
-                    "template_snapshot_issues": [],
                     "per_parent": {}
                 }
 
             missing_or_incomplete = []
-            template_snapshots = {}
             per_parent = {}
             sequence_errors = []
 
@@ -3026,19 +2817,7 @@ class ContentService(VerificationBaseService):
                         "status": status
                     })
 
-                # Track template_snapshot consistency: build a fingerprint of keys for simplicity
-                ts = content.get("template_snapshot")
-                if ts is None:
-                    # record missing template_snapshot
-                    template_snapshots.setdefault("missing", []).append(sid)
-                else:
-                    try:
-                        # fingerprint as sorted keys list
-                        keys = sorted(list(ts.keys())) if isinstance(ts, dict) else ["non_dict_snapshot"]
-                        key_sig = tuple(keys)
-                        template_snapshots.setdefault(key_sig, []).append(sid)
-                    except Exception:
-                        template_snapshots.setdefault("invalid", []).append(sid)
+                # template_snapshot tracking removed - field no longer used
 
                 per_parent[parent_key]["slides"].append({
                     "content_id": sid,
@@ -3074,29 +2853,7 @@ class ContentService(VerificationBaseService):
                         break
                     expected += 1
 
-            # Template snapshot issues: if more than one signature besides 'missing' exists -> inconsistent
-            ts_issues = []
-            sigs = [k for k in template_snapshots.keys()]
-            # Count distinct non-missing signatures
-            non_missing_sigs = [k for k in sigs if k != "missing" and k != "invalid"]
-            if len(set(non_missing_sigs)) > 1:
-                ts_issues.append({
-                    "issue": "inconsistent_template_signatures",
-                    "signatures_count": len(set(non_missing_sigs)),
-                    "details": {str(k): v for k, v in template_snapshots.items()}
-                })
-            if "missing" in template_snapshots:
-                ts_issues.append({
-                    "issue": "missing_template_snapshot",
-                    "count": len(template_snapshots.get("missing", [])),
-                    "examples": template_snapshots.get("missing", [])[:5]
-                })
-            if "invalid" in template_snapshots:
-                ts_issues.append({
-                    "issue": "invalid_template_snapshot",
-                    "count": len(template_snapshots.get("invalid", [])),
-                    "examples": template_snapshots.get("invalid", [])[:5]
-                })
+            # template_snapshot issues processing removed - field no longer used
 
             complete_count = total - len(missing_or_incomplete)
             percent_complete = round((complete_count / total * 100), 2)
@@ -3107,7 +2864,6 @@ class ContentService(VerificationBaseService):
                 "percent_complete": percent_complete,
                 "missing_or_incomplete": missing_or_incomplete,
                 "sequence_errors": sequence_errors,
-                "template_snapshot_issues": ts_issues,
                 "per_parent": per_parent
             }
             return report

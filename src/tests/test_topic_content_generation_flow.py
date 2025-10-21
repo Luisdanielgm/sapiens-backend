@@ -39,13 +39,7 @@ class TestTopicContentGenerationFlow(unittest.TestCase):
                 "order": 1,
                 "content": {
                     "full_text": "Introducción al tema...",
-                    "slide_plan": self.slide_plan,
-                    "template_snapshot": {
-                        "style": "modern",
-                        "colors": ["blue", "white"],
-                        "font": "sans-serif",
-                        "layout": "title-and-content"
-                    }
+                    "slide_plan": self.slide_plan
                 },
                 "creator_id": self.test_user_id,
                 "status": "skeleton"
@@ -56,13 +50,7 @@ class TestTopicContentGenerationFlow(unittest.TestCase):
                 "order": 2,
                 "content": {
                     "full_text": "Desarrollo del concepto principal...",
-                    "slide_plan": self.slide_plan,
-                    "template_snapshot": {
-                        "style": "modern",
-                        "colors": ["blue", "white"],
-                        "font": "sans-serif",
-                        "layout": "title-and-content"
-                    }
+                    "slide_plan": self.slide_plan
                 },
                 "creator_id": self.test_user_id,
                 "status": "skeleton"
@@ -73,13 +61,7 @@ class TestTopicContentGenerationFlow(unittest.TestCase):
                 "order": 3,
                 "content": {
                     "full_text": "Conclusión y resumen...",
-                    "slide_plan": self.slide_plan,
-                    "template_snapshot": {
-                        "style": "modern",
-                        "colors": ["blue", "white"],
-                        "font": "sans-serif",
-                        "layout": "title-and-content"
-                    }
+                    "slide_plan": self.slide_plan
                 },
                 "creator_id": self.test_user_id,
                 "status": "skeleton"
@@ -185,12 +167,11 @@ class TestTopicContentGenerationFlow(unittest.TestCase):
         self.assertIn('content', update_doc)
         self.assertIn('full_text', update_doc['content'])
         self.assertIn('slide_plan', update_doc['content'])
-        self.assertIn('template_snapshot', update_doc['content'])
+        # template_snapshot removed - all configuration now in slide_plan
 
         # Verificar que no se encuentran estos campos a nivel raíz de update_doc
         self.assertNotIn('full_text', update_doc)
         self.assertNotIn('slide_plan', update_doc)
-        self.assertNotIn('template_snapshot', update_doc)
 
         # Paso 2: Actualizar HTML de slides
         for i, slide_id in enumerate(result):
@@ -201,8 +182,7 @@ class TestTopicContentGenerationFlow(unittest.TestCase):
                 "order": i + 1,
                 "content": {
                     "full_text": self.slides_data[i]['content']['full_text'],
-                    "slide_plan": self.slide_plan,
-                    "template_snapshot": self.slides_data[i]['content']['template_snapshot']
+                    "slide_plan": self.slide_plan
                 },
                 "status": "skeleton"
             }
@@ -230,8 +210,7 @@ class TestTopicContentGenerationFlow(unittest.TestCase):
                 "content": {
                     "full_text": self.slides_data[i]['content']['full_text'],
                     "slide_plan": self.slide_plan,
-                    "content_html": self.sample_html,
-                    "template_snapshot": self.slides_data[i]['content']['template_snapshot']
+                    "content_html": self.sample_html
                 },
                 "status": "html_ready"
             }
@@ -470,14 +449,7 @@ class TestTopicContentGenerationFlow(unittest.TestCase):
                 "provider": "anthropic",  # Prohibido
                 "content": {
                     "full_text": "Test",
-                    "slide_template": "Generate a professional slide with modern design",
-                    "template_snapshot": {
-                        "palette": {"primary": "#007bff", "secondary": "#6c757d"},
-                        "grid": {"columns": 12, "gap": 16},
-                        "fontFamilies": ["Arial", "Helvetica"],
-                        "spacing": {"small": 8, "medium": 16, "large": 24},
-                        "breakpoints": {"mobile": 480, "tablet": 768, "desktop": 1024}
-                    }
+                    "slide_template": "Generate a professional slide with modern design"
                 }
             }
         ]
@@ -542,14 +514,7 @@ class TestTopicContentGenerationFlow(unittest.TestCase):
             'order': 1,
             'content': {
                 'full_text': 'X',
-                'slide_plan': {'a': 1},
-                'template_snapshot': {
-                    'palette': {'primary': '#007bff', 'secondary': '#6c757d'},
-                    'grid': {'columns': 12, 'gap': 16},
-                    'fontFamilies': ['Arial', 'Helvetica'],
-                    'spacing': {'small': 8, 'medium': 16, 'large': 24},
-                    'breakpoints': {'mobile': 480, 'tablet': 768, 'desktop': 1024}
-                }
+                'slide_plan': {'a': 1}
             }
         }]
         success, message = service.create_bulk_slides_skeleton(slides_data=invalid_slides)
@@ -778,17 +743,15 @@ class TestTopicContentGenerationFlow(unittest.TestCase):
         self.assertIn('content', update_doc)
         self.assertIn('full_text', update_doc['content'])
         self.assertIn('slide_plan', update_doc['content'])
-        self.assertIn('template_snapshot', update_doc['content'])
         self.assertIn('content_html', update_doc['content'])
         self.assertIn('narrative_text', update_doc['content'])
-        self.assertIn('template_snapshot', update_doc['content'])
+        # template_snapshot removed - all configuration now in slide_plan
 
         # Verificar que NO existen a nivel raíz
         self.assertNotIn('full_text', update_doc)
         self.assertNotIn('slide_plan', update_doc)
         self.assertNotIn('content_html', update_doc)
         self.assertNotIn('narrative_text', update_doc)
-        self.assertNotIn('template_snapshot', update_doc)
 
         # Test 6.2: Verificar `to_dict()` de TopicContent
         topic_content = TopicContent(

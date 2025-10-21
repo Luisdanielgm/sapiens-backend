@@ -27,9 +27,15 @@ content_type ∈ {'slide','quiz'}.
 
 Todo dato específico del contenido va dentro de content (lowercase):
 
-Slides: content.full_text (trozo literal), content.slide_plan (string/Markdown, no JSON), content.content_html (HTML), content.narrative_text (string).
+Slides: 
+- content.full_text (trozo literal)
+- content.slide_plan (string/Markdown, NO JSON)
+- content.content_html (HTML)
+- content.narrative_text (string)
 
 Quiz: estructura completa del quiz dentro de content según esquema vigente.
+
+**IMPORTANTE**: Todos los campos específicos del contenido DEBEN estar dentro del objeto `content`. NO deben existir campos como `slide_plan`, `full_text`, `content_html`, o `narrative_text` al nivel raíz del documento.
 
 Flujo (visto desde API)
 
@@ -45,11 +51,15 @@ Políticas
 
 Sin parámetros de proveedor/modelo en payloads (rechazar/ignorar).
 
-slide_plan es string (texto/MD), prohibido JSON.
+content.slide_plan es string (texto/MD), prohibido JSON.
 
-full_text debe ser un substring literal de Topics.theory_content.
+content.full_text debe ser un substring literal de Topics.theory_content.
 
-No duplicar campos fuera de content (nada de content_html, narrative_text, full_text al nivel raíz).
+No duplicar campos fuera de content (nada de content_html, narrative_text, full_text, slide_plan al nivel raíz).
+
+**CAMPOS OBSOLETOS ELIMINADOS**: 
+- `slide_template` - COMPLETAMENTE ELIMINADO
+- `template_snapshot` - COMPLETAMENTE ELIMINADO
 
 Checklist de verificación (solo backend)
 
@@ -93,7 +103,7 @@ Políticas de API
 
  Si llegan provider/model en payload → 400/ignorar.
 
- slide_plan validado como string (rechazar objetos/arrays).
+ content.slide_plan validado como string (rechazar objetos/arrays).
 
  Idempotencia: re-click no duplica slides (reusa order) ni quiz.
 
@@ -124,9 +134,9 @@ POST /content/bulk/slides que acepte lote con order; upsert por (topic_id, order
 
 Si sobran slides previos (más que N), eliminarlos.
 
-Auto-generar template_snapshot por defecto si falta (o aceptar mínimo válido), sin bloquear el flujo (el spec no lo exige).
+**Nota**: `template_snapshot` y `slide_template` han sido eliminados completamente del sistema. Toda la configuración de estilo y plantillas ahora se maneja a través de `content.slide_plan`.
 
-Validación slide_plan
+Validación content.slide_plan
 
 Tipo string; rechazar payloads object/array.
 
@@ -164,7 +174,7 @@ Contadores: slides creados/actualizados, quiz reemplazado, fallos de validación
 
 Tests automatizados
 
-Unit: validadores (slide_plan, HTML, nesting).
+Unit: validadores (content.slide_plan, HTML, nesting).
 
 Integración:
 
@@ -172,7 +182,7 @@ Generación inicial: N slides + 1 quiz, nesting correcto.
 
 Re-generación: no duplica, reemplaza quiz, mantiene order.
 
-Rechazo de provider/model y slide_plan no-string.
+Rechazo de provider/model y content.slide_plan no-string.
 
 G. Documentación
 
@@ -188,6 +198,6 @@ Upsert por (topic_id, order) en creación de slides (bulk) y delete sobrantes.
 
 Reemplazo de quiz: deleteMany(topic_id, 'quiz') previo a crear.
 
-Validadores: rechazar slide_plan no-string; sanitizar content_html.
+Validadores: rechazar content.slide_plan no-string; sanitizar content.content_html.
 
 Índices: crear únicos para slides/quiz.

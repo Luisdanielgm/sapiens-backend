@@ -90,7 +90,6 @@ class TopicContent:
                  generation_prompt: Optional[str] = None,
                  ai_credits: bool = True,
                  personalization_markers: Optional[Dict] = None,
-                 slide_template: Optional[str] = None,  # Prompt para generar plantilla de diapositivas
                  # Nuevos campos para sistema de plantillas
                  render_engine: str = "legacy",  # legacy | html_template
                  instance_id: Optional[str] = None,  # Referencia a TemplateInstance
@@ -117,7 +116,6 @@ class TopicContent:
         self.generation_prompt = generation_prompt
         self.ai_credits = ai_credits
         self.personalization_markers = personalization_markers or {}
-        self.slide_template = slide_template or ""
         # Nuevos campos de plantillas
         self.render_engine = render_engine
         self.instance_id = ObjectId(instance_id) if instance_id else None
@@ -162,11 +160,7 @@ class TopicContent:
                     self.content['slide_plan'] = kwargs.pop('slide_plan')
                 else:
                     kwargs.pop('slide_plan')
-            if 'template_snapshot' in kwargs:
-                if 'template_snapshot' not in self.content:
-                    self.content['template_snapshot'] = kwargs.pop('template_snapshot')
-                else:
-                    kwargs.pop('template_snapshot')
+
 
         if kwargs:
             logging.warning(f"TopicContent received unexpected arguments, which were ignored: {list(kwargs.keys())}")
@@ -185,7 +179,6 @@ class TopicContent:
             "generation_prompt": self.generation_prompt,
             "ai_credits": self.ai_credits,
             "personalization_markers": self.personalization_markers,
-            "slide_template": self.slide_template,
             "render_engine": self.render_engine,
             "learning_mix": self.learning_mix,
             "order": self.order,
@@ -206,7 +199,7 @@ class TopicContent:
         # Fix content field duplication: ensure content-specific fields are only inside content object
         if self.content_type in ['slide', 'quiz'] and isinstance(self.content, dict):
             # Remove any root-level copies of these fields to prevent duplication
-            content_specific_fields = ['content_html', 'narrative_text', 'full_text', 'slide_plan', 'template_snapshot']
+            content_specific_fields = ['content_html', 'narrative_text', 'full_text', 'slide_plan']
             # Only iterate if any of the content-specific fields exist at root level
             if any(field in data for field in content_specific_fields):
                 for field in content_specific_fields:
