@@ -12,11 +12,11 @@ from .services import (
     ContentTypeService,
     LearningMethodologyService,
     ContentService,
+    EvaluationService,
     EvaluationResourceService,
     TopicReadinessService,
     AutomaticGradingService
 )
-from src.evaluations.services import EvaluationService
 from src.resources.services import ResourceService, ResourceFolderService
 import logging
 from src.shared.constants import ROLES

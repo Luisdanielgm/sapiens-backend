@@ -1871,14 +1871,15 @@ class EvaluationService(VerificationBaseService):
             due_date_str = evaluation_data.get("due_date")
             if isinstance(due_date_str, str):
                 try:
-                    evaluation_dict["due_date"] = datetime.fromisoformat(due_date_str)
+                    normalized_due_date = due_date_str.replace("Z", "+00:00") if due_date_str.endswith("Z") else due_date_str
+                    evaluation_dict["due_date"] = datetime.fromisoformat(normalized_due_date)
                 except ValueError:
-                     logging.error(f"Formato de due_date inválido: {due_date_str}")
-                     return False, f"Formato de due_date inválido: {due_date_str}"
+                    logging.error(f"Formato de due_date invalido: {due_date_str}")
+                    return False, f"Formato de due_date invalido: {due_date_str}"
             elif isinstance(due_date_str, datetime):
-                 evaluation_dict["due_date"] = due_date_str # Ya es datetime
+                evaluation_dict["due_date"] = due_date_str  # Ya es datetime
             else:
-                 return False, "due_date es requerida y debe ser string ISO 8601 o datetime"
+                return False, "due_date es requerida y debe ser string ISO 8601 o datetime"
             # ---- Fin: Manejo de due_date ----
 
             # Crear la evaluación con parámetros exactos

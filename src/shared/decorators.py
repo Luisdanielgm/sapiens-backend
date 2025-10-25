@@ -42,22 +42,22 @@ def handle_errors(f):
     return decorated_function
 
 def auth_required(f):
-    """Decorador para requerir autenticación mediante JWT"""
+    """Decorador para requerir autenticacion mediante JWT"""
     @wraps(f)
     def decorated_function(*args, **kwargs):
         logger = logging.getLogger(__name__)
-        
+
         try:
             # Usar flask_jwt_extended para verificar el token
             verify_jwt_in_request()
-            # Guardar el ID del usuario para usarlo en la función
+            # Guardar el ID del usuario para usarlo en la funcion
             user_id = get_jwt_identity()
-            logger.info(f"Auth_required: Token JWT válido para usuario con ID: {user_id}")
-            
+            logger.info(f"Auth_required: Token JWT valido para usuario con ID: {user_id}")
+
             # Verificar que el usuario existe en la base de datos
             db = get_db()
             user = db.users.find_one({"_id": ObjectId(user_id)})
-            
+
             if not user:
                 logger.warning(f"Auth_required: Usuario con ID {user_id} no encontrado en la base de datos")
                 return jsonify({
@@ -65,26 +65,30 @@ def auth_required(f):
                     "error": "ERROR_AUTENTICACION",
                     "message": "Usuario no encontrado"
                 }), 401
-                
-            # Guardar información relevante del usuario en el request
+
+            # Guardar informacion relevante del usuario en el request
             request.user_id = user_id
-            
-            # Obtener información del workspace desde el JWT
+
+            # Obtener informacion del workspace desde el JWT
             claims = get_jwt()
             request.workspace_id = claims.get("workspace_id")
             request.institute_id = claims.get("institute_id")
-            request.workspace_role = claims.get("role")  # Rol específico del workspace
-            # Propagar también tipo y class_id del workspace para estandarización
+            request.workspace_role = claims.get("role")  # Rol especifico del workspace
             request.workspace_type = claims.get("workspace_type")
             if "class_id" in claims:
                 request.class_id = claims.get("class_id")
-            
+
             user_main_role = user.get("role")
             request.user_roles = [user_main_role] if user_main_role else []
-            
-            logger.info(f"Auth_required: Usuario autenticado con ID: {user_id}, Rol global: {user_main_role}, Workspace: {request.workspace_id}, Rol workspace: {request.workspace_role}")
-            
-            return f(*args, **kwargs)
+
+            logger.info(
+                f"Auth_required: Usuario autenticado con ID: {user_id}, Rol global: {user_main_role}, "
+                f"Workspace: {request.workspace_id}, Rol workspace: {request.workspace_role}"
+            )
+        except AppException:
+            raise
+        except HTTPException as http_exc:
+            raise http_exc
         except Exception as e:
             logger.error(f"Auth_required: Error de autenticacion: {str(e)}")
             return jsonify({
@@ -92,6 +96,8 @@ def auth_required(f):
                 "error": "TOKEN_INVALIDO",
                 "message": "Token invalido o expirado"
             }), 401
+
+        return f(*args, **kwargs)
     return decorated_function
 
 def role_required(required_roles):
