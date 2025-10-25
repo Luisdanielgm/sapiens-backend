@@ -86,11 +86,11 @@ def auth_required(f):
             
             return f(*args, **kwargs)
         except Exception as e:
-            logger.error(f"Auth_required: Error de autenticación: {str(e)}")
+            logger.error(f"Auth_required: Error de autenticacion: {str(e)}")
             return jsonify({
                 "success": False,
                 "error": "TOKEN_INVALIDO",
-                "message": "Token inválido o expirado"
+                "message": "Token invalido o expirado"
             }), 401
     return decorated_function
 
