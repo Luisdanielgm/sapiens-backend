@@ -99,6 +99,32 @@ class ContentService(VerificationBaseService):
     Servicio unificado para gestionar TODO tipo de contenido.
     Reemplaza GameService, SimulationService, QuizService, etc.
     """
+    _CONTENT_TYPE_ALIASES = {
+        'document': 'documents',
+        'documents': 'documents',
+        'doc': 'documents',
+        'docx': 'documents',
+        'pdf': 'documents',
+        'video_content': 'video',
+        'image_content': 'image',
+        'audio_content': 'audio',
+        'external_link': 'link',
+        'link': 'link'
+    }
+
+    def _normalize_content_type(self, content_type: Optional[str]) -> Optional[str]:
+        if not content_type:
+            return content_type
+        normalized = content_type.strip().lower()
+        return self._CONTENT_TYPE_ALIASES.get(normalized, normalized)
+
+    def _apply_content_type_alias(self, payload: Dict[str, Any]) -> Optional[str]:
+        raw_type = payload.get('content_type')
+        normalized = self._normalize_content_type(raw_type)
+        if normalized and raw_type != normalized:
+            payload['content_type'] = normalized
+        return normalized
+
     def __init__(self):
         super().__init__(collection_name="topic_contents")
         self.content_type_service = ContentTypeService()
@@ -492,8 +518,8 @@ class ContentService(VerificationBaseService):
         try:
             # Validaciones básicas
             topic_id = content_data.get("topic_id")
-            content_type = content_data.get("content_type")
-            
+            content_type = self._apply_content_type_alias(content_data)
+
             # TEMPORAL: Comentar validación de topic_id para pruebas
             # if not topic_id or not self.check_topic_exists(topic_id):
             #     return False, "El tema especificado no existe"
@@ -1175,7 +1201,7 @@ class ContentService(VerificationBaseService):
             # Validaciones previas
             for i, content_data in enumerate(contents_data):
                 topic_id = content_data.get("topic_id")
-                content_type = content_data.get("content_type")
+                content_type = self._apply_content_type_alias(content_data) or content_data.get("content_type")
                 
                 # Validar campos requeridos
                 if not topic_id:
@@ -1733,8 +1759,8 @@ class ContentService(VerificationBaseService):
         groups = {}
 
         for i, content_data in enumerate(contents_data):
-            # Solo incluir en la validación si el tipo de contenido está en los tipos especificados
-            content_type = content_data.get("content_type")
+            # Solo incluir en la validacion si el tipo de contenido esta en los tipos especificados
+            content_type = self._apply_content_type_alias(content_data) or content_data.get("content_type")
             if content_type not in types:
                 continue
 
@@ -2092,8 +2118,12 @@ class ContentService(VerificationBaseService):
             if not valid_policy:
                 return False, policy_msg
 
-            # Validaciones específicas para diapositivas
-            content_type = update_data.get("content_type", current_content.get("content_type"))
+            applied_type = None
+            if 'content_type' in update_data:
+                applied_type = self._apply_content_type_alias(update_data)
+
+            # Validaciones especificas para diapositivas
+            content_type = applied_type or current_content.get("content_type")
 
             update_data["updated_at"] = datetime.now()
 

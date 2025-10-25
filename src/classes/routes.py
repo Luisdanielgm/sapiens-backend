@@ -2,6 +2,9 @@ from flask import request, jsonify
 from bson import ObjectId
 from flask_jwt_extended import get_jwt_identity, get_jwt
 
+from datetime import datetime
+import logging
+
 from src.shared.standardization import APIBlueprint, APIRoute, ErrorCodes
 from src.shared.constants import ROLES
 from src.shared.decorators import (
@@ -17,6 +20,8 @@ from src.shared.database import get_db
 classes_bp = APIBlueprint('classes', __name__)
 class_service = ClassService()
 membership_service = MembershipService()
+
+logger = logging.getLogger(__name__)
 # content_service ha sido eliminado ya que ahora se usa StudentIndividualContentService
 subperiod_service = SubperiodService()
 
@@ -64,15 +69,21 @@ def create_class():
             'level_id': ObjectId(request.json['level_id']),
             'name': request.json['name'],
             'access_code': request.json['access_code'],
-            'created_by': user_id,
-            'created_at': ObjectId(request.json.get('created_at', '')).generation_time if request.json.get('created_at') else None
+            'created_by': ObjectId(user_id) if ObjectId.is_valid(user_id) else user_id
         }
+
+        created_at_value = request.json.get('created_at')
+        if created_at_value:
+            try:
+                class_data['created_at'] = datetime.fromisoformat(created_at_value)
+            except (ValueError, TypeError):
+                logger.warning("create_class: valor de created_at no v\u00e1lido recibido, se usar\u00e1 la fecha actual")
         
         # Si hay un schedule, agregarlo
         if 'schedule' in request.json:
             class_data['schedule'] = request.json['schedule']
         
-        success, result = class_service.create_class(class_data, workspace_info)
+        success, result = class_service.create_class(class_data)
 
         if success:
             return APIRoute.success(data={"id": result}, message="Clase creada exitosamente", status_code=201)
@@ -126,17 +137,29 @@ def update_class(class_id):
             return APIRoute.error(ErrorCodes.MISSING_FIELD, "No se proporcionaron datos para actualizar", status_code=400)
         
         # Campos permitidos para actualización
-        allowed_fields = ['name', 'access_code', 'status', 'settings']
+        allowed_fields = [
+            'name',
+            'access_code',
+            'status',
+            'settings',
+            'subject_id',
+            'section_id',
+            'academic_period_id'
+        ]
         updates = {}
         
         for field in allowed_fields:
             if field in request.json:
-                updates[field] = request.json[field]
+                value = request.json[field]
+                if field in {'subject_id', 'section_id', 'academic_period_id'} and value is not None:
+                    updates[field] = str(value)
+                else:
+                    updates[field] = value
         
         if not updates:
             return APIRoute.error(ErrorCodes.MISSING_FIELD, "No se proporcionaron campos válidos para actualizar", status_code=400)
         
-        success, result = class_service.update_class(class_id, updates, workspace_info)
+        success, result = class_service.update_class(class_id, updates)
 
         if success:
             return APIRoute.success(data={"message": result})
