@@ -12,12 +12,14 @@ Este archivo solo contiene funciones de utilidad generales.
 
 from functools import wraps
 from flask import jsonify, request, current_app
-from datetime import datetime, timedelta
+from datetime import datetime, date, timedelta
 import jwt
 import os
 from typing import List, Any, Callable
 from bson import ObjectId
 import json
+from decimal import Decimal
+from uuid import UUID
 from flask_jwt_extended import create_access_token, decode_token
 
 # Reemplazar la importación circular y la redeclaración
@@ -93,14 +95,37 @@ def serialize_object_id(obj: dict) -> dict:
                 for k, v in obj.items()}
     return obj
 
-# Función para convertir ObjectId a string en un objeto o lista de objetos
+# Funcion para convertir objetos complejos en representaciones serializables por JSON
 def ensure_json_serializable(data):
-    """Convierte todos los ObjectId a string para garantizar que el objeto sea JSON serializable"""
-    if isinstance(data, list):
+    """
+    Convierte colecciones y tipos especiales (ObjectId, datetime, Decimal, UUID, etc.)
+    en representaciones compatibles con JSON.
+    """
+    if isinstance(data, (list, tuple, set)):
         return [ensure_json_serializable(item) for item in data]
-    elif isinstance(data, dict):
+
+    if isinstance(data, dict):
         return {key: ensure_json_serializable(value) for key, value in data.items()}
-    elif isinstance(data, ObjectId):
+
+    if isinstance(data, ObjectId):
         return str(data)
-    else:
-        return data
+
+    if isinstance(data, datetime):
+        return data.isoformat()
+
+    if isinstance(data, date):
+        return data.isoformat()
+
+    if isinstance(data, timedelta):
+        return data.total_seconds()
+
+    if isinstance(data, Decimal):
+        return int(data) if data % 1 == 0 else float(data)
+
+    if isinstance(data, UUID):
+        return str(data)
+
+    if isinstance(data, bytes):
+        return data.decode("utf-8", errors="replace")
+
+    return data
