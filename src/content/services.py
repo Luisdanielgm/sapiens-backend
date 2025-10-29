@@ -202,7 +202,7 @@ class ContentService(VerificationBaseService):
             if not allow_full_document:
                 if re.search(r'on[a-z]+\s*=', low):
                     logging.warning("validate_slide_html_content: encontrado atributo de evento inline (on*)")
-                    return False, "HTML contiene atributos de evento inline (on*) que están prohibidos"
+                    return False, "HTML contiene atributos de evento inline (on*) que estan prohibidos"
             # Prohibir javascript: URIs
             if "javascript:" in low:
                 logging.warning("validate_slide_html_content: encontrado javascript: URI")
