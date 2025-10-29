@@ -198,11 +198,11 @@ class ContentService(VerificationBaseService):
                     logging.warning(f"validate_slide_html_content: encontrado tag prohibido <{tag}>")
                     return False, f"HTML contiene etiqueta <{tag}> prohibida"
 
-            # Prohibir eventos inline (on*)
-            if re.search(r'on[a-z]+\s*=', low):
-                logging.warning("validate_slide_html_content: encontrado atributo de evento inline (on*)")
-                return False, "HTML contiene atributos de evento inline (on*) que están prohibidos"
-
+            # Prohibir eventos inline (on*) salvo cuando se permite documento completo
+            if not allow_full_document:
+                if re.search(r'on[a-z]+\s*=', low):
+                    logging.warning("validate_slide_html_content: encontrado atributo de evento inline (on*)")
+                    return False, "HTML contiene atributos de evento inline (on*) que est�n prohibidos"
             # Prohibir javascript: URIs
             if "javascript:" in low:
                 logging.warning("validate_slide_html_content: encontrado javascript: URI")
@@ -425,8 +425,14 @@ class ContentService(VerificationBaseService):
             # Validación específica a nivel raíz (solo slide_plan)
             # Las validaciones de provider/model ya están cubiertas por _detect_forbidden_keys_recursive
 
+            # Validar que 'content' sea un objeto si está presente
+            content_field = payload_data.get('content')
+            if content_field is not None and not isinstance(content_field, dict):
+                logging.warning(f"POLICY_VIOLATION: 'content' debe ser un objeto JSON, recibido {type(content_field).__name__} en {context}. user_id={user_id}, topic_id={topic_id}")
+                return False, "El campo 'content' debe ser un objeto con subcampos (p. ej., content.full_text, content.slide_plan, content.content_html, content.narrative_text)."
+
             # Validar tipo de 'slide_plan'
-            slide_plan = payload_data.get('content', {}).get('slide_plan') or payload_data.get('slide_plan')
+            slide_plan = (payload_data.get('content') or {}).get('slide_plan') if isinstance(payload_data.get('content'), dict) else payload_data.get('slide_plan')
             if slide_plan is not None:
                 if not isinstance(slide_plan, str):
                     logging.warning(f"POLICY_VIOLATION: slide_plan debe ser string, recibido {type(slide_plan).__name__} en {context}. user_id={user_id}, topic_id={topic_id}")
@@ -2599,8 +2605,8 @@ class ContentService(VerificationBaseService):
             raw_html = html_content
             valid, msg = self.validate_slide_html_content(raw_html, allow_full_document=True)
             if not valid:
-                logging.info(f"update_slide_html: validación fallida para slide {content_id}: {msg} (después de sanitización)")
-                return False, f"content_html inválido después de sanitización: {msg}"
+                logging.info(f"update_slide_html: validacion fallida para slide {content_id}: {msg} (documento completo)")
+                return False, f"content_html invalido: {msg}"
 
             update_data = {
                 "content.content_html": raw_html,
