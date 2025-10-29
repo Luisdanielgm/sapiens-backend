@@ -160,7 +160,7 @@ class ContentService(VerificationBaseService):
         except Exception:
             return False
 
-    def validate_slide_html_content(self, html_content: str) -> Tuple[bool, str]:
+    def validate_slide_html_content(self, html_content: str, allow_full_document: bool = False) -> Tuple[bool, str]:
         """
         Valida que el HTML de una diapositiva sea seguro y tenga estructura básica.
         Reglas:
@@ -183,7 +183,7 @@ class ContentService(VerificationBaseService):
                 return False, "HTML no debe estar vacío"
 
             # Tamaño razonable para una slide individual (150 KB = 153,600 bytes)
-            max_bytes = 150 * 1024  # 153,600 bytes
+            max_bytes = (2 * 1024 * 1024) if allow_full_document else (150 * 1024)  # 150KB or 2MB
             current_bytes = len(html_content.encode('utf-8'))
             if current_bytes > max_bytes:
                 logging.warning(f"validate_slide_html_content: HTML demasiado largo ({current_bytes} bytes > {max_bytes} bytes)")
@@ -192,7 +192,7 @@ class ContentService(VerificationBaseService):
             low = raw.lower()
 
             # Prohibir tags peligrosos explícitos
-            dangerous_tags = ["script", "iframe", "object", "embed", "link", "meta", "base"]
+            dangerous_tags = ["script", "iframe", "object", "embed"] if allow_full_document else ["script", "iframe", "object", "embed", "link", "meta", "base"]
             for tag in dangerous_tags:
                 if f"<{tag}" in low or f"</{tag}" in low:
                     logging.warning(f"validate_slide_html_content: encontrado tag prohibido <{tag}>")
@@ -2596,14 +2596,14 @@ class ContentService(VerificationBaseService):
                 logging.debug(f"update_slide_html: contenido {content_id} no es tipo slide")
                 return False, "El contenido no es una diapositiva"
 
-            sanitized_html = self.sanitize_slide_html_content(html_content)
-            valid, msg = self.validate_slide_html_content(sanitized_html)
+            raw_html = html_content
+            valid, msg = self.validate_slide_html_content(raw_html, allow_full_document=True)
             if not valid:
                 logging.info(f"update_slide_html: validación fallida para slide {content_id}: {msg} (después de sanitización)")
                 return False, f"content_html inválido después de sanitización: {msg}"
 
             update_data = {
-                "content.content_html": sanitized_html,
+                "content.content_html": raw_html,
                 "updated_at": datetime.now(),
                 "render_engine": "raw_html"
             }
@@ -2641,6 +2641,61 @@ class ContentService(VerificationBaseService):
                 return False, "No se realizaron cambios en el contenido"
         except Exception as e:
             logging.error(f"Error en update_slide_html para {content_id}: {str(e)}")
+            return False, f"Error interno: {str(e)}"
+
+    def update_slide_full_html(self, content_id: str, full_html: str, updater_id: str = None) -> Tuple[bool, str]:
+        """
+        Guarda el documento HTML completo en content.full_html sin sanitización.
+        No altera content.content_html ni el status derivado.
+        Aplica un límite de tamaño razonable para evitar documentos excesivos.
+        """
+        try:
+            if not isinstance(full_html, str):
+                return False, "full_html debe ser una cadena de texto"
+
+            # Límite de tamaño: ~2 MB para documento completo
+            max_bytes = 2 * 1024 * 1024
+            if len(full_html.encode('utf-8')) > max_bytes:
+                return False, "full_html excede el tamaño máximo permitido de 2MB"
+
+            current = self.get_content(content_id)
+            if not current:
+                logging.debug(f"update_slide_full_html: contenido {content_id} no encontrado")
+                return False, "Contenido no encontrado"
+            if current.get("content_type") != "slide":
+                logging.debug(f"update_slide_full_html: contenido {content_id} no es tipo slide")
+                return False, "El contenido no es una diapositiva"
+
+            update_data = {
+                "content.full_html": full_html,
+                "updated_at": datetime.now()
+            }
+
+            if updater_id:
+                update_data["last_updated_by"] = updater_id
+
+            result = self.collection.update_one(
+                {"_id": ObjectId(content_id)},
+                {"$set": update_data}
+            )
+
+            if result.modified_count > 0:
+                logging.info(f"update_slide_full_html: slide {content_id} full_html actualizado by {updater_id or 'unknown'}")
+                # Invalidate caches de estado si aplica (no cambia status, pero refrescar por updated_at)
+                try:
+                    current_topic = current.get("topic_id")
+                    cache_key = f"slide_status::{current_topic}"
+                    with self._cache_lock:
+                        if cache_key in self._stats_cache:
+                            del self._stats_cache[cache_key]
+                except Exception:
+                    pass
+                return True, "Full HTML de la diapositiva guardado exitosamente"
+            else:
+                logging.debug(f"update_slide_full_html: no hubo cambios al actualizar slide {content_id}")
+                return False, "No se realizaron cambios en el contenido"
+        except Exception as e:
+            logging.error(f"Error en update_slide_full_html para {content_id}: {str(e)}")
             return False, f"Error interno: {str(e)}"
 
     def update_slide_narrative(self, content_id: str, narrative_text: str, updater_id: str = None) -> Tuple[bool, str]:

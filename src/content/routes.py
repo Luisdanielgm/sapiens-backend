@@ -753,6 +753,63 @@ def update_slide_html(content_id):
             status_code=500,
         )
 
+@content_bp.route('/<content_id>/full_html', methods=['PUT'])
+@APIRoute.standard(auth_required_flag=True, roles=[ROLES["TEACHER"], ROLES["ADMIN"]])
+def update_slide_full_html(content_id):
+    """
+    Guarda el documento HTML completo sin sanitización en content.full_html.
+    Body:
+    {
+        "full_html": "<!DOCTYPE html>..."
+    }
+    - Verifica existencia y que sea slide
+    - No sanitiza ni altera content.content_html
+    - No cambia lógicas de estado (status)
+    """
+    try:
+        if not ObjectId.is_valid(content_id):
+            return APIRoute.error(ErrorCodes.VALIDATION_ERROR, "ID de contenido inválido")
+
+        data = request.get_json() or {}
+        full_html = data.get('full_html')
+
+        if full_html is None:
+            return APIRoute.error(ErrorCodes.VALIDATION_ERROR, "Campo 'full_html' requerido")
+        if not isinstance(full_html, str):
+            return APIRoute.error(ErrorCodes.VALIDATION_ERROR, "full_html debe ser una cadena de texto")
+
+        current = content_service.get_content(content_id)
+        if not current:
+            return APIRoute.error(ErrorCodes.NOT_FOUND, "Contenido no encontrado", status_code=404)
+        if current.get("content_type") != "slide":
+            return APIRoute.error(ErrorCodes.VALIDATION_ERROR, "Solo se puede actualizar full_html para contenidos de tipo 'slide'")
+
+        updater_id = getattr(request, 'user_id', None) or get_jwt_identity()
+
+        success, message = content_service.update_slide_full_html(content_id, full_html, updater_id=updater_id)
+
+        if success:
+            details = content_service.get_slide_status_details(content_id)
+            return APIRoute.success(
+                data={"status_details": details},
+                message="Full HTML guardado exitosamente"
+            )
+        else:
+            msg_lower = (message or "").lower()
+            if "inválido" in msg_lower or "excede" in msg_lower:
+                return APIRoute.error(ErrorCodes.VALIDATION_ERROR, message)
+            if "no encontrado" in msg_lower:
+                return APIRoute.error(ErrorCodes.NOT_FOUND, message, status_code=404)
+            return APIRoute.error(ErrorCodes.UPDATE_ERROR, message)
+
+    except Exception as e:
+        logging.error(f"Error en endpoint update_slide_full_html para {content_id}: {str(e)}")
+        return APIRoute.error(
+            ErrorCodes.SERVER_ERROR,
+            "Error interno del servidor",
+            status_code=500,
+        )
+
 @content_bp.route('/<content_id>/narrative', methods=['PUT'])
 @APIRoute.standard(auth_required_flag=True, roles=[ROLES["TEACHER"], ROLES["ADMIN"]])
 def update_slide_narrative(content_id):
