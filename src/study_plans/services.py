@@ -3824,7 +3824,10 @@ class TopicReadinessService(VerificationBaseService):
             if not topic:
                 raise AppException("Tema no encontrado", ErrorCodes.NOT_FOUND)
 
-            contents = self.content_service.get_topic_content(topic_id)
+            # Obtener contenidos con todos los estados válidos para slides
+            # Incluir "narrative_ready" que es el estado de slides generadas
+            all_valid_statuses = ["draft", "active", "published", "skeleton", "html_ready", "narrative_ready"]
+            contents = self.content_service.get_topic_content(topic_id, status_filter=all_valid_statuses)
             content_types_present = {c.get('content_type') for c in contents}
 
             # --- Nuevas Reglas de Validación (Solo Quiz y Slide Obligatorios) ---
