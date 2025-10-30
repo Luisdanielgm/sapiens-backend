@@ -392,7 +392,19 @@ class MembershipService(VerificationBaseService):
     def __init__(self):
         super().__init__(collection_name="class_members")
 
-    def add_member(self, class_id: str, user_id: str, role: str) -> Tuple[bool, str]:
+    def add_member(self, class_id: str, user_id: str, role: str, workspace_info: Optional[Dict] = None) -> Tuple[bool, str]:
+        """
+        Agrega un miembro a una clase
+        
+        Args:
+            class_id: ID de la clase
+            user_id: ID del usuario
+            role: Rol a asignar ('TEACHER' o 'STUDENT')
+            workspace_info: Información del workspace actual (opcional, para validaciones futuras)
+            
+        Returns:
+            Tuple[bool, str]: (Éxito, Mensaje o ID del miembro)
+        """
         try:
             # Verificar que la clase existe
             class_data = self.db.classes.find_one({"_id": ObjectId(class_id)})
@@ -662,7 +674,7 @@ class MembershipService(VerificationBaseService):
             print(f"Error al eliminar miembro: {str(e)}")
             return False, str(e)
     
-    def add_member_by_email(self, class_id: str, email: str, role: str) -> Tuple[bool, Union[str, Dict]]:
+    def add_member_by_email(self, class_id: str, email: str, role: str, workspace_info: Optional[Dict] = None) -> Tuple[bool, Union[str, Dict]]:
         """
         Agrega un miembro a una clase mediante su email
         
@@ -670,6 +682,7 @@ class MembershipService(VerificationBaseService):
             class_id: ID de la clase
             email: Email del usuario
             role: Rol a asignar ('TEACHER' o 'STUDENT')
+            workspace_info: Información del workspace actual (opcional, para validaciones futuras)
             
         Returns:
             Tuple[bool, Union[str, Dict]]: (Éxito, Mensaje o datos)
