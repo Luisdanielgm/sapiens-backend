@@ -344,6 +344,56 @@ def get_my_api_keys():
         log_error(f"Error getting API keys: {str(e)}", e, "users.routes")
         return APIRoute.error(ErrorCodes.SERVER_ERROR, "Error interno al obtener las claves de API")
 
+@users_bp.route('/user-info', methods=['GET', 'OPTIONS'])
+def get_user_info_by_email():
+    """
+    Obtiene información de un usuario por su email.
+    
+    Query Parameters:
+        email: Email del usuario a buscar
+    """
+    # Manejar preflight OPTIONS antes de cualquier validación
+    if request.method == 'OPTIONS':
+        return "", 200
+    
+    # Aplicar autenticación solo para GET
+    from src.shared.decorators import auth_required
+    from src.shared.decorators import handle_errors
+    
+    @handle_errors
+    @auth_required
+    def _get_user_info():
+        try:
+            email = request.args.get('email', '').strip()
+            
+            if not email:
+                return APIRoute.error(
+                    ErrorCodes.MISSING_FIELDS,
+                    "El parámetro 'email' es requerido",
+                    status_code=400
+                )
+            
+            # Obtener información del usuario
+            user_info = user_service.get_user_info(email)
+            
+            if user_info:
+                # Normalizar el rol si existe
+                if user_info.get("role"):
+                    user_info["role"] = normalize_role(user_info["role"])
+                return APIRoute.success(data=user_info)
+            else:
+                return APIRoute.error(
+                    ErrorCodes.RESOURCE_NOT_FOUND,
+                    "Usuario no encontrado",
+                    status_code=404
+                )
+                
+        except Exception as e:
+            log_error(f"Error obteniendo información del usuario: {str(e)}", e, "users.routes")
+            return APIRoute.error(ErrorCodes.SERVER_ERROR, "Error interno al obtener la información del usuario")
+    
+    return _get_user_info()
+
 @users_bp.route('/search', methods=['GET', 'OPTIONS'])
 def search_users():
     """
