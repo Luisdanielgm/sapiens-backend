@@ -16,6 +16,9 @@ class Class:
         level_id: ObjectId,
         name: str,
         access_code: str,
+        workspace_id: Optional[ObjectId] = None,
+        workspace_type: Optional[str] = None,
+        schedule: Optional[Any] = None,
         created_by: Optional[ObjectId] = None,
         created_at: Optional[datetime] = None,
         status: str = "active",
@@ -24,12 +27,15 @@ class Class:
     ):
         self._id = _id or ObjectId()
         self.institute_id = institute_id
+        self.workspace_id = workspace_id
+        self.workspace_type = workspace_type
         self.subject_id = subject_id
         self.section_id = section_id
         self.academic_period_id = academic_period_id
         self.level_id = level_id
         self.name = name
         self.access_code = access_code
+        self.schedule = schedule
         self.created_by = created_by
         self.created_at = created_at or datetime.now()
         self.status = status
@@ -37,20 +43,25 @@ class Class:
 
     def to_dict(self) -> Dict[str, Any]:
         """Convierte el objeto a un diccionario para almacenamiento en MongoDB"""
-        return {
+        data = {
             "_id": self._id,
             "institute_id": self.institute_id,
+            "workspace_id": self.workspace_id,
+            "workspace_type": self.workspace_type,
             "subject_id": self.subject_id,
             "section_id": self.section_id,
             "academic_period_id": self.academic_period_id,
             "level_id": self.level_id,
             "name": self.name,
             "access_code": self.access_code,
+            "schedule": self.schedule,
             "created_by": self.created_by,
             "created_at": self.created_at,
             "status": self.status,
             "settings": self.settings
         }
+        # Eliminar claves con None para mantener compatibilidad con datos previos
+        return {k: v for k, v in data.items() if v is not None}
 
 class ClassMember:
     """
@@ -102,12 +113,18 @@ class Subperiod:
         start_date: str,
         end_date: str,
         status: str = "active",
+        workspace_id: Optional[ObjectId] = None,
+        institute_id: Optional[ObjectId] = None,
+        workspace_type: Optional[str] = None,
         created_by: Optional[ObjectId] = None,
         created_at: Optional[datetime] = None,
         _id: Optional[ObjectId] = None
     ):
         self._id = _id or ObjectId()
         self.class_id = class_id
+        self.workspace_id = workspace_id
+        self.institute_id = institute_id
+        self.workspace_type = workspace_type
         self.name = name
         self.start_date = start_date
         self.end_date = end_date
@@ -117,13 +134,17 @@ class Subperiod:
 
     def to_dict(self) -> Dict[str, Any]:
         """Convierte el objeto a un diccionario para almacenamiento en MongoDB"""
-        return {
+        data = {
             "_id": self._id,
             "class_id": self.class_id,
+            "workspace_id": self.workspace_id,
+            "institute_id": self.institute_id,
+            "workspace_type": self.workspace_type,
             "name": self.name,
             "start_date": self.start_date,
             "end_date": self.end_date,
             "status": self.status,
             "created_by": self.created_by,
             "created_at": self.created_at
-        } 
+        }
+        return {k: v for k, v in data.items() if v is not None}
