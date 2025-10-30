@@ -352,3 +352,4 @@ El sistema tiene **dos enfoques paralelos** para eliminaciones en cascada:
 3. Reemplazar lógica manual
 
 
+

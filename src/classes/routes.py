@@ -226,8 +226,9 @@ def check_class_dependencies(class_id):
         
         # Verificar que la clase existe y pertenece al workspace
         workspace_type = workspace_info.get('workspace_type')
-        
-        if workspace_type == 'INSTITUTE':
+
+        # Tratar workspace_type ausente como INSTITUTE por compatibilidad
+        if workspace_type == 'INSTITUTE' or not workspace_type:
             # Para workspaces de instituto, buscar por workspace_id O por institute_id
             filter_query = {
                 "_id": ObjectId(class_id),
@@ -246,6 +247,14 @@ def check_class_dependencies(class_id):
                 "workspace_id": ObjectId(workspace_info.get('workspace_id'))
             }
         
+        # Log de depuración para entender el filtro aplicado
+        try:
+            logger.info(
+                f"check_class_dependencies: class_id={class_id}, workspace_info={{'workspace_id': {workspace_info.get('workspace_id')}, 'workspace_type': {workspace_type}, 'institute_id': {workspace_info.get('institute_id')}}}, filter={filter_query}"
+            )
+        except Exception:
+            pass
+
         class_data = class_service.collection.find_one(filter_query)
         if not class_data:
             return APIRoute.error(
