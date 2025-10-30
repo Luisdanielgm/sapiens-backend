@@ -191,9 +191,15 @@ class InvitationService(VerificationBaseService):
             print(f"Error al obtener invitaciones: {str(e)}")
             return []
 
-    def process_institute_invitation(self, invitation_id: str, user_id: str, action: str) -> Tuple[bool, str]:
+    def process_institute_invitation(self, invitation_id: str, user_id: str, action: str, workspace_info: Optional[Dict] = None) -> Tuple[bool, str]:
         """
         Procesa una invitación a un instituto (aceptar/rechazar)
+        
+        Args:
+            invitation_id: ID de la invitación
+            user_id: ID del usuario que procesa la invitación
+            action: 'accept' o 'reject'
+            workspace_info: Información del workspace actual (opcional, para crear membresía con workspace)
         """
         try:
             # Verificar que la invitación existe
@@ -221,6 +227,16 @@ class InvitationService(VerificationBaseService):
                     "user_id": user_id,
                     "role": invitation["role"]
                 }
+                
+                # Agregar información de workspace si está disponible
+                # NOTA: workspace_id no se pasa porque el _id del documento será el workspace_id
+                if workspace_info:
+                    if workspace_info.get('workspace_type'):
+                        membership_data['workspace_type'] = workspace_info['workspace_type']
+                    if workspace_info.get('institute_id'):
+                        # Verificar que el institute_id del workspace coincide con el de la invitación
+                        if str(workspace_info.get('institute_id')) != str(invitation["institute_id"]):
+                            return False, "El workspace no corresponde al instituto de la invitación"
                 
                 member_id = self.membership_service.add_institute_member(membership_data)
                 return True, f"Invitación aceptada, miembro creado con ID: {member_id}"
@@ -293,9 +309,15 @@ class InvitationService(VerificationBaseService):
             print(f"Error al obtener invitaciones de clase: {str(e)}")
             return []
 
-    def process_class_invitation(self, invitation_id: str, user_id: str, action: str) -> Tuple[bool, str]:
+    def process_class_invitation(self, invitation_id: str, user_id: str, action: str, workspace_info: Optional[Dict] = None) -> Tuple[bool, str]:
         """
         Procesa una invitación a una clase (aceptar/rechazar)
+        
+        Args:
+            invitation_id: ID de la invitación
+            user_id: ID del usuario que procesa la invitación
+            action: 'accept' o 'reject'
+            workspace_info: Información del workspace actual (opcional, para validaciones de membresía)
         """
         try:
             # Verificar que la invitación existe
@@ -327,6 +349,12 @@ class InvitationService(VerificationBaseService):
                     "user_id": user_id,
                     "role": invitation["role"]
                 }
+                
+                # Agregar información de workspace si está disponible (para futuras validaciones)
+                # NOTA: workspace_id no se pasa porque no es un campo del modelo ClassMember
+                if workspace_info:
+                    if workspace_info.get('workspace_type'):
+                        membership_data['workspace_type'] = workspace_info['workspace_type']
                 
                 success, result = self.membership_service.add_class_member(membership_data)
                 if success:
@@ -394,9 +422,14 @@ class InvitationService(VerificationBaseService):
             print(f"Error al obtener solicitudes: {str(e)}")
             return []
 
-    def process_membership_request(self, request_id: str, action: str) -> Tuple[bool, str]:
+    def process_membership_request(self, request_id: str, action: str, workspace_info: Optional[Dict] = None) -> Tuple[bool, str]:
         """
         Procesa una solicitud de membresía (aprobar/rechazar)
+        
+        Args:
+            request_id: ID de la solicitud
+            action: 'approve' o 'reject'
+            workspace_info: Información del workspace actual (opcional, para crear membresía con workspace)
         """
         try:
             # Verificar que la solicitud existe
@@ -423,6 +456,16 @@ class InvitationService(VerificationBaseService):
                     "user_id": str(request["user_id"]),
                     "role": request["requested_role"]
                 }
+                
+                # Agregar información de workspace si está disponible
+                # NOTA: workspace_id no se pasa porque el _id del documento será el workspace_id
+                if workspace_info:
+                    if workspace_info.get('workspace_type'):
+                        membership_data['workspace_type'] = workspace_info['workspace_type']
+                    if workspace_info.get('institute_id'):
+                        # Verificar que el institute_id del workspace coincide con el de la solicitud
+                        if str(workspace_info.get('institute_id')) != str(request["institute_id"]):
+                            return False, "El workspace no corresponde al instituto de la solicitud"
                 
                 member_id = self.membership_service.add_institute_member(membership_data)
                 return True, f"Solicitud aprobada, miembro creado con ID: {member_id}"

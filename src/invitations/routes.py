@@ -5,6 +5,7 @@ from bson import ObjectId, errors
 from src.shared.constants import ROLES
 from src.shared.standardization import APIBlueprint, APIRoute, ErrorCodes
 from src.shared.exceptions import AppException
+from src.shared.middleware import get_current_workspace_info
 from .services import InvitationService
 
 invitations_bp = APIBlueprint('invitations', __name__)
@@ -75,10 +76,14 @@ def process_institute_invitation(invitation_id):
             status_code=403
         )
     
+    # Obtener información del workspace actual
+    workspace_info = get_current_workspace_info()
+    
     success, message = invitation_service.process_institute_invitation(
         invitation_id, 
         user_id, 
-        data.get('action')
+        data.get('action'),
+        workspace_info
     )
     
     if success:
@@ -154,10 +159,14 @@ def process_class_invitation(invitation_id):
             status_code=403
         )
     
+    # Obtener información del workspace actual
+    workspace_info = get_current_workspace_info()
+    
     success, message = invitation_service.process_class_invitation(
         invitation_id, 
         user_id, 
-        data.get('action')
+        data.get('action'),
+        workspace_info
     )
     
     if success:
@@ -215,7 +224,10 @@ def process_membership_request(request_id):
     data = request.get_json()
     action = data.get('action')
     
-    success, message = invitation_service.process_membership_request(request_id, action)
+    # Obtener información del workspace actual
+    workspace_info = get_current_workspace_info()
+    
+    success, message = invitation_service.process_membership_request(request_id, action, workspace_info)
     if success:
         return APIRoute.success(message=message)
     return APIRoute.error(
