@@ -77,13 +77,14 @@ class MembershipService(VerificationBaseService):
         result = self.collection.insert_one(member.to_dict())
         return str(result.inserted_id)
 
-    def get_institute_members(self, institute_id: str, role: Optional[str] = None) -> List[Dict]:
+    def get_institute_members(self, institute_id: str, role: Optional[str] = None, workspace_info: Optional[Dict] = None) -> List[Dict]:
         """
         Obtiene todos los miembros de un instituto, opcionalmente filtrados por rol
         
         Args:
             institute_id: ID del instituto
             role: Rol para filtrar (opcional)
+            workspace_info: Información del workspace actual (opcional, para compatibilidad con workspaces)
             
         Returns:
             List[Dict]: Lista de miembros
@@ -93,11 +94,50 @@ class MembershipService(VerificationBaseService):
         """
         validate_object_id(institute_id, "ID de instituto")
         
+        # Crear query base
         query = {"institute_id": ObjectId(institute_id)}
+        
+        # Aplicar filtro de workspace si está disponible
+        # NOTA: En institute_members, el _id del documento ES el workspace_id (membership ID)
+        if workspace_info and workspace_info.get('workspace_id'):
+            workspace_type = workspace_info.get('workspace_type')
+            
+            # Tratar workspace_type ausente como INSTITUTE por compatibilidad
+            if workspace_type == 'INSTITUTE' or not workspace_type:
+                # Para workspaces institucionales, devolver todos los miembros del instituto
+                # (sin filtrar por workspace_id específico para ver todo el instituto)
+                # Mantener query base por institute_id solamente
+                pass  # Ya tenemos query = {"institute_id": ObjectId(institute_id)}
+            else:
+                # Para workspaces individuales, solo devolver esa membresía específica
+                query["_id"] = ObjectId(workspace_info['workspace_id'])
+        
         if role:
             query["role"] = role
         
+        # Logging de depuración
+        try:
+            import logging
+            logging.getLogger(__name__).info(
+                f"get_institute_members: institute_id={institute_id}, role={role}, "
+                f"workspace_info={{'workspace_id': {workspace_info.get('workspace_id') if workspace_info else None}, "
+                f"'workspace_type': {workspace_info.get('workspace_type') if workspace_info else None}, "
+                f"'institute_id': {workspace_info.get('institute_id') if workspace_info else None}}}, "
+                f"query={query}"
+            )
+        except Exception:
+            pass
+        
         members = list(self.collection.find(query))
+        
+        # Logging del resultado
+        try:
+            import logging
+            logging.getLogger(__name__).info(
+                f"get_institute_members: Found {len(members)} members for institute {institute_id}"
+            )
+        except Exception:
+            pass
         
         # Unir con información de usuarios para obtener nombres, emails, etc.
         for member in members:

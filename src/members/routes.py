@@ -5,6 +5,7 @@ from bson import ObjectId
 from src.shared.constants import ROLES
 from src.shared.standardization import APIBlueprint, APIRoute, ErrorCodes
 from src.shared.exceptions import AppException
+from src.shared.middleware import get_current_workspace_info
 from .services import MembershipService
 
 members_bp = APIBlueprint('members', __name__)
@@ -20,7 +21,8 @@ MEMBER_ADDED_MESSAGE = "Miembro añadido correctamente"
 def get_institute_members(institute_id):
     """Obtener todos los miembros de un instituto"""
     role = request.args.get('role')
-    members = membership_service.get_institute_members(institute_id, role)
+    workspace_info = get_current_workspace_info()
+    members = membership_service.get_institute_members(institute_id, role, workspace_info)
     return APIRoute.success(data={"members": members})
 
 @members_bp.route('/institute/<institute_id>/members', methods=['POST'])
