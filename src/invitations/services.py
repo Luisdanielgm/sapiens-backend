@@ -8,6 +8,7 @@ from src.shared.standardization import VerificationBaseService, ErrorCodes
 from src.shared.exceptions import AppException
 from .models import InstituteInvitation, ClassInvitation, MembershipRequest
 from src.members.services import MembershipService
+import logging
 
 class InvitationService(VerificationBaseService):
     def __init__(self):
@@ -230,20 +231,35 @@ class InvitationService(VerificationBaseService):
                 
                 # Agregar información de workspace si está disponible
                 # NOTA: workspace_id no se pasa porque el _id del documento será el workspace_id
+                # Al aceptar una invitación, el workspace actual puede ser de otro instituto
+                # Si el workspace actual coincide con el instituto de la invitación, usamos su workspace_type
+                # Si no coincide o no hay workspace, usamos 'INSTITUTE' por defecto
                 if workspace_info:
-                    if workspace_info.get('workspace_type'):
+                    workspace_institute_id = str(workspace_info.get('institute_id', ''))
+                    invitation_institute_id = str(invitation["institute_id"])
+                    
+                    # Solo usar workspace_type del workspace actual si es del mismo instituto
+                    if workspace_institute_id == invitation_institute_id and workspace_info.get('workspace_type'):
                         membership_data['workspace_type'] = workspace_info['workspace_type']
-                    if workspace_info.get('institute_id'):
-                        # Verificar que el institute_id del workspace coincide con el de la invitación
-                        if str(workspace_info.get('institute_id')) != str(invitation["institute_id"]):
-                            return False, "El workspace no corresponde al instituto de la invitación"
+                    else:
+                        # Si el workspace es de otro instituto o no tiene workspace_type, usar 'INSTITUTE' por defecto
+                        membership_data['workspace_type'] = 'INSTITUTE'
+                else:
+                    # Si no hay workspace_info, usar 'INSTITUTE' por defecto
+                    membership_data['workspace_type'] = 'INSTITUTE'
                 
-                member_id = self.membership_service.add_institute_member(membership_data)
-                return True, f"Invitación aceptada, miembro creado con ID: {member_id}"
+                try:
+                    member_id = self.membership_service.add_institute_member(membership_data)
+                    return True, f"Invitación aceptada, miembro creado con ID: {member_id}"
+                except AppException as e:
+                    # AppException tiene mensaje y código HTTP
+                    logging.getLogger(__name__).error(f"Error de aplicación al crear membresía: {e.message}")
+                    return False, e.message
                 
             return True, "Invitación rechazada"
                 
         except Exception as e:
+            logging.getLogger(__name__).error(f"Error procesando invitación de instituto: {str(e)}", exc_info=True)
             return False, str(e)
 
     def get_invitation_by_id(self, invitation_id: str, collection_name: str = "institute_invitations") -> Optional[Dict]:
@@ -459,13 +475,22 @@ class InvitationService(VerificationBaseService):
                 
                 # Agregar información de workspace si está disponible
                 # NOTA: workspace_id no se pasa porque el _id del documento será el workspace_id
+                # Al aprobar una solicitud, el workspace actual puede ser de otro instituto
+                # Si el workspace actual coincide con el instituto de la solicitud, usamos su workspace_type
+                # Si no coincide o no hay workspace, usamos 'INSTITUTE' por defecto
                 if workspace_info:
-                    if workspace_info.get('workspace_type'):
+                    workspace_institute_id = str(workspace_info.get('institute_id', ''))
+                    request_institute_id = str(request["institute_id"])
+                    
+                    # Solo usar workspace_type del workspace actual si es del mismo instituto
+                    if workspace_institute_id == request_institute_id and workspace_info.get('workspace_type'):
                         membership_data['workspace_type'] = workspace_info['workspace_type']
-                    if workspace_info.get('institute_id'):
-                        # Verificar que el institute_id del workspace coincide con el de la solicitud
-                        if str(workspace_info.get('institute_id')) != str(request["institute_id"]):
-                            return False, "El workspace no corresponde al instituto de la solicitud"
+                    else:
+                        # Si el workspace es de otro instituto o no tiene workspace_type, usar 'INSTITUTE' por defecto
+                        membership_data['workspace_type'] = 'INSTITUTE'
+                else:
+                    # Si no hay workspace_info, usar 'INSTITUTE' por defecto
+                    membership_data['workspace_type'] = 'INSTITUTE'
                 
                 member_id = self.membership_service.add_institute_member(membership_data)
                 return True, f"Solicitud aprobada, miembro creado con ID: {member_id}"
