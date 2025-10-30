@@ -343,3 +343,55 @@ def get_my_api_keys():
     except Exception as e:
         log_error(f"Error getting API keys: {str(e)}", e, "users.routes")
         return APIRoute.error(ErrorCodes.SERVER_ERROR, "Error interno al obtener las claves de API")
+
+@users_bp.route('/search', methods=['GET', 'OPTIONS'])
+def search_users():
+    """
+    Busca usuarios por email parcial.
+    
+    Query Parameters:
+        email: Email parcial o completo a buscar
+    """
+    # Manejar preflight OPTIONS antes de cualquier validación
+    if request.method == 'OPTIONS':
+        return "", 200
+    
+    # Aplicar autenticación solo para GET
+    from src.shared.decorators import auth_required
+    from src.shared.decorators import handle_errors
+    
+    @handle_errors
+    @auth_required
+    def _search_users():
+        try:
+            email = request.args.get('email', '').strip()
+            
+            if not email:
+                return APIRoute.error(
+                    ErrorCodes.MISSING_FIELDS,
+                    "El parámetro 'email' es requerido",
+                    status_code=400
+                )
+            
+            # Buscar usuarios que coincidan con el email parcial
+            users = user_service.collection.find(
+                {"email": {"$regex": email, "$options": "i"}},
+                {"email": 1, "name": 1, "_id": 1, "picture": 1}
+            ).limit(10)  # Limitar a 10 resultados
+            
+            results = []
+            for user in users:
+                results.append({
+                    "id": str(user["_id"]),
+                    "email": user.get("email", ""),
+                    "name": user.get("name", ""),
+                    "picture": user.get("picture", "")
+                })
+            
+            return APIRoute.success(data={"users": results})
+                
+        except Exception as e:
+            log_error(f"Error buscando usuarios: {str(e)}", e, "users.routes")
+            return APIRoute.error(ErrorCodes.SERVER_ERROR, "Error interno al buscar usuarios")
+    
+    return _search_users()
