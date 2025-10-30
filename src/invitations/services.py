@@ -368,19 +368,26 @@ class InvitationService(VerificationBaseService):
                 
                 # Agregar información de workspace si está disponible (para futuras validaciones)
                 # NOTA: workspace_id no se pasa porque no es un campo del modelo ClassMember
-                if workspace_info:
-                    if workspace_info.get('workspace_type'):
-                        membership_data['workspace_type'] = workspace_info['workspace_type']
+                # El workspace_info se pasa pero add_class_member no lo usa directamente
+                # Solo lo incluimos por si en el futuro se necesita para validaciones
                 
-                success, result = self.membership_service.add_class_member(membership_data)
-                if success:
-                    return True, f"Invitación aceptada, miembro creado con ID: {result}"
-                else:
-                    return False, f"Error al crear membresía: {result}"
+                try:
+                    success, result = self.membership_service.add_class_member(membership_data)
+                    if success:
+                        return True, f"Invitación aceptada, miembro creado con ID: {result}"
+                    else:
+                        # result contiene el mensaje de error
+                        logging.getLogger(__name__).warning(f"Error al crear membresía de clase: {result}")
+                        return False, result
+                except AppException as e:
+                    # AppException puede ser lanzada por validaciones internas
+                    logging.getLogger(__name__).error(f"Error de aplicación al crear membresía de clase: {e.message}")
+                    return False, e.message
                 
             return True, "Invitación rechazada"
                 
         except Exception as e:
+            logging.getLogger(__name__).error(f"Error procesando invitación de clase: {str(e)}", exc_info=True)
             return False, str(e)
 
     # ========== MEMBERSHIP REQUESTS ==========

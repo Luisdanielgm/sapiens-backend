@@ -81,16 +81,31 @@ def switch_workspace(workspace_id):
             return APIRoute.error(ErrorCodes.UNAUTHORIZED, "Workspace no válido o inactivo")
         
         # Verificar que el workspace tiene la información necesaria
-        if not membership.get("workspace_type") or not membership.get("workspace_name"):
-            return APIRoute.error(ErrorCodes.SERVER_ERROR, "Workspace con información incompleta")
+        workspace_type = membership.get("workspace_type")
+        if not workspace_type:
+            return APIRoute.error(ErrorCodes.SERVER_ERROR, "Workspace con información incompleta: falta workspace_type")
+        
+        # Si falta workspace_name pero es tipo INSTITUTE, intentar obtenerlo del instituto
+        workspace_name = membership.get("workspace_name")
+        if not workspace_name and workspace_type == 'INSTITUTE':
+            # Intentar obtener el nombre del instituto
+            institute = get_db().institutes.find_one({"_id": membership.get("institute_id")})
+            if institute:
+                workspace_name = institute.get('name', 'Instituto')
+            else:
+                workspace_name = 'Instituto'
+        
+        # Si aún no hay workspace_name, rechazar
+        if not workspace_name:
+            return APIRoute.error(ErrorCodes.SERVER_ERROR, "Workspace con información incompleta: falta workspace_name")
         
         # Crear claims para el nuevo token
         claims = {
             "workspace_id": workspace_id,
             "institute_id": str(membership["institute_id"]),
             "role": normalize_role(membership.get("role")),
-            "workspace_type": membership.get("workspace_type"),
-            "workspace_name": membership.get("workspace_name")
+            "workspace_type": workspace_type,
+            "workspace_name": workspace_name
         }
         
         # Agregar class_id si existe
@@ -103,8 +118,8 @@ def switch_workspace(workspace_id):
         # Respuesta con información del workspace activo
         workspace_info = {
             "workspace_id": workspace_id,
-            "workspace_type": membership.get("workspace_type"),
-            "workspace_name": membership.get("workspace_name"),
+            "workspace_type": workspace_type,
+            "workspace_name": workspace_name,
             "role_in_workspace": normalize_role(membership.get("role")),
             "institute_id": str(membership["institute_id"]),
             "class_id": str(membership["class_id"]) if membership.get("class_id") else None
@@ -113,7 +128,7 @@ def switch_workspace(workspace_id):
         return APIRoute.success(data={
             "token": token,
             "workspace": workspace_info,
-            "message": f"Cambiado a workspace: {membership.get('workspace_name')}"
+            "message": f"Cambiado a workspace: {workspace_name}"
         })
         
     except Exception as e:

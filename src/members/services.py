@@ -44,6 +44,10 @@ class MembershipService(VerificationBaseService):
 
         workspace_type = member_data.get('workspace_type', 'INSTITUTE')
 
+        # Si no se proporciona workspace_name y el tipo es INSTITUTE, usar el nombre del instituto
+        if not member_data.get('workspace_name') and workspace_type == 'INSTITUTE':
+            member_data['workspace_name'] = institute.get('name', 'Instituto')
+
         # Para el instituto genérico, permitir múltiples workspaces por usuario
         # Solo verificar duplicados si no es el instituto genérico
         if workspace_type != 'INSTITUTE':
@@ -69,7 +73,7 @@ class MembershipService(VerificationBaseService):
                 raise AppException("El usuario ya es miembro del workspace", ErrorCodes.ALREADY_EXISTS)
 
         member_data.setdefault('workspace_type', workspace_type)
-        member_data.setdefault('workspace_name', None)
+        member_data.setdefault('workspace_name', member_data.get('workspace_name', None))
         member_data.setdefault('class_id', None)
 
         # Crear y guardar el nuevo miembro
@@ -243,14 +247,19 @@ class MembershipService(VerificationBaseService):
             # Obtener el instituto al que pertenece la clase
             class_institute_id = None
             
-            # Buscar información académica relacionada con la clase
-            subject = get_db().subjects.find_one({"_id": class_obj.get("subject_id")})
-            if subject:
-                level = get_db().levels.find_one({"_id": subject.get("level_id")})
-                if level:
-                    program = get_db().educational_programs.find_one({"_id": level.get("program_id")})
-                    if program:
-                        class_institute_id = program.get("institute_id")
+            # Primero intentar obtener institute_id directamente de la clase (más eficiente)
+            if class_obj.get("institute_id"):
+                class_institute_id = class_obj.get("institute_id")
+            
+            # Si no está disponible directamente, buscar a través de subject->level->program (fallback)
+            if not class_institute_id:
+                subject = get_db().subjects.find_one({"_id": class_obj.get("subject_id")})
+                if subject:
+                    level = get_db().levels.find_one({"_id": subject.get("level_id")})
+                    if level:
+                        program = get_db().educational_programs.find_one({"_id": level.get("program_id")})
+                        if program:
+                            class_institute_id = program.get("institute_id")
             
             if not class_institute_id:
                 return False, "No se pudo determinar el instituto de la clase"
