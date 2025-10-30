@@ -109,8 +109,9 @@ class ClassService(VerificationBaseService):
             # Aplicar filtro de workspace si está disponible
             if workspace_info and workspace_info.get('workspace_id'):
                 workspace_type = workspace_info.get('workspace_type')
-                
-                if workspace_type == 'INSTITUTE':
+
+                # Tratar workspace_type ausente como institucional por defecto
+                if workspace_type == 'INSTITUTE' or not workspace_type:
                     # Para workspaces de instituto, buscar por workspace_id O por institute_id
                     # (para compatibilidad con clases existentes sin workspace_id)
                     filter_query = {
@@ -124,7 +125,7 @@ class ClassService(VerificationBaseService):
                         ]
                     }
                 else:
-                    # Para otros tipos de workspace, mantener filtro estricto
+                    # Para workspaces individuales, mantener filtro estricto
                     filter_query["workspace_id"] = ObjectId(workspace_info['workspace_id'])
             
             class_data = self.collection.find_one(filter_query)
@@ -254,12 +255,13 @@ class ClassService(VerificationBaseService):
         try:
             # Crear filtro base
             filter_query = {"level_id": ObjectId(level_id)}
-            
+
             # Aplicar filtro de workspace si está disponible
             if workspace_info and workspace_info.get('workspace_id'):
                 workspace_type = workspace_info.get('workspace_type')
-                
-                if workspace_type == 'INSTITUTE':
+
+                # Tratar workspace_type ausente como institucional por defecto
+                if workspace_type == 'INSTITUTE' or not workspace_type:
                     # Para workspaces de instituto, buscar por workspace_id O por institute_id
                     # (para compatibilidad con clases existentes sin workspace_id)
                     filter_query = {
@@ -273,11 +275,20 @@ class ClassService(VerificationBaseService):
                         ]
                     }
                 else:
-                    # Para otros tipos de workspace, mantener filtro estricto
+                    # Para workspaces individuales, mantener filtro estricto
                     filter_query["workspace_id"] = ObjectId(workspace_info['workspace_id'])
             
             # Obtener todas las clases del nivel
             classes = list(self.collection.find(filter_query))
+
+            # Logging de depuración para entender por qué no hay resultados
+            try:
+                import logging
+                logging.getLogger(__name__).info(
+                    f"get_classes_by_level: level_id={level_id}, workspace_info={{'workspace_id': {workspace_info.get('workspace_id') if workspace_info else None}, 'workspace_type': {workspace_info.get('workspace_type') if workspace_info else None}, 'institute_id': {workspace_info.get('institute_id') if workspace_info else None}}}, filter={filter_query}, count={len(classes)}"
+                )
+            except Exception:
+                pass
             result = []
             
             for class_item in classes:
