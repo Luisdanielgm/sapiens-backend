@@ -3525,6 +3525,310 @@ class TopicContentService(VerificationBaseService):
                 "recommended_types": []
             }
 
+class ContentRecommendationService(VerificationBaseService):
+    """
+    Servicio para recomendar contenido (PDFs, recursos web, diagramas) basado en temas.
+    """
+    def __init__(self):
+        super().__init__(collection_name="topics")  # Usamos topics como colección base
+        from src.shared.utils import ensure_json_serializable
+        self.ensure_json_serializable = ensure_json_serializable
+        
+    def get_content_recommendations(self, topic_id: str) -> Dict:
+        """
+        Obtiene recomendaciones de contenido (PDFs, recursos web, diagramas) para un tema.
+        
+        Args:
+            topic_id: ID del tema
+            
+        Returns:
+            Dict con 'pdfs', 'web_resources' y 'diagrams'
+        """
+        try:
+            # Obtener el tema
+            topic = self.collection.find_one({"_id": ObjectId(topic_id)})
+            if not topic:
+                return {
+                    "pdfs": [],
+                    "web_resources": [],
+                    "diagrams": {"existing_diagrams": [], "recommended_types": []}
+                }
+            
+            topic = self.ensure_json_serializable(topic)
+            
+            # Extraer palabras clave del tema
+            keywords = self._extract_keywords_from_topic(topic)
+            
+            # Obtener recomendaciones
+            pdfs = self._recommend_pdfs(keywords)
+            web_resources = self._recommend_web_resources(keywords)
+            diagrams = self._recommend_diagrams(keywords, topic.get("name", ""))
+            
+            return {
+                "pdfs": pdfs,
+                "web_resources": web_resources,
+                "diagrams": diagrams
+            }
+            
+        except Exception as e:
+            logging.error(f"Error al obtener recomendaciones de contenido: {str(e)}")
+            return {
+                "pdfs": [],
+                "web_resources": [],
+                "diagrams": {"existing_diagrams": [], "recommended_types": []}
+            }
+    
+    def _extract_keywords_from_topic(self, topic: Dict) -> List[str]:
+        """
+        Extrae palabras clave de un tema.
+        
+        Args:
+            topic: Diccionario del tema
+            
+        Returns:
+            Lista de palabras clave
+        """
+        keywords = []
+        
+        # Añadir nombre del tema
+        if "name" in topic:
+            keywords.append(topic["name"])
+            
+        # Extraer palabras del contenido teórico
+        if "theory_content" in topic and topic["theory_content"]:
+            # Definir palabras a ignorar (stop words)
+            stop_words = set(['el', 'la', 'los', 'las', 'un', 'una', 'unos', 'unas', 'y', 'o', 'a', 
+                             'de', 'del', 'en', 'con', 'por', 'para', 'es', 'son', 'al', 'e', 'u'])
+                             
+            # Extraer palabras relevantes
+            words = re.findall(r'\b[a-zA-ZáéíóúÁÉÍÓÚñÑ]{4,}\b', topic["theory_content"].lower())
+            
+            # Filtrar stop words y contar frecuencia
+            word_counts = {}
+            for word in words:
+                if word not in stop_words:
+                    word_counts[word] = word_counts.get(word, 0) + 1
+                    
+            # Obtener las 10 palabras más frecuentes
+            sorted_words = sorted(word_counts.items(), key=lambda x: x[1], reverse=True)
+            frequent_words = [word for word, count in sorted_words[:10]]
+            
+            keywords.extend(frequent_words)
+            
+        # Si no hay suficientes palabras clave, usar el módulo
+        if len(keywords) < 3 and "module_id" in topic:
+            try:
+                module = get_db().modules.find_one({"_id": ObjectId(topic["module_id"])})
+                if module and "name" in module:
+                    keywords.append(module["name"])
+            except (TypeError, ValueError):
+                pass
+                
+        return list(set(keywords))  # Eliminar duplicados
+    
+    def _recommend_pdfs(self, keywords: List[str]) -> List[Dict]:
+        """
+        Recomienda PDFs según palabras clave.
+        
+        Args:
+            keywords: Lista de palabras clave
+            
+        Returns:
+            Lista de PDFs recomendados
+        """
+        try:
+            # Buscar PDFs en la colección de recursos que sean PDFs
+            query = {
+                "$and": [
+                    {
+                        "$or": [
+                            {"tags": {"$in": keywords}},
+                            {"title": {"$regex": "|".join(keywords), "$options": "i"}},
+                            {"description": {"$regex": "|".join(keywords), "$options": "i"}}
+                        ]
+                    },
+                    {
+                        "$or": [
+                            {"file_type": "pdf"},
+                            {"resource_type": "pdf"},
+                            {"content_type": "pdf"}
+                        ]
+                    }
+                ],
+                "status": {"$ne": "deleted"}
+            }
+            
+            # Intentar buscar en diferentes colecciones posibles
+            pdfs_collection = get_db().resources  # O pdfs si existe
+            pdfs = list(pdfs_collection.find(query).limit(5))
+            
+            # Convertir a formato serializable
+            relevant_pdfs = []
+            for pdf in pdfs:
+                pdf = self.ensure_json_serializable(pdf)
+                
+                # Añadir puntuación de relevancia
+                score = 0
+                for keyword in keywords:
+                    if keyword.lower() in pdf.get("title", "").lower():
+                        score += 3
+                    if keyword.lower() in " ".join(pdf.get("tags", [])).lower():
+                        score += 2
+                    description = pdf.get("description", "")
+                    if description and keyword.lower() in description.lower():
+                        score += 1
+                        
+                pdf["relevance_score"] = score
+                relevant_pdfs.append(pdf)
+                
+            # Ordenar por relevancia
+            relevant_pdfs.sort(key=lambda x: x.get("relevance_score", 0), reverse=True)
+            
+            return relevant_pdfs
+        except Exception as e:
+            logging.error(f"Error al recomendar PDFs: {str(e)}")
+            return []
+            
+    def _recommend_web_resources(self, keywords: List[str]) -> List[Dict]:
+        """
+        Recomienda recursos web según palabras clave.
+        
+        Args:
+            keywords: Lista de palabras clave
+            
+        Returns:
+            Lista de recursos web recomendados
+        """
+        try:
+            # Buscar recursos web que contengan las palabras clave
+            query = {
+                "$and": [
+                    {
+                        "$or": [
+                            {"tags": {"$in": keywords}},
+                            {"title": {"$regex": "|".join(keywords), "$options": "i"}},
+                            {"description": {"$regex": "|".join(keywords), "$options": "i"}},
+                            {"url": {"$regex": "|".join(keywords), "$options": "i"}}
+                        ]
+                    },
+                    {
+                        "$or": [
+                            {"resource_type": "link"},
+                            {"content_type": "link"},
+                            {"resource_type": "web"}
+                        ]
+                    }
+                ],
+                "status": {"$ne": "deleted"}
+            }
+            
+            web_resources_collection = get_db().resources
+            web_resources = list(web_resources_collection.find(query).limit(5))
+            
+            # Convertir a formato serializable
+            relevant_resources = []
+            for resource in web_resources:
+                resource = self.ensure_json_serializable(resource)
+                
+                # Añadir puntuación de relevancia
+                score = 0
+                for keyword in keywords:
+                    if keyword.lower() in resource.get("title", "").lower():
+                        score += 3
+                    if keyword.lower() in " ".join(resource.get("tags", [])).lower():
+                        score += 2
+                    description = resource.get("description", "")
+                    if description and keyword.lower() in description.lower():
+                        score += 1
+                        
+                resource["relevance_score"] = score
+                relevant_resources.append(resource)
+                
+            # Ordenar por relevancia
+            relevant_resources.sort(key=lambda x: x.get("relevance_score", 0), reverse=True)
+            
+            return relevant_resources
+        except Exception as e:
+            logging.error(f"Error al recomendar recursos web: {str(e)}")
+            return []
+            
+    def _recommend_diagrams(self, keywords: List[str], topic_name: str) -> Dict:
+        """
+        Recomienda diagramas según palabras clave.
+        
+        Args:
+            keywords: Lista de palabras clave
+            topic_name: Nombre del tema
+            
+        Returns:
+            Dict con 'existing_diagrams' y 'recommended_types'
+        """
+        try:
+            # Buscar diagramas existentes en topic_contents con content_type='diagram'
+            query = {
+                "$or": [
+                    {"title": {"$regex": "|".join(keywords), "$options": "i"}},
+                    {"content": {"$regex": "|".join(keywords), "$options": "i"}},
+                    {"description": {"$regex": "|".join(keywords), "$options": "i"}}
+                ],
+                "content_type": "diagram",
+                "status": {"$ne": "deleted"}
+            }
+            
+            diagrams_collection = get_db().topic_contents
+            diagrams = list(diagrams_collection.find(query).limit(3))
+            
+            # Convertir a formato serializable
+            relevant_diagrams = []
+            for diagram in diagrams:
+                diagram = self.ensure_json_serializable(diagram)
+                
+                # Añadir puntuación de relevancia
+                score = 0
+                for keyword in keywords:
+                    title = diagram.get("title", "") or diagram.get("content", {}).get("title", "")
+                    if title and keyword.lower() in title.lower():
+                        score += 3
+                    content_str = str(diagram.get("content", ""))
+                    if keyword.lower() in content_str.lower():
+                        score += 1
+                        
+                diagram["relevance_score"] = score
+                relevant_diagrams.append(diagram)
+                
+            # Ordenar por relevancia
+            relevant_diagrams.sort(key=lambda x: x.get("relevance_score", 0), reverse=True)
+            
+            # Determinar qué tipos de diagramas serían más útiles según las palabras clave
+            process_keywords = ['proceso', 'flujo', 'pasos', 'etapas', 'procedimiento', 'secuencia']
+            relation_keywords = ['relación', 'estructura', 'jerarquía', 'organización', 'sistema']
+            concept_keywords = ['concepto', 'idea', 'teoría', 'principio', 'fundamento', 'mapa']
+            
+            recommended_types = []
+            for keyword in keywords:
+                keyword = keyword.lower()
+                if any(k in keyword for k in process_keywords):
+                    recommended_types.append("flowchart")
+                if any(k in keyword for k in relation_keywords):
+                    recommended_types.append("uml")
+                if any(k in keyword for k in concept_keywords):
+                    recommended_types.append("mindmap")
+                    
+            # Si no hay tipos recomendados, sugerir mapa mental por defecto
+            if not recommended_types:
+                recommended_types = ["mindmap"]
+                
+            return {
+                "existing_diagrams": relevant_diagrams,
+                "recommended_types": list(set(recommended_types))
+            }
+        except Exception as e:
+            logging.error(f"Error al recomendar diagramas: {str(e)}")
+            return {
+                "existing_diagrams": [],
+                "recommended_types": []
+            }
+
 class EvaluationResourceService(VerificationBaseService):
     """
     Servicio para gestionar la vinculación entre Evaluaciones y Recursos.
