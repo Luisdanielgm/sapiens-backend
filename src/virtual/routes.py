@@ -913,7 +913,7 @@ def generate_personalized_content(topic_id: str, virtual_topic_id: str, cognitiv
 
         existing_contents = list(get_db().topic_contents.find({
             "topic_id": ObjectId(topic_id),
-            "status": {"$in": ["draft", "active", "published", "approved"]}
+            "status": {"$in": ["draft", "active", "published", "approved", "narrative_ready", "skeleton", "html_ready"]}
         }))
 
         # Usar el algoritmo avanzado de selección personalizada

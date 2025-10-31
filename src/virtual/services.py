@@ -1373,7 +1373,7 @@ class FastVirtualModuleGenerator(VerificationBaseService):
             # Obtener contenidos originales del tema
             original_contents = list(self.db.topic_contents.find({
                 "topic_id": ObjectId(topic_id),
-                "status": {"$in": ["active", "draft", "approved"]}
+                "status": {"$in": ["active", "draft", "approved", "published", "narrative_ready", "skeleton", "html_ready"]}
             }))
             
             if not original_contents:
