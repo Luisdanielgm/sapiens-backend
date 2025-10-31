@@ -81,7 +81,7 @@ class StructuredSequenceService:
             query = {
                 "topic_id": ObjectId(topic_id),
                 "content_type": ContentTypes.SLIDE,
-                "status": {"$in": ["draft", "active", "published"]}
+                "status": {"$in": ["draft", "active", "published", "narrative_ready", "skeleton", "html_ready"]}
             }
             
             slides = list(self.collection.find(query).sort("order", 1))
@@ -119,7 +119,7 @@ class StructuredSequenceService:
                 "topic_id": ObjectId(topic_id),
                 "content_type": {"$in": optional_types},
                 "parent_content_id": {"$exists": True, "$ne": None},
-                "status": {"$in": ["draft", "active", "published"]}
+                "status": {"$in": ["draft", "active", "published", "narrative_ready", "skeleton", "html_ready"]}
             }
             
             contents = list(self.collection.find(query))
@@ -153,7 +153,7 @@ class StructuredSequenceService:
             query = {
                 "topic_id": ObjectId(topic_id),
                 "content_type": {"$in": evaluation_types},
-                "status": {"$in": ["draft", "active", "published"]}
+                "status": {"$in": ["draft", "active", "published", "narrative_ready", "skeleton", "html_ready"]}
             }
             
             contents = list(self.collection.find(query))
@@ -217,7 +217,7 @@ class StructuredSequenceService:
                 "topic_id": ObjectId(topic_id),
                 "content_type": ContentTypes.SLIDE,
                 "order": {"$exists": False},
-                "status": {"$in": ["draft", "active", "published"]}
+                "status": {"$in": ["draft", "active", "published", "narrative_ready", "skeleton", "html_ready"]}
             })
             
             orphan_count = orphan_slides.count()
