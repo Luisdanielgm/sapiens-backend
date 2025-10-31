@@ -1239,44 +1239,39 @@ def initialize_progressive_generation():
                     "message": f"Debe completar la evaluación '{evaluation.get('name', 'Evaluación sin nombre')}' antes de generar módulos virtuales"
                 })
 
-        # B. Verificar plantillas de pensamiento crítico
-        critical_thinking_templates = get_db().templates.count_documents({
-            "subject_tags": {"$in": ["pensamiento_critico", "critical_thinking"]},
-            "scope": {"$in": ["public", "org"]},
-            "status": "usable"
-        })
-
-        if critical_thinking_templates == 0:
-            validation_errors.append({
-                "type": "missing_critical_thinking_templates",
-                "message": "No hay plantillas de pensamiento crítico disponibles. Se requieren para la generación de módulos virtuales."
-            })
-
-        # C. Verificar contenidos interactivos disponibles
-        interactive_content_count = get_db().topics.count_documents({
-            "study_plan_id": ObjectId(plan_id),
-            "content_type": {"$in": ["game", "simulation", "interactive_exercise", "quiz"]},
+        # B. Verificar que el plan tenga al menos un quiz completo
+        module_ids = [mod["_id"] for mod in enabled_modules]
+        topics_query = {
+            "module_id": {"$in": module_ids},
             "published": True
+        }
+        all_published_topics = list(get_db().topics.find(topics_query))
+        topic_ids = [t["_id"] for t in all_published_topics]
+        
+        # Contar quizzes publicados
+        quiz_count = get_db().topic_contents.count_documents({
+            "topic_id": {"$in": topic_ids},
+            "content_type": "quiz",
+            "status": {"$in": ["draft", "active", "published"]}
         })
-
-        if interactive_content_count < 3:
+        
+        if quiz_count == 0:
             validation_errors.append({
-                "type": "insufficient_interactive_content",
-                "current_count": interactive_content_count,
-                "required_minimum": 3,
-                "message": f"Se requieren al menos 3 contenidos interactivos publicados. Actualmente hay {interactive_content_count}."
+                "type": "missing_quiz_content",
+                "message": "No hay quizzes disponibles en el plan de estudios. Se requiere al menos un quiz para generar módulos virtuales."
             })
 
-        # D. Verificar que el estudiante tenga un perfil cognitivo válido
-        cognitive_profile = get_db().cognitive_profiles.find_one({
-            "user_id": ObjectId(student_id),
-            "status": "completed"
+        # C. Verificar que el plan tenga al menos una slide completa (narrative_ready)
+        slide_count = get_db().topic_contents.count_documents({
+            "topic_id": {"$in": topic_ids},
+            "content_type": "slide",
+            "status": "narrative_ready"
         })
-
-        if not cognitive_profile:
+        
+        if slide_count == 0:
             validation_errors.append({
-                "type": "missing_cognitive_profile",
-                "message": "El estudiante debe tener un perfil cognitivo completo antes de generar módulos virtuales."
+                "type": "missing_slide_content",
+                "message": "No hay diapositivas completas disponibles en el plan de estudios. Se requiere al menos una diapositiva en estado 'narrative_ready' para generar módulos virtuales."
             })
 
         # Si hay errores de validación, retornar todos los errores
