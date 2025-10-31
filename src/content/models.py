@@ -556,3 +556,57 @@ class LearningMethodologyTypes:
                 "portfolio_template"
             ]
         }
+    
+    @classmethod
+    def get_default_content_compatibility(cls) -> Dict[str, List[str]]:
+        """
+        Retorna el mapeo de compatibilidad por defecto entre metodologías de aprendizaje
+        y tipos de contenido recomendados.
+        
+        Returns:
+            Dict: Mapeo de metodología a lista de tipos de contenido compatibles
+        """
+        return {
+            cls.VISUAL: [ContentTypes.DIAGRAM, ContentTypes.INFOGRAPHIC, ContentTypes.MINDMAP, 
+                        ContentTypes.TIMELINE, ContentTypes.ILLUSTRATION, ContentTypes.CHART, 
+                        ContentTypes.IMAGE, ContentTypes.VIDEO, ContentTypes.ANIMATION],
+            
+            cls.AUDITORY: [ContentTypes.AUDIO, ContentTypes.MUSIC, ContentTypes.VIDEO, 
+                          ContentTypes.NARRATED_PRESENTATION, ContentTypes.SCREENCAST],
+            
+            cls.READ_WRITE: [ContentTypes.TEXT, ContentTypes.SUMMARY, ContentTypes.GLOSSARY, 
+                            ContentTypes.EXAMPLES, ContentTypes.DOCUMENTS, ContentTypes.SLIDE,
+                            ContentTypes.GUIDED_QUESTIONS],
+            
+            cls.KINESTHETIC: [ContentTypes.INTERACTIVE_EXERCISE, ContentTypes.COMPLETION_EXERCISE,
+                             ContentTypes.MATH_EXERCISE, ContentTypes.CHALLENGE, ContentTypes.FLASHCARDS,
+                             ContentTypes.VIRTUAL_LAB],
+            
+            cls.GAMIFICATION: [ContentTypes.CHALLENGE, ContentTypes.INTERACTIVE_EXERCISE,
+                              ContentTypes.FLASHCARDS, ContentTypes.QUIZ],
+            
+            cls.PROBLEM_BASED: [ContentTypes.INTERACTIVE_EXERCISE, ContentTypes.EXAMPLES,
+                               ContentTypes.GUIDED_QUESTIONS, ContentTypes.PROJECT],
+            
+            cls.SPACED_REPETITION: [ContentTypes.FLASHCARDS, ContentTypes.QUIZ,
+                                   ContentTypes.FORMATIVE_TEST],
+            
+            cls.RETRIEVAL_PRACTICE: [ContentTypes.QUIZ, ContentTypes.FORMATIVE_TEST,
+                                    ContentTypes.FLASHCARDS],
+            
+            cls.FEYNMAN: [ContentTypes.TEXT, ContentTypes.SUMMARY, ContentTypes.EXAMPLES,
+                         ContentTypes.GUIDED_QUESTIONS],
+            
+            cls.MIND_MAP: [ContentTypes.MINDMAP, ContentTypes.DIAGRAM],
+            
+            cls.SOCRATIC: [ContentTypes.GUIDED_QUESTIONS, ContentTypes.INTERACTIVE_EXERCISE,
+                          ContentTypes.PEER_REVIEW],
+            
+            cls.ADHD_ADAPTED: [ContentTypes.SLIDE, ContentTypes.VIDEO, ContentTypes.INTERACTIVE_EXERCISE,
+                              ContentTypes.CHALLENGE, ContentTypes.FLASHCARDS],
+            
+            cls.DYSLEXIA_ADAPTED: [ContentTypes.AUDIO, ContentTypes.VIDEO, ContentTypes.DIAGRAM,
+                                  ContentTypes.INTERACTIVE_EXERCISE],
+            
+            cls.AUTISM_ADAPTED: [ContentTypes.SLIDE, ContentTypes.DIAGRAM, ContentTypes.CHALLENGE]
+        }
