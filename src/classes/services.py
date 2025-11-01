@@ -345,43 +345,116 @@ class ClassService(VerificationBaseService):
             print(f"Error al obtener clases del nivel: {str(e)}")
             return []
 
-    def delete_class(self, class_id: str) -> Tuple[bool, str]:
+    def delete_class(self, class_id: str, workspace_info: dict = None, cascade: bool = False) -> Tuple[bool, str]:
         """
-        Elimina una clase si no tiene miembros o subperiodos asociados.
+        Elimina una clase. Si cascade=True, elimina también todas sus dependencias.
         
         Args:
             class_id: ID de la clase a eliminar
+            workspace_info: Información del workspace (opcional)
+            cascade: Si es True, elimina en cascada todas las dependencias
             
         Returns:
             Tuple[bool, str]: (Éxito, Mensaje)
         """
         try:
             # Validar que la clase existe
-            class_data = self.collection.find_one({"_id": ObjectId(class_id)})
+            filter_query = {"_id": ObjectId(class_id)}
+            
+            # Aplicar filtro de workspace si está disponible
+            if workspace_info and workspace_info.get('workspace_id'):
+                workspace_type = workspace_info.get('workspace_type')
+                if workspace_type == 'INSTITUTE' or not workspace_type:
+                    filter_query = {
+                        "_id": ObjectId(class_id),
+                        "$or": [
+                            {"workspace_id": ObjectId(workspace_info['workspace_id'])},
+                            {
+                                "workspace_id": {"$exists": False},
+                                "institute_id": ObjectId(workspace_info.get('institute_id'))
+                            }
+                        ]
+                    }
+                else:
+                    filter_query["workspace_id"] = ObjectId(workspace_info['workspace_id'])
+            
+            class_data = self.collection.find_one(filter_query)
             if not class_data:
                 return False, "Clase no encontrada"
 
-            # Verificar si hay miembros asociados
-            members_count = self.db.class_members.count_documents({
-                "class_id": ObjectId(class_id)
-            })
-            
-            if members_count > 0:
-                return False, f"No se puede eliminar la clase porque tiene {members_count} miembros asociados"
+            # Si no es eliminación en cascada, verificar dependencias
+            if not cascade:
+                # Verificar si hay miembros asociados
+                members_count = self.db.class_members.count_documents({
+                    "class_id": ObjectId(class_id)
+                })
+                
+                if members_count > 0:
+                    return False, f"No se puede eliminar la clase porque tiene {members_count} miembros asociados"
 
-            # Verificar si hay subperiodos asociados
-            subperiods_count = self.db.subperiods.count_documents({
-                "class_id": ObjectId(class_id)
-            })
+                # Verificar si hay subperiodos asociados
+                subperiods_count = self.db.subperiods.count_documents({
+                    "class_id": ObjectId(class_id)
+                })
+                
+                if subperiods_count > 0:
+                    return False, f"No se puede eliminar la clase porque tiene {subperiods_count} subperiodos asociados"
             
-            if subperiods_count > 0:
-                return False, f"No se puede eliminar la clase porque tiene {subperiods_count} subperiodos asociados"
+            # Si es eliminación en cascada, eliminar dependencias primero
+            if cascade:
+                class_id_obj = ObjectId(class_id)
+                
+                # 1. Eliminar miembros de la clase
+                members_deleted = self.db.class_members.delete_many({
+                    "class_id": class_id_obj
+                })
+                
+                # 2. Eliminar subperiodos
+                subperiods_deleted = self.db.subperiods.delete_many({
+                    "class_id": class_id_obj
+                })
+                
+                # 3. Eliminar asignaciones de planes de estudio
+                study_plan_assignments_deleted = self.db.study_plan_assignments.delete_many({
+                    "class_id": class_id_obj
+                })
+                
+                # 4. Eliminar contenido individual de estudiantes
+                student_content_deleted = self.db.student_individual_content.delete_many({
+                    "class_id": class_id_obj
+                })
+                
+                # 5. Eliminar rendimiento de estudiantes asociado a la clase
+                student_performance_deleted = self.db.student_performance.delete_many({
+                    "class_id": class_id_obj
+                })
+                
+                # 6. Eliminar estadísticas de la clase
+                class_statistics_deleted = self.db.class_statistics.delete_many({
+                    "class_id": class_id_obj
+                })
+                
+                # 7. Eliminar análisis de evaluaciones de la clase
+                evaluation_analytics_deleted = self.db.evaluation_analytics.delete_many({
+                    "class_id": class_id_obj
+                })
+                
+                print(f"Eliminación en cascada: {members_deleted.deleted_count} miembros, "
+                      f"{subperiods_deleted.deleted_count} subperiodos, "
+                      f"{study_plan_assignments_deleted.deleted_count} asignaciones de planes, "
+                      f"{student_content_deleted.deleted_count} contenidos individuales, "
+                      f"{student_performance_deleted.deleted_count} rendimientos, "
+                      f"{class_statistics_deleted.deleted_count} estadísticas, "
+                      f"{evaluation_analytics_deleted.deleted_count} análisis de evaluaciones")
 
-            # Si no hay dependencias, eliminar la clase
+            # Eliminar la clase
             result = self.collection.delete_one({"_id": ObjectId(class_id)})
             
             if result.deleted_count > 0:
-                return True, "Clase eliminada correctamente"
+                message = "Clase eliminada correctamente"
+                if cascade:
+                    message += " junto con todas sus dependencias"
+                return True, message
             return False, "No se pudo eliminar la clase"
             
         except Exception as e:

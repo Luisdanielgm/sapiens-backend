@@ -174,10 +174,12 @@ def update_class(class_id):
 @apply_workspace_filter('classes')
 def delete_class(class_id):
     """
-    Elimina una clase específica si no tiene dependencias.
+    Elimina una clase específica. Si cascade=true en query params, elimina también todas sus dependencias.
     
     Args:
         class_id: ID de la clase a eliminar
+    Query params:
+        cascade: Si es 'true', elimina en cascada todas las dependencias
     """
     try:
         # Obtener información del workspace actual
@@ -193,7 +195,15 @@ def delete_class(class_id):
                     status_code=403
                 )
         
-        success, message = class_service.delete_class(class_id, workspace_info)
+        # Obtener parámetro cascade del query string
+        cascade = request.args.get('cascade', 'false').lower() == 'true'
+        
+        # Llamar al método con todos los parámetros explícitos
+        success, message = class_service.delete_class(
+            class_id=class_id,
+            workspace_info=workspace_info,
+            cascade=cascade
+        )
 
         if success:
             return APIRoute.success(data={"message": message})
