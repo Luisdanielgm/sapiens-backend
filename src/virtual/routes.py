@@ -1553,19 +1553,64 @@ def trigger_next_topic():
         )
         
         if not success:
+            # result es un diccionario con información de error
+            error_message = result.get("message", "Error desconocido") if isinstance(result, dict) else str(result)
             return APIRoute.error(
                 ErrorCodes.OPERATION_FAILED,
-                result.get("message", "Error desconocido"),
+                error_message,
                 status_code=400
             )
+        
+        # result es un diccionario con información de éxito
+        if not isinstance(result, dict):
+            return APIRoute.error(
+                ErrorCodes.SERVER_ERROR,
+                "Error en formato de respuesta del servicio",
+                status_code=500
+            )
+        
+        # Obtener información del módulo virtual para incluir queue_status
+        from src.virtual.services import OptimizedQueueService
+        queue_status_info = {}
+        try:
+            # Obtener el tema para acceder al módulo virtual
+            topic = get_db().virtual_topics.find_one({"_id": ObjectId(current_topic_id)})
+            if topic:
+                virtual_module_id = str(topic.get("virtual_module_id"))
+                queue_service = OptimizedQueueService()
+                queue_status = queue_service.get_queue_status(virtual_module_id)
+                
+                # Adaptar queue_status al formato esperado por el frontend
+                # Para temas, no hay tareas pendientes/procesando, así que usamos la info de la cola
+                queue_status_info = {
+                    "pending": 0,  # Los temas se generan inmediatamente, no hay tareas pendientes
+                    "processing": 0,  # No aplica para generación inmediata de temas
+                    "completed": queue_status.get("completed_topics", 0),
+                    "topic_queue": {
+                        "active": queue_status.get("active_topics", 0),
+                        "locked": queue_status.get("locked_topics", 0),
+                        "total_generated": queue_status.get("generated_topics", 0),
+                        "total_available": queue_status.get("total_original_topics", 0),
+                        "can_generate_more": queue_status.get("can_generate_more", False)
+                    }
+                }
+        except Exception as queue_err:
+            logging.warning(f"Error obteniendo queue_status: {str(queue_err)}")
+            queue_status_info = {
+                "pending": 0,
+                "processing": 0,
+                "completed": 0
+            }
         
         return APIRoute.success(
             data={
                 "generated_topics": result.get("generated_topics", []),
                 "has_next": result.get("has_next", False),
-                "message": result.get("message", "")
+                "queue_status": queue_status_info,
+                "topic_completed": result.get("topic_completed", False),
+                "progress": result.get("progress", progress)
             },
-            message=f"Generación de temas completada: {len(result.get('generated_topics', []))} nuevos temas"
+            message=f"Generación de temas completada: {result.get('generated_topics_count', 0)} nuevos temas"
         )
         
     except Exception as e:

@@ -482,7 +482,7 @@ class VirtualTopicService(VerificationBaseService):
             logging.error(f"Error al obtener contenidos del tema virtual: {str(e)}")
             return []
     
-    def trigger_next_topic_generation(self, topic_id: str, progress: float) -> Tuple[bool, str]:
+    def trigger_next_topic_generation(self, topic_id: str, progress: float) -> Tuple[bool, Dict]:
         """
         Activa la generación del siguiente tema cuando el progreso supera el 80%.
         
@@ -491,30 +491,64 @@ class VirtualTopicService(VerificationBaseService):
             progress: Progreso actual (0-100)
             
         Returns:
-            Tuple[bool, str]: (Éxito, mensaje)
+            Tuple[bool, Dict]: (Éxito, resultado con información de generación)
         """
         try:
             # Validar progreso
             if progress < 80:
-                return False, "El progreso debe ser mayor al 80% para activar la generación"
+                return False, {
+                    "message": "El progreso debe ser mayor al 80% para activar la generación",
+                    "error": "PROGRESS_TOO_LOW"
+                }
             
             # Obtener el tema actual
             topic = self.collection.find_one({"_id": ObjectId(topic_id)})
             if not topic:
-                return False, "Tema no encontrado"
+                return False, {
+                    "message": "Tema no encontrado",
+                    "error": "TOPIC_NOT_FOUND"
+                }
             
             # Usar el servicio de cola optimizada para activar la generación
             queue_service = OptimizedQueueService()
             result = queue_service.trigger_on_progress(topic_id, progress)
             
-            if result:
-                return True, "Generación del siguiente tema activada exitosamente"
-            else:
-                return False, "Error al activar la generación del siguiente tema"
+            # Verificar si hay error en el resultado
+            if "error" in result:
+                return False, {
+                    "message": result.get("error", "Error desconocido"),
+                    "error": "QUEUE_ERROR"
+                }
+            
+            # Si no se activó el trigger
+            if not result.get("triggered", False):
+                return False, {
+                    "message": result.get("reason", "Trigger no ejecutado"),
+                    "error": "TRIGGER_NOT_EXECUTED",
+                    "reason": result.get("reason")
+                }
+            
+            # Extraer información de la cola
+            queue_maintenance = result.get("queue_maintenance", {})
+            generated_topics_list = queue_maintenance.get("details", [])
+            
+            return True, {
+                "message": "Generación del siguiente tema activada exitosamente",
+                "triggered": True,
+                "progress": progress,
+                "topic_completed": result.get("topic_completed", False),
+                "generated_topics": generated_topics_list,
+                "generated_topics_count": len(generated_topics_list),
+                "has_next": queue_maintenance.get("remaining_original", 0) > 0,
+                "queue_maintenance": queue_maintenance
+            }
                 
         except Exception as e:
             logging.error(f"Error en trigger_next_topic_generation: {str(e)}")
-            return False, f"Error interno: {str(e)}"
+            return False, {
+                "message": f"Error interno: {str(e)}",
+                "error": "INTERNAL_ERROR"
+            }
 
 # QuizService eliminado - Los quizzes ahora se manejan como TopicContent con content_type="quiz"
 # La funcionalidad de evaluación se migró al sistema unificado de ContentResult
