@@ -1561,99 +1561,99 @@ class FastVirtualModuleGenerator(VerificationBaseService):
         return priority_map.get(content_type, 5)
     
 
-def _select_personalized_contents(
-    self,
-    original_contents: List[Dict],
-    cognitive_profile: Dict,
-    preferences: Dict = None
-) -> List[Dict]:
-    """Selecciona contenidos preservando todas las diapositivas, evaluaciones y recursos."""
-    try:
-        if not original_contents:
-            return []
+    def _select_personalized_contents(
+        self,
+        original_contents: List[Dict],
+        cognitive_profile: Dict,
+        preferences: Dict = None
+    ) -> List[Dict]:
+        """Selecciona contenidos preservando todas las diapositivas, evaluaciones y recursos."""
+        try:
+            if not original_contents:
+                return []
 
-        preferences = preferences or {}
-        avoid_types = set(preferences.get('avoid_types', []))
-        valid_statuses = {
-            'draft',
-            'active',
-            'approved',
-            'published',
-            'narrative_ready',
-            'skeleton',
-            'html_ready'
-        }
+            preferences = preferences or {}
+            avoid_types = set(preferences.get('avoid_types', []))
+            valid_statuses = {
+                'draft',
+                'active',
+                'approved',
+                'published',
+                'narrative_ready',
+                'skeleton',
+                'html_ready'
+            }
 
-        def sort_key(content: Dict) -> int:
-            order_value = content.get('order')
-            if isinstance(order_value, (int, float)):
-                return int(order_value)
-            try:
-                return int(order_value)
-            except (TypeError, ValueError):
-                return 999
+            def sort_key(content: Dict) -> int:
+                order_value = content.get('order')
+                if isinstance(order_value, (int, float)):
+                    return int(order_value)
+                try:
+                    return int(order_value)
+                except (TypeError, ValueError):
+                    return 999
 
-        slides = [
-            content for content in original_contents
-            if content.get('content_type') == 'slide'
-            and content.get('content_type') not in avoid_types
-            and (
-                not content.get('status')
-                or content.get('status') in valid_statuses
+            slides = [
+                content for content in original_contents
+                if content.get('content_type') == 'slide'
+                and content.get('content_type') not in avoid_types
+                and (
+                    not content.get('status')
+                    or content.get('status') in valid_statuses
+                )
+            ]
+            slides.sort(key=sort_key)
+
+            evaluations = [
+                content for content in original_contents
+                if content.get('content_type') in self.EVALUATION_CONTENT_TYPES
+                and content.get('content_type') not in avoid_types
+            ]
+            evaluations.sort(key=sort_key)
+
+            optional_resources = [
+                content for content in original_contents
+                if content.get('content_type') not in ({'slide'} | self.EVALUATION_CONTENT_TYPES)
+                and content.get('content_type') not in avoid_types
+            ]
+            optional_resources.sort(key=sort_key)
+
+            ordered_contents = slides + evaluations + optional_resources
+
+            if not ordered_contents:
+                logging.warning(
+                    "No se encontraron contenidos válidos tras aplicar la nueva lógica. Se devuelve el arreglo original (%s elementos).",
+                    len(original_contents)
+                )
+                return original_contents
+
+            seen_ids = set()
+            unique_contents: List[Dict] = []
+            for content in ordered_contents:
+                content_id = content.get('_id') or content.get('id')
+                if isinstance(content_id, ObjectId):
+                    content_id = str(content_id)
+                elif content_id is not None:
+                    content_id = str(content_id)
+
+                if content_id:
+                    if content_id in seen_ids:
+                        continue
+                    seen_ids.add(content_id)
+                unique_contents.append(content)
+
+            logging.info(
+                "Selección final de contenidos para topic: slides=%s, evaluaciones=%s, opcionales=%s, total=%s",
+                len(slides),
+                len(evaluations),
+                len(optional_resources),
+                len(unique_contents)
             )
-        ]
-        slides.sort(key=sort_key)
 
-        evaluations = [
-            content for content in original_contents
-            if content.get('content_type') in self.EVALUATION_CONTENT_TYPES
-            and content.get('content_type') not in avoid_types
-        ]
-        evaluations.sort(key=sort_key)
-
-        optional_resources = [
-            content for content in original_contents
-            if content.get('content_type') not in ({'slide'} | self.EVALUATION_CONTENT_TYPES)
-            and content.get('content_type') not in avoid_types
-        ]
-        optional_resources.sort(key=sort_key)
-
-        ordered_contents = slides + evaluations + optional_resources
-
-        if not ordered_contents:
-            logging.warning(
-                "No se encontraron contenidos válidos tras aplicar la nueva lógica. Se devuelve el arreglo original (%s elementos).",
-                len(original_contents)
-            )
+            return unique_contents
+        except Exception as e:
+            logging.error(f"Error en _select_personalized_contents (nueva lógica): {e}")
             return original_contents
-
-        seen_ids = set()
-        unique_contents: List[Dict] = []
-        for content in ordered_contents:
-            content_id = content.get('_id') or content.get('id')
-            if isinstance(content_id, ObjectId):
-                content_id = str(content_id)
-            elif content_id is not None:
-                content_id = str(content_id)
-
-            if content_id:
-                if content_id in seen_ids:
-                    continue
-                seen_ids.add(content_id)
-            unique_contents.append(content)
-
-        logging.info(
-            "Selección final de contenidos para topic: slides=%s, evaluaciones=%s, opcionales=%s, total=%s",
-            len(slides),
-            len(evaluations),
-            len(optional_resources),
-            len(unique_contents)
-        )
-
-        return unique_contents
-    except Exception as e:
-        logging.error(f"Error en _select_personalized_contents (nueva lógica): {e}")
-        return original_contents
     def _generate_content_personalization(self, content: Dict, cognitive_profile: Dict) -> Dict:
         """
         Genera datos de personalización específicos para un contenido.
