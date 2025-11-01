@@ -208,7 +208,7 @@ def delete_class(class_id):
         if success:
             return APIRoute.success(data={"message": message})
         return APIRoute.error(
-            ErrorCodes.DELETE_ERROR,
+            ErrorCodes.OPERATION_FAILED,
             message,
             status_code=400,
         )
