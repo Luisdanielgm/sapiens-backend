@@ -1010,6 +1010,19 @@ class FastVirtualModuleGenerator(VerificationBaseService):
     Generador optimizado para crear módulos virtuales rápidamente.
     Diseñado para funcionar dentro de los límites de tiempo serverless.
     """
+
+    EVALUATION_CONTENT_TYPES = {
+        "quiz",
+        "exam",
+        "formative_test",
+        "summative_test",
+        "project",
+        "evaluation",
+        "assessment",
+        "interactive_quiz",
+        "diagnostic_quiz"
+    }
+
     def __init__(self):
         super().__init__(collection_name="virtual_modules")
         
@@ -1380,42 +1393,84 @@ class FastVirtualModuleGenerator(VerificationBaseService):
                 logging.warning(f"No se encontraron contenidos para el tema {topic_id}")
                 return
             
-            # Filtrar y seleccionar contenidos según perfil cognitivo
-            selected_contents = self._select_personalized_contents(original_contents, cognitive_profile, preferences or {})
+            # Seleccionar contenidos preservando todas las diapositivas, evaluaciones y recursos
+            selected_contents = self._select_personalized_contents(
+                original_contents,
+                cognitive_profile,
+                preferences or {}
+            )
 
             if not selected_contents:
-                logging.warning(f"No se pudieron personalizar contenidos para el tema {topic_id}")
-                # Como fallback, usar los primeros 3 contenidos disponibles
-                selected_contents = original_contents[:3]
+                logging.warning(
+                    f"No se pudieron personalizar contenidos para el tema {topic_id}. Usando orden original."
+                )
+                selected_contents = original_contents
 
-            # Aplicar secuencia estructurada en lugar de intercalación aleatoria
+            # Aplicar secuencia estructurada (diapositivas → evaluaciones → recursos)
             try:
                 from src.content.structured_sequence_service import StructuredSequenceService
                 structured_service = StructuredSequenceService(self.db)
-                
-                # Obtener secuencia estructurada: diapositivas → contenidos opcionales → evaluación
-                structured_contents = structured_service.get_structured_content_sequence(topic_id, student_id)
-                
-                if structured_contents:
-                    # Filtrar solo los contenidos que están en selected_contents
-                    selected_content_ids = {str(c["_id"]) for c in selected_contents}
-                    selected_contents = [
-                        content for content in structured_contents 
-                        if str(content["_id"]) in selected_content_ids
-                    ]
-                    logging.info(f"Secuencia estructurada aplicada exitosamente para tema {topic_id}: {len(selected_contents)} contenidos")
-                else:
-                    logging.warning(f"No se pudo obtener secuencia estructurada para tema {topic_id}, usando orden original")
-                    
-            except Exception as e:
-                logging.error(f"Error aplicando secuencia estructurada para tema {topic_id}: {str(e)}")
-                # Continuar con los contenidos seleccionados sin reordenamiento
 
-            # Verificar si usar generación paralela
-            # Usar solo generación tradicional (sistema paralelo eliminado)
-            logging.info(f"Usando generación tradicional para tema {virtual_topic_id}")
+                structured_contents = structured_service.get_structured_content_sequence(
+                    topic_id,
+                    student_id
+                )
+
+                if structured_contents:
+                    selected_ids = {str(content["_id"]) for content in selected_contents}
+                    ordered_contents = [
+                        content for content in structured_contents
+                        if str(content["_id"]) in selected_ids
+                    ]
+
+                    if len(ordered_contents) != len(selected_contents):
+                        remaining_ids = selected_ids - {str(c["_id"]) for c in ordered_contents}
+                        if remaining_ids:
+                            extras = [
+                                content for content in selected_contents
+                                if str(content["_id"]) in remaining_ids
+                            ]
+                            ordered_contents.extend(extras)
+
+                    selected_contents = ordered_contents
+                    logging.info(
+                        "Secuencia estructurada aplicada para tema %s: %s contenidos (slides=%s, evaluations=%s, resources=%s)",
+                        topic_id,
+                        len(selected_contents),
+                        len([c for c in selected_contents if c.get('content_type') == 'slide']),
+                        len([
+                            c for c in selected_contents
+                            if c.get('content_type') in self.EVALUATION_CONTENT_TYPES
+                        ]),
+                        len([
+                            c for c in selected_contents
+                            if c.get('content_type') not in {'slide'}
+                            | self.EVALUATION_CONTENT_TYPES
+                        ])
+                    )
+                else:
+                    logging.warning(
+                        "No se encontró secuencia estructurada para tema %s. Manteniendo orden derivado de selección.",
+                        topic_id
+                    )
+            except Exception as e:
+                logging.error(
+                    "Error aplicando secuencia estructurada para tema %s: %s",
+                    topic_id,
+                    str(e)
+                )
+
+            logging.info(
+                "Generando %s contenidos virtuales para tema %s (virtual_topic_id=%s)",
+                len(selected_contents),
+                topic_id,
+                virtual_topic_id
+            )
             self._generate_contents_traditional(
-                virtual_topic_id, student_id, selected_contents, cognitive_profile
+                virtual_topic_id,
+                student_id,
+                selected_contents,
+                cognitive_profile
             )
             
         except Exception as e:
@@ -1505,399 +1560,100 @@ class FastVirtualModuleGenerator(VerificationBaseService):
         
         return priority_map.get(content_type, 5)
     
-    def _select_personalized_contents(self, original_contents: List[Dict], cognitive_profile: Dict, preferences: Dict = None) -> List[Dict]:
-        """
-        Selecciona y filtra contenidos según el perfil cognitivo del estudiante.
-        *** CORREGIDO PARA MANEJAR LA ESTRUCTURA REAL DE LA BASE DE DATOS ***
-        """
-        try:
-            # --- INICIO DE LA LÓGICA CORREGIDA ---
-            
-            # PASO 1: Extraer y parsear los datos del perfil cognitivo
-            profile_str = cognitive_profile.get("profile", "{}")
-            profile_data = {}
-            if isinstance(profile_str, str):
-                try:
-                    import json
-                    profile_data = json.loads(profile_str)
-                except json.JSONDecodeError:
-                    logging.warning("El campo 'profile' no es un JSON válido.")
-            
-            # Usar datos del nivel raíz si existen (como fallback)
-            learning_style = profile_data.get("learningStyle", cognitive_profile.get("learning_style", {}))
-            diagnosis = profile_data.get("diagnosis", cognitive_profile.get("diagnosis", ""))
-            cognitive_difficulties = profile_data.get("cognitiveDifficulties", cognitive_profile.get("cognitive_difficulties", []))
 
-            # PASO 2: Normalizar puntuaciones VAK (de 0-100 a 0-1)
-            visual_score = learning_style.get("visual", 0) / 100.0
-            auditory_score = learning_style.get("auditory", 0) / 100.0
-            kinesthetic_score = learning_style.get("kinesthetic", 0) / 100.0
-            reading_writing_score = learning_style.get("readingWriting", 0) / 100.0 # Corregido a camelCase
+def _select_personalized_contents(
+    self,
+    original_contents: List[Dict],
+    cognitive_profile: Dict,
+    preferences: Dict = None
+) -> List[Dict]:
+    """Selecciona contenidos preservando todas las diapositivas, evaluaciones y recursos."""
+    try:
+        if not original_contents:
+            return []
 
-            # PASO 3: Inferir discapacidades desde los campos de texto y estructurados
-            diagnosis_lower = diagnosis.lower() if isinstance(diagnosis, str) else ""
-            if isinstance(diagnosis, list):
-                diagnosis_lower = " ".join(diagnosis).lower()
-            
-            difficulties_str = " ".join(cognitive_difficulties).lower() if cognitive_difficulties else ""
-            
-            # Verificar ADHD en múltiples fuentes
-            learning_disabilities = profile_data.get("learning_disabilities", {})
-            has_adhd_from_disabilities = learning_disabilities.get("adhd", False)
-            has_adhd_from_text = "tda" in diagnosis_lower or "hiperactividad" in diagnosis_lower or \
-                                "adhd" in diagnosis_lower or "distractibilidad" in difficulties_str or \
-                                "concentración" in difficulties_str
-            
-            has_adhd = has_adhd_from_disabilities or has_adhd_from_text
-            
-            # Verificar dislexia en múltiples fuentes
-            has_dyslexia_from_disabilities = learning_disabilities.get("dyslexia", False)
-            has_dyslexia_from_text = "dislexia" in diagnosis_lower or "lectura" in difficulties_str or \
-                                    "escritura" in difficulties_str
-            
-            has_dyslexia = has_dyslexia_from_disabilities or has_dyslexia_from_text
+        preferences = preferences or {}
+        avoid_types = set(preferences.get('avoid_types', []))
+        valid_statuses = {
+            'draft',
+            'active',
+            'approved',
+            'published',
+            'narrative_ready',
+            'skeleton',
+            'html_ready'
+        }
 
-            # PASO 3.5: Obtener preferencias de contenido del perfil adaptativo (Fase 2B)
-            content_preferences = {}
-            if isinstance(profile_data, dict):
-                content_preferences = profile_data.get("contentPreferences", {})
-            
-            # Combinar preferencias del perfil adaptativo con las pasadas como parámetro
-            preferences = preferences or {}
-            
-            # Preferencias adaptativas tienen prioridad
-            avoid_types = content_preferences.get("avoid_types", []) or preferences.get("avoid_types", [])
-            prefer_types = content_preferences.get("prefer_types", []) or preferences.get("prefer_types", [])
-            
-            # Obtener análisis detallado de contenido si está disponible
-            content_analysis = content_preferences.get("content_analysis", {})
-            
-            logging.info(f"Preferencias adaptativas - Evitar: {avoid_types}, Preferir: {prefer_types}")
-            if content_analysis:
-                logging.info(f"Análisis de contenido disponible para {len(content_analysis)} tipos")
-            
-            # --- FIN DE LA LÓGICA CORREGIDA ---
+        def sort_key(content: Dict) -> int:
+            order_value = content.get('order')
+            if isinstance(order_value, (int, float)):
+                return int(order_value)
+            try:
+                return int(order_value)
+            except (TypeError, ValueError):
+                return 999
 
-            # El resto de la lógica de selección de contenidos permanece igual,
-            # ya que ahora opera con los datos normalizados y extraídos correctamente.
-            
-            # ... (el resto del método desde la categorización de contenidos no cambia) ...
-            
-            # PASO 4: Categorizar contenidos por cobertura y tipo
-            complete_contents = []
-            specific_contents = []
-            evaluative_contents = []
-            
-            for content in original_contents:
-                content_type = content.get("content_type", "")
-                
-                # Contenidos completos (cubren todo el tema)
-                if content_type in ["text", "slide", "video", "feynman", "story", "summary", "narrated_presentation"]:
-                    complete_contents.append(content)
-                # Contenidos evaluativos
-                elif content_type in ["quiz", "exam", "formative_test", "project"]:
-                    evaluative_contents.append(content)
-                # Contenidos específicos
-                else:
-                    specific_contents.append(content)
+        slides = [
+            content for content in original_contents
+            if content.get('content_type') == 'slide'
+            and content.get('content_type') not in avoid_types
+            and (
+                not content.get('status')
+                or content.get('status') in valid_statuses
+            )
+        ]
+        slides.sort(key=sort_key)
 
-            if avoid_types:
-                original_contents = [c for c in original_contents if c.get("content_type") not in avoid_types] or original_contents
-                complete_contents = [c for c in complete_contents if c.get("content_type") not in avoid_types]
-                specific_contents = [c for c in specific_contents if c.get("content_type") not in avoid_types]
-                evaluative_contents = [c for c in evaluative_contents if c.get("content_type") not in avoid_types]
-            
-            # PASO 5: Validar que hay contenidos para trabajar
-            if not complete_contents and len(original_contents) < 2:
-                logging.warning(f"Contenidos insuficientes para personalización. Usando todos los disponibles.")
-                return original_contents
-            
-            # PASO 6: Inicializar selección con balance garantizado
-            selected_contents = []
-            
-            # REGLA DE BALANCE #1: Asegurar al menos UN contenido completo
-            if complete_contents:
-                preferred_complete = self._select_by_vak_preference(
-                    complete_contents, visual_score, auditory_score, reading_writing_score, kinesthetic_score
-                )
-                if preferred_complete:
-                    selected_contents.append(preferred_complete)
-                    logging.debug(f"Contenido completo seleccionado: {preferred_complete.get('content_type')}")
-                else:
-                    # Fallback: tomar el primer contenido completo disponible
-                    selected_contents.append(complete_contents[0])
-                    logging.debug(f"Contenido completo fallback: {complete_contents[0].get('content_type')}")
-            else:
-                # Si no hay contenidos completos, tomar los 2 primeros específicos
-                if len(specific_contents) >= 2:
-                    selected_contents.extend(specific_contents[:2])
-                    logging.warning("No hay contenidos completos. Usando contenidos específicos como base.")
-            
-            # PASO 7: Seleccionar contenidos específicos usando análisis adaptativo (Fase 2B)
-            preferred_specific = []
-            
-            # Usar análisis de preferencias si está disponible
-            if content_analysis:
-                # Ordenar tipos de contenido por puntuación de preferencia
-                sorted_preferences = sorted(content_analysis.items(), 
-                                          key=lambda x: x[1].get("preference_score", 0), 
-                                          reverse=True)
-                
-                for content_type, analysis_data in sorted_preferences:
-                    if len(preferred_specific) >= 4:  # Limitar contenidos específicos
-                        break
-                    
-                    # Buscar contenidos de este tipo preferido
-                    type_contents = [c for c in specific_contents 
-                                   if c.get("content_type") == content_type]
-                    
-                    if type_contents:
-                        # Calcular cuántos contenidos agregar basado en la puntuación
-                        preference_score = analysis_data.get("preference_score", 0)
-                        if preference_score >= 0.8:
-                            count = 2  # Alta preferencia
-                        elif preference_score >= 0.6:
-                            count = 1  # Preferencia moderada
-                        else:
-                            count = 0  # Baja preferencia, saltar
-                        
-                        if count > 0:
-                            selected_type_contents = type_contents[:count]
-                            preferred_specific.extend(selected_type_contents)
-                            logging.debug(f"Agregados {len(selected_type_contents)} contenidos de tipo '{content_type}' (score: {preference_score:.2f})")
-            
-            # Fallback a lógica VAK tradicional si no hay análisis adaptativo
-            else:
-                # Contenidos visuales (para visual > 0.6)
-                if visual_score > 0.6:
-                    visual_contents = [c for c in specific_contents 
-                                    if c.get("content_type") in ["diagram", "infographic", "mindmap", "chart", "illustration", "timeline"]]
-                    preferred_specific.extend(visual_contents[:2])
-                    logging.debug(f"Agregados {len(visual_contents[:2])} contenidos visuales (VAK fallback)")
-                
-                # Contenidos auditivos (para auditory > 0.6)
-                if auditory_score > 0.6:
-                    audio_contents = [c for c in specific_contents 
-                                   if c.get("content_type") in ["audio", "music"]]
-                    preferred_specific.extend(audio_contents[:1])
-                    logging.debug(f"Agregados {len(audio_contents[:1])} contenidos auditivos (VAK fallback)")
-                
-                # Contenidos kinestésicos/interactivos (para kinesthetic > 0.6)
-                if kinesthetic_score > 0.6:
-                    interactive_contents = [c for c in specific_contents 
-                                         if c.get("content_type") in ["game", "simulation", "virtual_lab", "interactive_exercise", "mini_game"]]
-                    preferred_specific.extend(interactive_contents[:2])
-                    logging.debug(f"Agregados {len(interactive_contents[:2])} contenidos interactivos (VAK fallback)")
-                
-                # Contenidos para lectura/escritura (para reading > 0.6)
-                if reading_writing_score > 0.6:
-                    text_contents = [c for c in specific_contents 
-                                   if c.get("content_type") in ["glossary", "examples", "guided_questions", "documents"]]
-                    preferred_specific.extend(text_contents[:1])
-                    logging.debug(f"Agregados {len(text_contents[:1])} contenidos de texto (VAK fallback)")
-            
-            # PASO 8: Adaptaciones especiales por discapacidades
-            if has_adhd:
-                # REGLA DE BALANCE #2: ADHD necesita contenidos cortos e interactivos
-                adhd_friendly = [c for c in specific_contents 
-                               if c.get("content_type") in ["game", "mini_game", "interactive_exercise", "flashcards"]]
-                preferred_specific.extend(adhd_friendly[:2])
-                logging.debug(f"Agregados {len(adhd_friendly[:2])} contenidos para ADHD")
-            
-            if has_dyslexia:
-                # REGLA DE BALANCE #3: Dislexia prioriza visual/auditivo sobre texto
-                dyslexia_friendly = [c for c in specific_contents 
-                                   if c.get("content_type") in ["diagram", "audio", "video", "infographic"]]
-                preferred_specific.extend(dyslexia_friendly[:2])
-                logging.debug(f"Agregados {len(dyslexia_friendly[:2])} contenidos para dislexia")
-                
-                # Filtrar contenidos de solo texto si hay alternativas suficientes
-                if len(preferred_specific) >= 2:
-                    # Verificar si hay otros contenidos completos además de texto
-                    complete_types = ["text", "slide", "video", "feynman", "story", "summary", "narrated_presentation"]
-                    non_text_complete = [c for c in selected_contents 
-                                       if c.get("content_type") in complete_types and c.get("content_type") != "text"]
-                    
-                    # Solo remover texto si hay otros contenidos completos disponibles
-                    if non_text_complete:
-                        original_count = len(selected_contents)
-                        selected_contents = [c for c in selected_contents if c.get("content_type") != "text"]
-                        if len(selected_contents) < original_count:
-                            logging.debug("Removido contenido de texto por dislexia (hay otros contenidos completos)")
-                    else:
-                        logging.debug("Mantenido contenido de texto para preservar contenidos completos")
-            
-            # PASO 9: Agregar contenidos específicos seleccionados (sin duplicados)
-            seen_ids = {c["_id"] for c in selected_contents}
-            for content in preferred_specific:
-                if content["_id"] not in seen_ids and len(selected_contents) < 6:
-                    selected_contents.append(content)
-                    seen_ids.add(content["_id"])
+        evaluations = [
+            content for content in original_contents
+            if content.get('content_type') in self.EVALUATION_CONTENT_TYPES
+            and content.get('content_type') not in avoid_types
+        ]
+        evaluations.sort(key=sort_key)
 
-            # PASO 9.5: Aplicar boost a tipos preferidos (Fase 2B)
-            if prefer_types:
-                logging.debug(f"Aplicando boost a tipos preferidos: {prefer_types}")
-                for ptype in prefer_types:
-                    if len(selected_contents) >= 6:
-                        break
-                    
-                    # Verificar si ya tenemos contenido de este tipo
-                    if any(c.get("content_type") == ptype for c in selected_contents):
-                        continue
-                    
-                    # Buscar contenido de este tipo preferido
-                    candidates = [c for c in original_contents 
-                                if c.get("content_type") == ptype and c["_id"] not in seen_ids]
-                    
-                    if candidates:
-                        # Si hay análisis de contenido, usar el mejor candidato
-                        if content_analysis and ptype in content_analysis:
-                            analysis_data = content_analysis[ptype]
-                            preference_score = analysis_data.get("preference_score", 0)
-                            logging.debug(f"Agregando tipo preferido '{ptype}' con score {preference_score:.2f}")
-                        
-                        selected_content = candidates[0]
-                        selected_contents.append(selected_content)
-                        seen_ids.add(selected_content["_id"])
-                        logging.debug(f"Agregado contenido preferido: {ptype}")
-            
-            # PASO 10: REGLA DE BALANCE #4 - Incluir contenido evaluativo
-            if evaluative_contents and len(selected_contents) < 6:
-                eval_content = evaluative_contents[0]
-                if eval_content["_id"] not in seen_ids:
-                    selected_contents.append(eval_content)
-                    logging.debug(f"Agregado contenido evaluativo: {eval_content.get('content_type')}")
+        optional_resources = [
+            content for content in original_contents
+            if content.get('content_type') not in ({'slide'} | self.EVALUATION_CONTENT_TYPES)
+            and content.get('content_type') not in avoid_types
+        ]
+        optional_resources.sort(key=sort_key)
 
-            # PASO 11: REGLA DE BALANCE #5 - Garantizar mínimo 3 contenidos
-            if len(selected_contents) < 3:
-                remaining_contents = [c for c in original_contents
-                                    if c["_id"] not in seen_ids]
-                needed = 3 - len(selected_contents)
-                for content in remaining_contents[:needed]:
-                    selected_contents.append(content)
-                    logging.debug(f"Agregado contenido de relleno: {content.get('content_type')}")
+        ordered_contents = slides + evaluations + optional_resources
 
-            # PASO 11.5: Aplicar filtro de tipos a evitar con validación (Fase 2B)
-            if avoid_types:
-                original_count = len(selected_contents)
-                filtered_sel = [c for c in selected_contents if c.get("content_type") not in avoid_types]
-                
-                # Solo aplicar filtro si no compromete el mínimo de contenidos
-                if len(filtered_sel) >= 3:
-                    selected_contents = filtered_sel
-                    removed_count = original_count - len(filtered_sel)
-                    if removed_count > 0:
-                        logging.info(f"Filtrados {removed_count} contenidos de tipos evitados: {avoid_types}")
-                else:
-                    logging.warning(f"No se aplicó filtro de tipos evitados para mantener mínimo de contenidos")
-            
-            # PASO 12: Validación final del balance
-            final_types = [c.get('content_type') for c in selected_contents]
-            complete_types_in_selection = [ct for ct in final_types 
-                                         if ct in ["text", "slide", "video", "feynman", "story", "summary", "narrated_presentation"]]
-            
-            if not complete_types_in_selection and len(selected_contents) > 1:
-                logging.warning("ADVERTENCIA: Selección sin contenidos completos. Balance puede estar comprometido.")
-            
-            # PASO 13: Limitar a máximo 6 contenidos
-            if len(selected_contents) > 6:
-                selected_contents = selected_contents[:6]
-                logging.debug("Limitado a 6 contenidos máximo")
-            
-            # PASO 14: Validación final del balance con métricas
-            balance_metrics = self._validate_content_balance(selected_contents, original_contents)
-            
-            # Logging final con métricas de calidad (Fase 2B mejorado)
-            logging.info(f"BALANCE FINAL - Contenidos personalizados: {len(selected_contents)} de {len(original_contents)} disponibles")
-            logging.info(f"Tipos balanceados: {final_types}")
-            logging.info(f"Score de balance: {balance_metrics['balance_score']} - Calidad: {balance_metrics['quality_level']}")
-            logging.info(f"Cobertura - Completos: {balance_metrics['coverage']['complete']}, Específicos: {balance_metrics['coverage']['specific']}, Evaluativos: {balance_metrics['coverage']['evaluative']}")
-            
-            # Reportar uso de análisis adaptativo
-            if content_analysis:
-                analyzed_types = list(content_analysis.keys())
-                logging.info(f"Análisis adaptativo aplicado para tipos: {analyzed_types}")
-                
-                # Mostrar efectividad de las preferencias
-                selected_preferred = [t for t in final_types if t in prefer_types]
-                avoided_successfully = not any(t in avoid_types for t in final_types)
-                logging.info(f"Preferencias aplicadas: {len(selected_preferred)}/{len(prefer_types)} tipos preferidos incluidos")
-                logging.info(f"Tipos evitados exitosamente: {avoided_successfully}")
-            else:
-                logging.info("Usando lógica VAK tradicional (sin análisis adaptativo disponible)")
-            
-            # Reportar advertencias si las hay
-            if balance_metrics['warnings']:
-                for warning in balance_metrics['warnings']:
-                    logging.warning(f"BALANCE: {warning}")
-            
-            # Reportar recomendaciones para futuras mejoras
-            if balance_metrics['recommendations']:
-                for recommendation in balance_metrics['recommendations']:
-                    logging.debug(f"RECOMENDACIÓN: {recommendation}")
-            
-            return selected_contents
-            
-        except Exception as e:
-            logging.error(f"Error en _select_personalized_contents (con nueva lógica): {str(e)}")
-            # Fallback crítico: devolver primeros contenidos disponibles con balance básico
-            fallback_contents = original_contents[:min(3, len(original_contents))]
-            logging.warning(f"Usando fallback con {len(fallback_contents)} contenidos")
-            return fallback_contents
+        if not ordered_contents:
+            logging.warning(
+                "No se encontraron contenidos válidos tras aplicar la nueva lógica. Se devuelve el arreglo original (%s elementos).",
+                len(original_contents)
+            )
+            return original_contents
 
-    # DEPRECATED: apply_dynamic_intercalation ha sido reemplazado por StructuredSequenceService
-    # El nuevo sistema usa secuencia estructurada: diapositivas → contenidos opcionales → evaluación
+        seen_ids = set()
+        unique_contents: List[Dict] = []
+        for content in ordered_contents:
+            content_id = content.get('_id') or content.get('id')
+            if isinstance(content_id, ObjectId):
+                content_id = str(content_id)
+            elif content_id is not None:
+                content_id = str(content_id)
 
-    # DEPRECATED: Métodos auxiliares de intercalación eliminados - usar StructuredSequenceService
+            if content_id:
+                if content_id in seen_ids:
+                    continue
+                seen_ids.add(content_id)
+            unique_contents.append(content)
 
-    # _calculate_content_performance eliminado - funcionalidad movida a StructuredSequenceService
+        logging.info(
+            "Selección final de contenidos para topic: slides=%s, evaluaciones=%s, opcionales=%s, total=%s",
+            len(slides),
+            len(evaluations),
+            len(optional_resources),
+            len(unique_contents)
+        )
 
-    # _get_topic_progress eliminado - funcionalidad movida a StructuredSequenceService
-
-    # _apply_intercalation_algorithm eliminado - funcionalidad movida a StructuredSequenceService
-
-    # _calculate_optimal_sequence eliminado - funcionalidad movida a StructuredSequenceService
-
-    def _select_by_vak_preference(self, contents: List[Dict], visual: float, auditory: float, reading: float, kinesthetic: float) -> Optional[Dict]:
-        """
-        Selecciona el contenido completo más apropiado según las preferencias VAK.
-        
-        Args:
-            contents: Lista de contenidos completos disponibles
-            visual, auditory, reading, kinesthetic: Puntuaciones VAK del estudiante
-            
-        Returns:
-            Contenido seleccionado o None
-        """
-        if not contents:
-            return None
-        
-        # Mapear tipos de contenido a preferencias VAK
-        content_scores = []
-        
-        for content in contents:
-            content_type = content.get("content_type", "")
-            score = 0
-            
-            # Calcular score según tipo de contenido y preferencias
-            if content_type in ["video", "slide"] and visual > 0.5:
-                score += visual * 2
-            elif content_type in ["audio", "narrated_presentation"] and auditory > 0.5:
-                score += auditory * 2
-            elif content_type in ["text", "feynman", "summary"] and reading > 0.5:
-                score += reading * 2
-            elif content_type in ["story"] and kinesthetic > 0.5:
-                score += kinesthetic * 1.5
-            else:
-                # Score base para cualquier contenido
-                score = 0.5
-            
-            content_scores.append((content, score))
-        
-        # Seleccionar el contenido con mayor score
-        content_scores.sort(key=lambda x: x[1], reverse=True)
-        return content_scores[0][0]
-    
+        return unique_contents
+    except Exception as e:
+        logging.error(f"Error en _select_personalized_contents (nueva lógica): {e}")
+        return original_contents
     def _generate_content_personalization(self, content: Dict, cognitive_profile: Dict) -> Dict:
         """
         Genera datos de personalización específicos para un contenido.

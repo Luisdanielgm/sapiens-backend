@@ -926,10 +926,7 @@ def generate_personalized_content(topic_id: str, virtual_topic_id: str, cognitiv
         # Fallback si no se seleccionó contenido
         if not selected_contents:
             logging.warning(f"Algoritmo avanzado no seleccionó contenidos. Usando fallback.")
-            selected_contents = existing_contents[:3]
-        
-        # Limitar a máximo 6 contenidos según especificación
-        selected_contents = selected_contents[:6]
+            selected_contents = existing_contents
         
         logging.info(f"Seleccionados {len(selected_contents)} contenidos personalizados para tema {virtual_topic_id}")
 

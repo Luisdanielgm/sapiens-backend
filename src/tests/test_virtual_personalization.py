@@ -84,19 +84,19 @@ class TestVirtualPersonalization(unittest.TestCase):
             self.sample_contents, self.cognitive_profile_visual_dyslexia
         )
         
-        # Verificar que se seleccionaron contenidos
-        self.assertGreater(len(selected), 0)
-        self.assertLessEqual(len(selected), 6)
-        
-        # Verificar que hay al menos un contenido completo
-        complete_types = ["text", "slide", "video", "feynman", "story", "summary", "narrated_presentation"]
-        has_complete = any(c.get("content_type") in complete_types for c in selected)
-        self.assertTrue(has_complete, "Debe haber al menos un contenido completo")
-        
-        # Para dislexia, debe priorizar contenidos visuales y evitar solo texto
+        # Debe incluir todos los contenidos disponibles (slides, quiz y opcionales)
+        self.assertEqual(len(selected), len(self.sample_contents))
+
         content_types = [c.get("content_type") for c in selected]
-        visual_content_count = sum(1 for ct in content_types if ct in ["diagram", "video", "slide"])
-        self.assertGreater(visual_content_count, 0, "Debe incluir contenidos visuales para estudiantes con dislexia")
+        self.assertIn("slide", content_types)
+        self.assertIn("quiz", content_types)
+
+        # Verificar que las diapositivas aparecen primero, seguidas de la evaluación y luego otros contenidos
+        slide_count = content_types.count("slide")
+        quiz_index = content_types.index("quiz")
+        self.assertTrue(all(ct == "slide" for ct in content_types[:slide_count]))
+        self.assertTrue(all(ct != "slide" for ct in content_types[slide_count:]))
+        self.assertTrue(all(ct not in ["slide", "quiz"] for ct in content_types[quiz_index + 1:]))
     
     def test_select_personalized_contents_kinesthetic_adhd(self):
         """Test personalización para estudiante kinestésico con ADHD"""
@@ -104,14 +104,13 @@ class TestVirtualPersonalization(unittest.TestCase):
             self.sample_contents, self.cognitive_profile_kinesthetic_adhd
         )
         
-        # Verificar que se seleccionaron contenidos
-        self.assertGreater(len(selected), 0)
-        self.assertLessEqual(len(selected), 6)
-        
-        # Para ADHD y kinestésico, debe priorizar contenidos interactivos
+        # Debe incluir todos los contenidos para mantener consistencia del tema
+        self.assertEqual(len(selected), len(self.sample_contents))
+
         content_types = [c.get("content_type") for c in selected]
-        interactive_count = sum(1 for ct in content_types if ct in ["game", "interactive_exercise", "simulation"])
-        self.assertGreater(interactive_count, 0, "Debe incluir contenidos interactivos para estudiantes kinestésicos con ADHD")
+        self.assertIn("slide", content_types)
+        self.assertIn("quiz", content_types)
+        self.assertIn("game", content_types)
     
     def test_select_by_vak_preference(self):
         """Test selección de contenido completo por preferencia VAK"""
@@ -211,7 +210,7 @@ class TestVirtualPersonalization(unittest.TestCase):
         self.assertEqual(len(selected), 2)
     
     def test_maximum_content_selection(self):
-        """Test que no se seleccionen más de 6 contenidos"""
+        """Test que se eliminen duplicados pero se respeten todos los contenidos únicos"""
         # Muchos contenidos disponibles
         many_contents = self.sample_contents * 3  # 24 contenidos
         
@@ -219,8 +218,8 @@ class TestVirtualPersonalization(unittest.TestCase):
             many_contents, self.cognitive_profile_visual_dyslexia
         )
         
-        # No debe exceder 6 contenidos
-        self.assertLessEqual(len(selected), 6)
+        # Debe devolver solo los contenidos únicos (basado en su _id)
+        self.assertEqual(len(selected), len(self.sample_contents))
 
 if __name__ == '__main__':
     unittest.main()
