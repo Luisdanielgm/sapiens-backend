@@ -635,13 +635,14 @@ class MembershipService(VerificationBaseService):
             print(f"Error al obtener estudiantes de la clase: {str(e)}")
             return []
 
-    def remove_member(self, class_id: str, member_id: str) -> Tuple[bool, str]:
+    def remove_member(self, class_id: str, member_id: str, workspace_info: Optional[Dict] = None) -> Tuple[bool, str]:
         """
         Elimina un miembro de una clase
         
         Args:
             class_id: ID de la clase
             member_id: ID del miembro a eliminar
+            workspace_info: Información del workspace actual (opcional)
             
         Returns:
             Tuple[bool, str]: (Éxito, Mensaje)
