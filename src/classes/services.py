@@ -552,8 +552,28 @@ class MembershipService(VerificationBaseService):
             print(f"Error al obtener miembros de la clase: {str(e)}")
             return []
 
-    def get_classes_by_teacher(self, teacher_id_or_email: str, workspace_type: str = None, workspace_user_id: str = None, class_id: str = None) -> List[Dict]:
+    def get_classes_by_teacher(
+        self,
+        teacher_id_or_email: str,
+        workspace_info_or_type: Union[Dict, str, None] = None,
+        workspace_user_id: str = None,
+        class_id: str = None
+    ) -> List[Dict]:
         try:
+            workspace_info: Optional[Dict] = None
+            workspace_type = None
+            workspace_id = None
+            institute_id = None
+
+            if isinstance(workspace_info_or_type, dict):
+                workspace_info = workspace_info_or_type
+                workspace_type = workspace_info.get('workspace_type')
+                workspace_user_id = workspace_info.get('user_id')
+                workspace_id = workspace_info.get('workspace_id')
+                institute_id = workspace_info.get('institute_id')
+            else:
+                workspace_type = workspace_info_or_type
+
             # Determinar si es email o ID
             if "@" in teacher_id_or_email:
                 teacher = self.db.users.find_one({"email": teacher_id_or_email})
@@ -584,6 +604,25 @@ class MembershipService(VerificationBaseService):
             # Procesar resultados
             result = []
             for class_item in classes:
+                # Mantener consistencia con el workspace seleccionado para evitar 404 posteriores
+                if workspace_info:
+                    class_workspace_id = class_item.get("workspace_id")
+                    class_institute_id = class_item.get("institute_id")
+
+                    if workspace_id:
+                        if class_workspace_id:
+                            if str(class_workspace_id) != workspace_id:
+                                continue
+                        else:
+                            # Permitir clases legacy sin workspace_id si pertenecen al mismo instituto
+                            if institute_id and str(class_institute_id) != institute_id:
+                                continue
+                            if not institute_id:
+                                continue
+                    elif institute_id:
+                        if str(class_institute_id) != institute_id:
+                            continue
+
                 # Obtener información relacionada
                 subject = self.db.subjects.find_one({"_id": class_item["subject_id"]})
                 section = self.db.sections.find_one({"_id": class_item["section_id"]})
@@ -595,6 +634,8 @@ class MembershipService(VerificationBaseService):
                 class_item["institute_id"] = str(class_item["institute_id"])
                 class_item["academic_period_id"] = str(class_item["academic_period_id"])
                 class_item["level_id"] = str(class_item["level_id"])
+                if class_item.get("workspace_id"):
+                    class_item["workspace_id"] = str(class_item["workspace_id"])
                 
                 # Agregar información del subject
                 if subject:

@@ -6,7 +6,11 @@ from .paypal_service import PayPalService
 from .binance_service import BinancePayService
 from .webhook_service import WebhookService
 from .models import PlanType, PaymentProvider
-import stripe
+
+try:
+    import stripe
+except ModuleNotFoundError:
+    stripe = None
 from src.shared.decorators import auth_required
 from flask_jwt_extended import get_jwt_identity
 
@@ -31,6 +35,11 @@ def list_public_plans():
 def create_checkout_session(plan_id):
     """Creates a Stripe checkout session for a given study plan."""
     try:
+        if stripe is None:
+            return APIRoute.error(
+                message="Stripe SDK no está instalado. Ejecuta 'pip install stripe' para habilitar pagos con tarjeta.",
+                status_code=503
+            )
         user_id = get_jwt_identity()
         stripe.api_key = current_app.config['STRIPE_SECRET_KEY']
         
@@ -62,6 +71,8 @@ def create_checkout_session(plan_id):
 @marketplace_bp.route('/stripe-webhook', methods=['POST'])
 def stripe_webhook():
     """Handles webhooks from Stripe."""
+    if stripe is None:
+        return 'Stripe SDK not installed', 503
     payload = request.get_data(as_text=True)
     sig_header = request.headers.get('Stripe-Signature')
     webhook_secret = current_app.config['STRIPE_WEBHOOK_SECRET']

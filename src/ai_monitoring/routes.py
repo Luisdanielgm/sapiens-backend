@@ -583,7 +583,7 @@ def add_model_pricing():
         output_price = data.get('output_price')
         
         # Validar proveedor
-        valid_providers = ['gemini', 'openai', 'claude']
+        valid_providers = ['gemini', 'openai', 'claude', 'anthropic', 'groq', 'replicate', 'requesty', 'openrouter', 'deepseek', 'zai']
         if provider not in valid_providers:
             return APIRoute.error(
                 ErrorCodes.INVALID_DATA,

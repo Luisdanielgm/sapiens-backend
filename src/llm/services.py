@@ -11,7 +11,7 @@ class LLMValidationService:
     # Supported providers
     SUPPORTED_PROVIDERS = {
         'openai', 'anthropic', 'gemini', 'groq', 
-        'replicate', 'requesty', 'openrouter', 'deepseek'
+        'replicate', 'requesty', 'openrouter', 'deepseek', 'zai'
     }
     
     # API key format patterns
@@ -23,7 +23,8 @@ class LLMValidationService:
         'replicate': r'^r8_[a-zA-Z0-9]{40}$',
         'requesty': r'^[a-zA-Z0-9\-_]{32,}$',
         'openrouter': r'^sk-or-v1-[a-zA-Z0-9]{64}$',
-        'deepseek': r'^sk-[a-zA-Z0-9]{32}$'
+        'deepseek': r'^sk-[a-zA-Z0-9]{32}$',
+        'zai': r'^[a-zA-Z0-9\-_]{20,}$'  # Flexible format for Z.AI
     }
     
     # Test endpoints for validation
@@ -35,7 +36,8 @@ class LLMValidationService:
         'replicate': 'https://api.replicate.com/v1/models',
         'requesty': None,  # Custom endpoint, format validation only
         'openrouter': 'https://openrouter.ai/api/v1/models',
-        'deepseek': 'https://api.deepseek.com/v1/models'
+        'deepseek': 'https://api.deepseek.com/v1/models',
+        'zai': 'https://api.z.ai/api/paas/v4/models'
     }
     
     @classmethod
@@ -124,6 +126,8 @@ class LLMValidationService:
             base_headers['HTTP-Referer'] = 'https://sapiensai.com'
             base_headers['X-Title'] = 'SapiensAI'
         elif provider == 'deepseek':
+            base_headers['Authorization'] = f'Bearer {api_key}'
+        elif provider == 'zai':
             base_headers['Authorization'] = f'Bearer {api_key}'
         
         return base_headers

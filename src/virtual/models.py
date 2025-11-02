@@ -154,9 +154,9 @@ class ParallelContentGenerationTask:
         self.status = status  # pending, processing, completed, failed, retrying
         
         # Configuración de proveedores de IA
-        self.ai_providers = ai_providers or ["openai", "anthropic", "gemini"]
+        self.ai_providers = ai_providers or ["openai", "anthropic", "gemini", "zai"]
         self.primary_provider = primary_provider or "openai"
-        self.fallback_providers = fallback_providers or ["anthropic", "gemini"]
+        self.fallback_providers = fallback_providers or ["anthropic", "gemini", "zai"]
         self.current_provider = self.primary_provider
         
         # Control de intentos por proveedor
