@@ -82,7 +82,23 @@ class ContentTypeService(VerificationBaseService):
         """
         Obtiene un tipo de contenido específico por código.
         """
-        content_type = self.collection.find_one({"code": code, "status": "active"})
+        if not code:
+            return None
+
+        normalized_code = code.strip().lower()
+
+        # Soportar tipos internos no registrados en la colección
+        if normalized_code == "slide_template":
+            return {
+                "code": "slide_template",
+                "name": "Slide Template",
+                "description": "Plantilla base reutilizable para renderizar diapositivas",
+                "status": "active",
+                "subcategory": "template",
+                "builtin": True
+            }
+
+        content_type = self.collection.find_one({"code": normalized_code, "status": "active"})
         if content_type:
             content_type["_id"] = str(content_type["_id"])
         return content_type
@@ -90,6 +106,7 @@ class ContentTypeService(VerificationBaseService):
 # Default status mapping by content type
 DEFAULT_STATUS_BY_TYPE = {
     "slide": ["draft", "active", "published", "skeleton", "html_ready", "narrative_ready"],
+    "slide_template": ["draft", "active", "template"],
     "default": ["draft", "active", "published"]
 }
 
@@ -109,7 +126,8 @@ class ContentService(VerificationBaseService):
         'image_content': 'image',
         'audio_content': 'audio',
         'external_link': 'link',
-        'link': 'link'
+        'link': 'link',
+        'slide-template': 'slide_template'
     }
 
     def _normalize_content_type(self, content_type: Optional[str]) -> Optional[str]:

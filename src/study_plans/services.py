@@ -2709,7 +2709,22 @@ class ContentTypeService(VerificationBaseService):
             Diccionario con datos del tipo de contenido o None si no existe
         """
         try:
-            content_type = self.collection.find_one({"code": code, "status": "active"})
+            if not code:
+                return None
+
+            normalized_code = code.strip().lower()
+
+            if normalized_code == "slide_template":
+                return {
+                    "code": "slide_template",
+                    "name": "Slide Template",
+                    "description": "Plantilla base reutilizable para contenido de diapositivas",
+                    "status": "active",
+                    "subcategory": "template",
+                    "builtin": True
+                }
+
+            content_type = self.collection.find_one({"code": normalized_code, "status": "active"})
             if not content_type:
                 return None
                 
