@@ -1,4 +1,4 @@
-from typing import Tuple, List, Dict, Optional, Union
+from typing import Tuple, List, Dict, Optional, Union, Any
 from bson import ObjectId
 from flask import g
 from pymongo.errors import PyMongoError
@@ -867,14 +867,45 @@ class SubperiodService(VerificationBaseService):
     def __init__(self):
         super().__init__(collection_name="subperiods")
 
-    def create_subperiod(self, subperiod_data: dict) -> Tuple[bool, str]:
+    def _ensure_object_id(self, value: Any) -> Optional[ObjectId]:
+        if isinstance(value, ObjectId):
+            return value
+        if value is None:
+            return None
+        return ObjectId(value)
+
+    def create_subperiod(
+        self,
+        subperiod_data: dict,
+        workspace_info: Optional[Dict] = None
+    ) -> Tuple[bool, str]:
         try:
             # Verificar que la clase existe
-            class_data = self.db.classes.find_one({"_id": ObjectId(subperiod_data["class_id"])})
+            class_id = self._ensure_object_id(subperiod_data.get("class_id"))
+            subperiod_data["class_id"] = class_id
+
+            class_data = self.db.classes.find_one({"_id": class_id})
             if not class_data:
                 return False, "Clase no encontrada"
-                
-            subperiod = Subperiod(**subperiod_data)
+
+            # Enriquecer datos con información del workspace si es necesario
+            enriched_data = dict(subperiod_data)
+
+            if workspace_info:
+                workspace_id = workspace_info.get("workspace_id")
+                institute_id = workspace_info.get("institute_id")
+                workspace_type = workspace_info.get("workspace_type")
+
+                if workspace_id and "workspace_id" not in enriched_data:
+                    enriched_data["workspace_id"] = self._ensure_object_id(workspace_id)
+
+                if institute_id and "institute_id" not in enriched_data:
+                    enriched_data["institute_id"] = self._ensure_object_id(institute_id)
+
+                if workspace_type and "workspace_type" not in enriched_data:
+                    enriched_data["workspace_type"] = workspace_type
+
+            subperiod = Subperiod(**enriched_data)
             result = self.collection.insert_one(subperiod.to_dict())
             return True, str(result.inserted_id)
         except Exception as e:
@@ -897,7 +928,12 @@ class SubperiodService(VerificationBaseService):
             print(f"Error al obtener subperiodos de la clase: {str(e)}")
             return []
     
-    def update_subperiod(self, subperiod_id: str, update_data: dict) -> Tuple[bool, str]:
+    def update_subperiod(
+        self,
+        subperiod_id: str,
+        update_data: dict,
+        workspace_info: Optional[Dict] = None
+    ) -> Tuple[bool, str]:
         """
         Actualiza un subperiodo existente.
         
@@ -923,10 +959,42 @@ class SubperiodService(VerificationBaseService):
                 del update_data["created_by"]
             if "created_at" in update_data:
                 del update_data["created_at"]
+            if "workspace_id" in update_data:
+                del update_data["workspace_id"]
+            if "workspace_type" in update_data:
+                del update_data["workspace_type"]
+            if "institute_id" in update_data:
+                del update_data["institute_id"]
+
+            # Validar aislamiento por workspace si se proporciona información
+            if workspace_info:
+                workspace_type = workspace_info.get("workspace_type")
+                workspace_id = workspace_info.get("workspace_id")
+                institute_id = workspace_info.get("institute_id")
+
+                filter_query = {"_id": ObjectId(subperiod_id)}
+
+                if workspace_type == "INSTITUTE":
+                    or_conditions = []
+                    if workspace_id:
+                        or_conditions.append({"workspace_id": self._ensure_object_id(workspace_id)})
+                    if institute_id:
+                        or_conditions.append({
+                            "workspace_id": {"$exists": False},
+                            "institute_id": self._ensure_object_id(institute_id)
+                        })
+                    if or_conditions:
+                        filter_query["$or"] = or_conditions
+                elif workspace_id:
+                    filter_query["workspace_id"] = self._ensure_object_id(workspace_id)
+                else:
+                    filter_query["class_id"] = subperiod["class_id"]
+            else:
+                filter_query = {"_id": ObjectId(subperiod_id)}
             
             # Actualizar el subperiodo
             result = self.collection.update_one(
-                {"_id": ObjectId(subperiod_id)},
+                filter_query,
                 {"$set": update_data}
             )
             
@@ -937,7 +1005,11 @@ class SubperiodService(VerificationBaseService):
             print(f"Error al actualizar subperiodo: {str(e)}")
             return False, str(e)
     
-    def delete_subperiod(self, subperiod_id: str) -> Tuple[bool, str]:
+    def delete_subperiod(
+        self,
+        subperiod_id: str,
+        workspace_info: Optional[Dict] = None
+    ) -> Tuple[bool, str]:
         """
         Elimina un subperiodo existente.
         
@@ -949,7 +1021,28 @@ class SubperiodService(VerificationBaseService):
         """
         try:
             # Verificar que el subperiodo existe
-            subperiod = self.collection.find_one({"_id": ObjectId(subperiod_id)})
+            filter_query = {"_id": ObjectId(subperiod_id)}
+
+            if workspace_info:
+                workspace_type = workspace_info.get("workspace_type")
+                workspace_id = workspace_info.get("workspace_id")
+                institute_id = workspace_info.get("institute_id")
+
+                if workspace_type == "INSTITUTE":
+                    or_conditions = []
+                    if workspace_id:
+                        or_conditions.append({"workspace_id": self._ensure_object_id(workspace_id)})
+                    if institute_id:
+                        or_conditions.append({
+                            "workspace_id": {"$exists": False},
+                            "institute_id": self._ensure_object_id(institute_id)
+                        })
+                    if or_conditions:
+                        filter_query["$or"] = or_conditions
+                elif workspace_id:
+                    filter_query["workspace_id"] = self._ensure_object_id(workspace_id)
+
+            subperiod = self.collection.find_one(filter_query)
             if not subperiod:
                 return False, "Subperiodo no encontrado"
             
@@ -959,7 +1052,7 @@ class SubperiodService(VerificationBaseService):
             # Puedes verificar en las colecciones correspondientes
             
             # Eliminar el subperiodo
-            result = self.collection.delete_one({"_id": ObjectId(subperiod_id)})
+            result = self.collection.delete_one(filter_query)
             
             if result.deleted_count > 0:
                 return True, "Subperiodo eliminado correctamente"
