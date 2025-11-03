@@ -555,10 +555,16 @@ class MembershipService(VerificationBaseService):
             
             # Obtener detalles de cada clase
             class_ids = [m["class_id"] for m in memberships]
+            
+            # Si no hay membresías, retornar lista vacía
+            if not class_ids:
+                return []
+            
             query = {"_id": {"$in": class_ids}}
             
-            # Aplicar filtros de workspace si es necesario
-            if workspace_type and workspace_user_id:
+            # Para workspaces INDIVIDUAL_TEACHER, mostrar todas las clases donde el profesor tiene membresía
+            # No aplicar filtros restrictivos de workspace ya que el profesor necesita ver todas sus clases
+            if workspace_type != "INDIVIDUAL_TEACHER" and workspace_type and workspace_user_id:
                 from src.workspaces.services import WorkspaceService
                 workspace_service = WorkspaceService()
                 query = workspace_service.apply_workspace_filters(query, workspace_type, workspace_user_id, class_id)
@@ -568,24 +574,30 @@ class MembershipService(VerificationBaseService):
             # Procesar resultados
             result = []
             for class_item in classes:
-                # Mantener consistencia con el workspace seleccionado para evitar 404 posteriores
-                if workspace_info:
+                # Para workspaces INDIVIDUAL_TEACHER, mostrar todas las clases donde el profesor tiene membresía
+                # sin filtrar por workspace_id o institute_id
+                if workspace_info and workspace_type != "INDIVIDUAL_TEACHER":
                     class_workspace_id = class_item.get("workspace_id")
                     class_institute_id = class_item.get("institute_id")
 
                     if workspace_id:
                         if class_workspace_id:
+                            # Si la clase tiene workspace_id, debe coincidir
                             if str(class_workspace_id) != workspace_id:
                                 continue
                         else:
-                            # Permitir clases legacy sin workspace_id si pertenecen al mismo instituto
-                            if institute_id and str(class_institute_id) != institute_id:
-                                continue
-                            if not institute_id:
-                                continue
+                            # Clases legacy sin workspace_id: permitir si pertenecen al mismo instituto
+                            # o si no hay institute_id (mantener compatibilidad con clases legacy)
+                            if institute_id:
+                                if str(class_institute_id) != institute_id:
+                                    continue
+                            # Si no hay institute_id en el workspace, permitir clases legacy
+                            # ya que el profesor tiene membresía activa
                     elif institute_id:
-                        if str(class_institute_id) != institute_id:
+                        # Si solo hay institute_id, verificar que coincida
+                        if class_institute_id and str(class_institute_id) != institute_id:
                             continue
+                        # Si la clase no tiene institute_id, permitirla (clase legacy con membresía activa)
 
                 # Obtener información relacionada
                 subject = self.db.subjects.find_one({"_id": class_item["subject_id"]})
