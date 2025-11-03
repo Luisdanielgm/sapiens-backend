@@ -102,7 +102,8 @@ def get_class_details(class_id):
     """
     try:
         workspace_info = get_current_workspace_info()
-        class_details = class_service.get_class_details(class_id, workspace_info)
+        user_id = request.user_id  # Obtener el user_id del request
+        class_details = class_service.get_class_details(class_id, workspace_info, user_id)
         if class_details:
             return APIRoute.success(data=class_details)
         else:

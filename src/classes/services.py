@@ -102,7 +102,7 @@ class ClassService(VerificationBaseService):
         except Exception as e:
             return False, str(e)
 
-    def get_class_details(self, class_id: str, workspace_info: dict = None) -> Optional[Dict]:
+    def get_class_details(self, class_id: str, workspace_info: dict = None, user_id: str = None) -> Optional[Dict]:
         try:
             # Crear filtro base
             filter_query = {"_id": ObjectId(class_id)}
@@ -130,6 +130,35 @@ class ClassService(VerificationBaseService):
                     filter_query["workspace_id"] = ObjectId(workspace_info['workspace_id'])
             
             class_data = self.collection.find_one(filter_query)
+            
+            # Si no se encontró la clase con los filtros de workspace, verificar si el usuario tiene membresía activa
+            if not class_data and user_id:
+                print(f"[get_class_details] Clase no encontrada con filtros de workspace, verificando membresía para user_id: {user_id}")
+                
+                # Verificar si el usuario tiene membresía activa en esta clase
+                # Buscar membresías activas o sin campo status (asumimos que son activas por defecto)
+                membership = self.db.class_members.find_one({
+                    "class_id": ObjectId(class_id),
+                    "user_id": ObjectId(user_id),
+                    "$or": [
+                        {"status": "active"},
+                        {"status": {"$exists": False}}
+                    ]
+                })
+                
+                if membership:
+                    print(f"[get_class_details] Usuario tiene membresía activa, obteniendo clase sin filtros de workspace")
+                    # Obtener la clase sin filtros de workspace
+                    class_data = self.collection.find_one({"_id": ObjectId(class_id)})
+                    
+                    # Verificar que pertenezca al mismo instituto (medida de seguridad)
+                    if class_data and workspace_info and workspace_info.get('institute_id'):
+                        class_institute_id = class_data.get("institute_id")
+                        if class_institute_id and str(class_institute_id) != workspace_info.get('institute_id'):
+                            print(f"[get_class_details] Clase pertenece a un instituto diferente, acceso denegado")
+                            return None
+                        print(f"[get_class_details] Clase permitida: usuario tiene membresía activa y pertenece al mismo instituto")
+            
             if not class_data:
                 return None
 
