@@ -593,40 +593,20 @@ class MembershipService(VerificationBaseService):
                 class_id_str = str(class_item.get("_id", "N/A"))
                 print(f"[get_classes_by_teacher] Procesando clase: {class_id_str}, name: {class_item.get('name', 'N/A')}")
                 
-                # Para workspaces INDIVIDUAL_TEACHER, mostrar todas las clases donde el profesor tiene membresía
-                # sin filtrar por workspace_id o institute_id
-                if workspace_info and workspace_type != "INDIVIDUAL_TEACHER":
-                    class_workspace_id = class_item.get("workspace_id")
-                    class_institute_id = class_item.get("institute_id")
-                    
-                    print(f"[get_classes_by_teacher] Clase {class_id_str}: workspace_id={class_workspace_id}, institute_id={class_institute_id}")
-                    print(f"[get_classes_by_teacher] Workspace actual: workspace_id={workspace_id}, institute_id={institute_id}")
-
-                    if workspace_id:
-                        if class_workspace_id:
-                            # Si la clase tiene workspace_id, debe coincidir
-                            if str(class_workspace_id) != workspace_id:
-                                print(f"[get_classes_by_teacher] Clase {class_id_str} filtrada: workspace_id no coincide")
-                                continue
-                        else:
-                            # Clases legacy sin workspace_id: permitir si pertenecen al mismo instituto
-                            # o si no hay institute_id (mantener compatibilidad con clases legacy)
-                            if institute_id:
-                                if str(class_institute_id) != institute_id:
-                                    print(f"[get_classes_by_teacher] Clase {class_id_str} filtrada: institute_id no coincide")
-                                    continue
-                            # Si no hay institute_id en el workspace, permitir clases legacy
-                            # ya que el profesor tiene membresía activa
-                            print(f"[get_classes_by_teacher] Clase {class_id_str} permitida: clase legacy sin workspace_id")
-                    elif institute_id:
-                        # Si solo hay institute_id, verificar que coincida
-                        if class_institute_id and str(class_institute_id) != institute_id:
-                            print(f"[get_classes_by_teacher] Clase {class_id_str} filtrada: institute_id no coincide")
-                            continue
-                        # Si la clase no tiene institute_id, permitirla (clase legacy con membresía activa)
-                        print(f"[get_classes_by_teacher] Clase {class_id_str} permitida: clase legacy sin institute_id")
-                else:
-                    print(f"[get_classes_by_teacher] Clase {class_id_str} permitida: workspace_type={workspace_type} (sin filtros restrictivos)")
+                # IMPORTANTE: Si el profesor tiene membresía activa en una clase, debe poder verla
+                # independientemente del workspace. Solo validamos institute_id como medida de seguridad mínima.
+                class_institute_id = class_item.get("institute_id")
+                
+                # Verificar que pertenezca al mismo instituto (si hay institute_id en el workspace)
+                # Esto es una medida de seguridad básica, pero permitimos que el profesor vea todas sus clases
+                if workspace_info and institute_id and class_institute_id:
+                    if str(class_institute_id) != institute_id:
+                        print(f"[get_classes_by_teacher] Clase {class_id_str} filtrada: institute_id no coincide (seguridad)")
+                        continue
+                
+                # Si llegamos aquí, el profesor tiene membresía activa y la clase pertenece al mismo instituto
+                # (o no hay restricción de instituto), por lo que se permite
+                print(f"[get_classes_by_teacher] Clase {class_id_str} permitida: profesor tiene membresía activa")
 
                 # Obtener información relacionada
                 subject = self.db.subjects.find_one({"_id": class_item["subject_id"]})
