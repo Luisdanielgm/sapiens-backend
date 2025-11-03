@@ -542,10 +542,13 @@ class MembershipService(VerificationBaseService):
             if "@" in teacher_id_or_email:
                 teacher = self.db.users.find_one({"email": teacher_id_or_email})
                 if not teacher:
+                    print(f"[get_classes_by_teacher] Usuario no encontrado con email: {teacher_id_or_email}")
                     return []
                 teacher_id = teacher["_id"]
+                print(f"[get_classes_by_teacher] Usuario encontrado: {teacher_id_or_email} -> ID: {teacher_id}")
             else:
                 teacher_id = ObjectId(teacher_id_or_email)
+                print(f"[get_classes_by_teacher] Buscando con ID: {teacher_id}")
                 
             # Obtener membresías del profesor
             memberships = list(self.collection.find({
@@ -553,51 +556,77 @@ class MembershipService(VerificationBaseService):
                 "role": "TEACHER"
             }))
             
+            print(f"[get_classes_by_teacher] Encontradas {len(memberships)} membresías para el profesor")
+            if memberships:
+                print(f"[get_classes_by_teacher] IDs de membresías: {[str(m.get('_id', 'N/A')) for m in memberships]}")
+                print(f"[get_classes_by_teacher] Class IDs de membresías: {[str(m.get('class_id', 'N/A')) for m in memberships]}")
+            
             # Obtener detalles de cada clase
             class_ids = [m["class_id"] for m in memberships]
             
             # Si no hay membresías, retornar lista vacía
             if not class_ids:
+                print(f"[get_classes_by_teacher] No se encontraron class_ids, retornando lista vacía")
                 return []
             
+            print(f"[get_classes_by_teacher] Buscando clases con IDs: {[str(cid) for cid in class_ids]}")
             query = {"_id": {"$in": class_ids}}
+            
+            print(f"[get_classes_by_teacher] Workspace info: type={workspace_type}, workspace_id={workspace_id}, institute_id={institute_id}")
             
             # Para workspaces INDIVIDUAL_TEACHER, mostrar todas las clases donde el profesor tiene membresía
             # No aplicar filtros restrictivos de workspace ya que el profesor necesita ver todas sus clases
             if workspace_type != "INDIVIDUAL_TEACHER" and workspace_type and workspace_user_id:
                 from src.workspaces.services import WorkspaceService
                 workspace_service = WorkspaceService()
+                query_before_filter = query.copy()
                 query = workspace_service.apply_workspace_filters(query, workspace_type, workspace_user_id, class_id)
+                print(f"[get_classes_by_teacher] Query después de apply_workspace_filters: {query}")
             
+            print(f"[get_classes_by_teacher] Query final para buscar clases: {query}")
             classes = list(self.db.classes.find(query))
+            print(f"[get_classes_by_teacher] Encontradas {len(classes)} clases en la base de datos")
             
             # Procesar resultados
             result = []
             for class_item in classes:
+                class_id_str = str(class_item.get("_id", "N/A"))
+                print(f"[get_classes_by_teacher] Procesando clase: {class_id_str}, name: {class_item.get('name', 'N/A')}")
+                
                 # Para workspaces INDIVIDUAL_TEACHER, mostrar todas las clases donde el profesor tiene membresía
                 # sin filtrar por workspace_id o institute_id
                 if workspace_info and workspace_type != "INDIVIDUAL_TEACHER":
                     class_workspace_id = class_item.get("workspace_id")
                     class_institute_id = class_item.get("institute_id")
+                    
+                    print(f"[get_classes_by_teacher] Clase {class_id_str}: workspace_id={class_workspace_id}, institute_id={class_institute_id}")
+                    print(f"[get_classes_by_teacher] Workspace actual: workspace_id={workspace_id}, institute_id={institute_id}")
 
                     if workspace_id:
                         if class_workspace_id:
                             # Si la clase tiene workspace_id, debe coincidir
                             if str(class_workspace_id) != workspace_id:
+                                print(f"[get_classes_by_teacher] Clase {class_id_str} filtrada: workspace_id no coincide")
                                 continue
                         else:
                             # Clases legacy sin workspace_id: permitir si pertenecen al mismo instituto
                             # o si no hay institute_id (mantener compatibilidad con clases legacy)
                             if institute_id:
                                 if str(class_institute_id) != institute_id:
+                                    print(f"[get_classes_by_teacher] Clase {class_id_str} filtrada: institute_id no coincide")
                                     continue
                             # Si no hay institute_id en el workspace, permitir clases legacy
                             # ya que el profesor tiene membresía activa
+                            print(f"[get_classes_by_teacher] Clase {class_id_str} permitida: clase legacy sin workspace_id")
                     elif institute_id:
                         # Si solo hay institute_id, verificar que coincida
                         if class_institute_id and str(class_institute_id) != institute_id:
+                            print(f"[get_classes_by_teacher] Clase {class_id_str} filtrada: institute_id no coincide")
                             continue
                         # Si la clase no tiene institute_id, permitirla (clase legacy con membresía activa)
+                        print(f"[get_classes_by_teacher] Clase {class_id_str} permitida: clase legacy sin institute_id")
+                else:
+                    print(f"[get_classes_by_teacher] Clase {class_id_str} permitida: workspace_type={workspace_type} (sin filtros restrictivos)")
 
                 # Obtener información relacionada
                 subject = self.db.subjects.find_one({"_id": class_item["subject_id"]})
@@ -622,10 +651,14 @@ class MembershipService(VerificationBaseService):
                     class_item["section_name"] = section.get("name", "")
                 
                 result.append(class_item)
-                
+                print(f"[get_classes_by_teacher] Clase {class_id_str} agregada al resultado")
+            
+            print(f"[get_classes_by_teacher] Total de clases retornadas: {len(result)}")
             return result
         except Exception as e:
-            print(f"Error al obtener clases del profesor: {str(e)}")
+            import traceback
+            print(f"[get_classes_by_teacher] Error al obtener clases del profesor: {str(e)}")
+            print(f"[get_classes_by_teacher] Traceback: {traceback.format_exc()}")
             return []
 
     def get_classes_by_student(self, student_id_or_email: str, workspace_type: str = None, workspace_user_id: str = None, class_id: str = None) -> List[Dict]:
