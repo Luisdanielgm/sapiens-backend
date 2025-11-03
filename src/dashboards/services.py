@@ -409,11 +409,22 @@ class InstituteDashboardService(BaseService):
     
     def generate_institute_dashboard(self, institute_id: str) -> Optional[Dict]:
         """Genera un dashboard completo para un instituto educativo"""
+        logger = logging.getLogger(__name__)
         try:
+            # Validar que el ID sea válido
+            try:
+                ObjectId(institute_id)
+            except Exception as e:
+                logger.error(f"ID de instituto inválido: {institute_id}, error: {str(e)}")
+                return None
+            
             # Verificar si el instituto existe
             institute = self.db.institutes.find_one({"_id": ObjectId(institute_id)})
             if not institute:
+                logger.warning(f"Instituto no encontrado: {institute_id}")
                 return None
+
+            logger.info(f"Generando dashboard para instituto: {institute_id}")
 
             # Obtener métricas generales
             overview_metrics = self._get_overview_metrics(institute_id)
@@ -457,11 +468,18 @@ class InstituteDashboardService(BaseService):
             )
             
             # Guardar dashboard para historial/referencia
-            self.collection.insert_one(dashboard.to_dict())
+            dashboard_dict = dashboard.to_dict()
+            try:
+                self.collection.insert_one(dashboard_dict)
+            except Exception as save_error:
+                # Si falla el guardado, loguear pero no fallar - el dashboard se devuelve de todos modos
+                logger.warning(f"Error al guardar dashboard en historial: {str(save_error)}")
             
-            return dashboard.to_dict()
+            logger.info(f"Dashboard generado exitosamente para instituto: {institute_id}")
+            return dashboard_dict
         except Exception as e:
-            logging.getLogger(__name__).error(f"Error generando dashboard de instituto: {str(e)}")
+            import traceback
+            logger.error(f"Error generando dashboard de instituto {institute_id}: {str(e)}\n{traceback.format_exc()}")
             return None
     
     def _get_overview_metrics(self, institute_id: str) -> Dict[str, int]:

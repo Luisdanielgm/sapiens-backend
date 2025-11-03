@@ -165,6 +165,7 @@ class ClassService(VerificationBaseService):
             # Obtener información relacionada
             subject = self.db.subjects.find_one({"_id": class_data["subject_id"]})
             section = self.db.sections.find_one({"_id": class_data["section_id"]})
+            academic_period = self.db.academic_periods.find_one({"_id": class_data["academic_period_id"]})
 
             # Agregar información adicional
             class_data["subject"] = subject
@@ -180,8 +181,34 @@ class ClassService(VerificationBaseService):
             
             if subject:
                 class_data["subject"]["_id"] = str(subject["_id"])
+                # Agregar campos planos para compatibilidad con el frontend
+                class_data["subject_name"] = subject.get("name")
+                class_data["subject_code"] = subject.get("code")
+                class_data["subject_credits"] = subject.get("credits")
+            
             if section:
                 class_data["section"]["_id"] = str(section["_id"])
+                # Agregar campos planos para compatibilidad con el frontend
+                class_data["section_name"] = section.get("code")  # Usar code como section_name
+                class_data["section_code"] = section.get("code")
+                class_data["section_capacity"] = section.get("capacity")
+                class_data["section_schedule"] = section.get("schedule", {})
+            
+            # Agregar información del período académico
+            if academic_period:
+                class_data["period_name"] = academic_period.get("name")
+                class_data["period_type"] = academic_period.get("type")
+                start_date = academic_period.get("start_date")
+                end_date = academic_period.get("end_date")
+                # Convertir fechas a string ISO si son datetime objects
+                if isinstance(start_date, datetime):
+                    class_data["period_start_date"] = start_date.isoformat()
+                else:
+                    class_data["period_start_date"] = start_date
+                if isinstance(end_date, datetime):
+                    class_data["period_end_date"] = end_date.isoformat()
+                else:
+                    class_data["period_end_date"] = end_date
 
             return class_data
         except Exception as e:

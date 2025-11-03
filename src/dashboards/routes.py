@@ -157,14 +157,62 @@ def get_student_dashboard(student_id):
 def get_institute_dashboard(institute_id):
     """Obtiene un dashboard completo y detallado del instituto"""
     try:
+        logger = logging.getLogger(__name__)
+        logger.info(f"Solicitando dashboard para instituto: {institute_id}")
+        
         # Obtener información del workspace actual
         workspace_info = get_current_workspace_info()
+        logger.info(f"Workspace info: {workspace_info}")
+        
+        # Validar que el ID sea válido
+        try:
+            ObjectId(institute_id)
+        except Exception as e:
+            logger.error(f"ID de instituto inválido: {institute_id}, error: {str(e)}")
+            return APIRoute.error(
+                ErrorCodes.INVALID_REQUEST,
+                f"ID de instituto inválido: {institute_id}",
+                status_code=400
+            )
+        
+        # Validar que el usuario tenga acceso al instituto
+        user_id = request.user_id
+        db = get_db()
+        
+        # Verificar si el usuario es miembro del instituto como administrador
+        institute_member = db.institute_members.find_one({
+            "user_id": ObjectId(user_id),
+            "institute_id": ObjectId(institute_id),
+            "role": "INSTITUTE_ADMIN"
+        })
+        
+        # Si no es miembro, verificar si es ADMIN del sistema (puede ver cualquier instituto)
+        if not institute_member:
+            user = db.users.find_one({"_id": ObjectId(user_id)})
+            if not user or user.get("role") not in [ROLES["ADMIN"]]:
+                logger.warning(f"Usuario {user_id} no tiene acceso al instituto {institute_id}")
+                return APIRoute.error(
+                    ErrorCodes.FORBIDDEN,
+                    "No tienes acceso a este instituto",
+                    status_code=403
+                )
+        
+        # Verificar que el instituto existe
+        institute = db.institutes.find_one({"_id": ObjectId(institute_id)})
+        if not institute:
+            logger.warning(f"Instituto no encontrado: {institute_id}")
+            return APIRoute.error(
+                ErrorCodes.NOT_FOUND,
+                "Instituto no encontrado",
+                status_code=404
+            )
         
         # Obtener dashboard general
         dashboard = institute_dashboard_service.generate_institute_dashboard(
             institute_id
         )
         if not dashboard:
+            logger.warning(f"No se encontraron datos para generar el dashboard del instituto: {institute_id}")
             return APIRoute.error(
                 ErrorCodes.NOT_FOUND,
                 "No se encontraron datos para generar el dashboard",
@@ -173,6 +221,9 @@ def get_institute_dashboard(institute_id):
                 
         return APIRoute.success(data={"dashboard": dashboard})
     except Exception as e:
+        import traceback
+        logger = logging.getLogger(__name__)
+        logger.error(f"Error en get_institute_dashboard: {str(e)}\n{traceback.format_exc()}")
         return APIRoute.error(
             ErrorCodes.SERVER_ERROR,
             str(e),

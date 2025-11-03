@@ -192,6 +192,10 @@ class AIModelPricing(BaseModel):
     output_price_per_1k: float = Field(..., description="Price per 1000 output tokens")
     source: str = Field(..., description="Source of the pricing data ('local' or 'db')")
     notes: Optional[str] = Field(None, description="Additional notes about the pricing")
+    
+    model_config = ConfigDict(
+        protected_namespaces=()
+    )
 
 class AddAIModelRequest(BaseModel):
     model_name: str
@@ -199,9 +203,17 @@ class AddAIModelRequest(BaseModel):
     input_price_per_1k: float
     output_price_per_1k: float
     notes: Optional[str] = None
+    
+    model_config = ConfigDict(
+        protected_namespaces=()
+    )
 
 class CheckModelRequest(BaseModel):
     model_name: str
+    
+    model_config = ConfigDict(
+        protected_namespaces=()
+    )
 
 class AICall(BaseModel):
     call_id: str = Field(..., description="Unique identifier for the API call")
@@ -225,6 +237,7 @@ class AICall(BaseModel):
     user_type: Optional[str] = Field(None, description="Type of user (e.g., 'student', 'teacher', 'admin')")
     
     model_config = ConfigDict(
+        protected_namespaces=(),
         json_schema_extra={
             "example": {
                 "call_id": "1234567890",
@@ -286,6 +299,7 @@ class AICallCreate(BaseModel):
     success: Optional[bool] = None
 
     model_config = ConfigDict(
+        protected_namespaces=(),
         json_schema_extra={
             "example": {
                 "call_id": "1234567890",
