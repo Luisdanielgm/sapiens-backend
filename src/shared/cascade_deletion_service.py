@@ -74,9 +74,32 @@ class CascadeDeletionService:
                 'student_performance': 'student_id'
             },
             
+            # Educational structure dependencies
+            'educational_programs': {
+                'levels': 'program_id'
+            },
+            'levels': {
+                'sections': 'level_id',
+                'subjects': 'level_id',
+                'academic_periods': 'level_id',
+                'classes': 'level_id'
+            },
+            'sections': {
+                'classes': 'section_id'
+            },
+            'subjects': {
+                'classes': 'subject_id'
+            },
+            'academic_periods': {
+                'classes': 'academic_period_id'
+            },
+
             # Class dependencies
             'classes': {
+                'class_members': 'class_id',
+                'subperiods': 'class_id',
                 'study_plan_assignments': 'class_id',
+                'student_individual_content': 'class_id',
                 'student_performance': 'class_id',
                 'class_statistics': 'class_id',
                 'evaluation_analytics': 'class_id'
@@ -210,6 +233,9 @@ class CascadeDeletionService:
             'evaluation_submissions',
             'evaluation_resources',
             'evaluation_analytics',
+            'student_individual_content',
+            'class_members',
+            'subperiods',
             'student_performance',
             'class_statistics',
             'topic_contents',
@@ -217,8 +243,13 @@ class CascadeDeletionService:
             'topics',
             'modules',
             'study_plan_assignments',
-            'study_plans',
             'classes',
+            'sections',
+            'subjects',
+            'academic_periods',
+            'levels',
+            'educational_programs',
+            'study_plans',
             'students'
         ]
         

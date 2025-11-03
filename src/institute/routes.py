@@ -261,7 +261,10 @@ def delete_program(program_id):
     Elimina un programa educativo específico por su ID.
     """
     try:
-        success, result = program_service.delete_program(program_id)
+        payload = request.get_json(silent=True) or {}
+        cascade_delete = bool(payload.get("cascadeDelete") or payload.get("cascade"))
+
+        success, result = program_service.delete_program(program_id, cascade=cascade_delete)
 
         if success:
             return APIRoute.success(data={"message": result}, message=result)
@@ -357,7 +360,10 @@ def delete_level(level_id):
     Elimina un nivel específico por su ID.
     """
     try:
-        success, result = level_service.delete_level(level_id)
+        payload = request.get_json(silent=True) or {}
+        cascade_delete = bool(payload.get("cascadeDelete") or payload.get("cascade"))
+
+        success, result = level_service.delete_level(level_id, cascade=cascade_delete)
 
         if success:
             return APIRoute.success(data={"message": result}, message=result)
@@ -365,3 +371,4 @@ def delete_level(level_id):
             return APIRoute.error(ErrorCodes.DELETION_ERROR, result)
     except Exception as e:
         return APIRoute.error(str(e), 500)
+

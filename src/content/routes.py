@@ -664,10 +664,22 @@ def update_content(content_id):
 @APIRoute.standard(auth_required_flag=True, roles=[ROLES["TEACHER"], ROLES["ADMIN"]])
 def delete_content(content_id):
     """
-    Elimina contenido (soft delete).
+    Elimina contenido. Cuando se solicita en cascada, también elimina dependencias registradas
+    (virtual_topic_contents, content_results, etc.).
     """
     try:
-        success, result = content_service.delete_content(content_id)
+        payload = request.get_json(silent=True) or {}
+        cascade_delete = payload.get('cascadeDelete', payload.get('cascade_delete'))
+        if cascade_delete is None:
+            cascade_delete = request.args.get('cascade', 'false')
+
+        cascade = False
+        if isinstance(cascade_delete, bool):
+            cascade = cascade_delete
+        elif isinstance(cascade_delete, str):
+            cascade = cascade_delete.lower() in ('1', 'true', 'yes')
+
+        success, result = content_service.delete_content(content_id, cascade=cascade)
 
         if success:
             return APIRoute.success(data={"message": result})

@@ -9,6 +9,7 @@ from src.shared.constants import STATUS
 from src.shared.standardization import VerificationBaseService, ErrorCodes
 from src.shared.exceptions import AppException
 from src.shared.database import get_db
+from src.shared.cascade_deletion_service import CascadeDeletionService
 from src.classes.services import ClassService
 from src.study_plans.models import (
     StudyPlanPerSubject, StudyPlanAssignment, Module, Topic
@@ -293,66 +294,48 @@ class StudyPlanService(VerificationBaseService):
         except Exception as e:
             raise AppException(f"Error al actualizar plan: {str(e)}", AppException.BAD_REQUEST)
 
-    def delete_study_plan(self, plan_id: str) -> None:
+    def delete_study_plan(self, plan_id: str, cascade: bool = False) -> Tuple[bool, str]:
         """
-        Elimina un plan de estudios y todos sus componentes asociados.
-        
-        Args:
-            plan_id: ID del plan de estudios a eliminar
-            
-        Raises:
-            AppException: Si el plan no existe, si tiene asignaciones activas o si
-                         ocurre un error durante la eliminación
+        Elimina un plan de estudios. Si cascade=True, elimina también los módulos, temas,
+        asignaciones y cualquier entidad dependiente registrada en CascadeDeletionService.
         """
-        # Validar el ID de forma estandarizada
         validate_object_id(plan_id)
-        
-        # Verificar si hay asignaciones activas
-        assignments = get_db().study_plan_assignments.find_one({
-            "study_plan_id": ObjectId(plan_id),
-            "is_active": True
-        })
-        
-        if assignments:
-            raise AppException("No se puede eliminar un plan con asignaciones activas", AppException.FORBIDDEN)
-        
+        db = get_db()
+
+        plan = self.collection.find_one({"_id": ObjectId(plan_id)})
+        if not plan:
+            return False, "Plan de estudios no encontrado"
+
+        assignments_count = db.study_plan_assignments.count_documents({"study_plan_id": ObjectId(plan_id)})
+        modules_count = db.modules.count_documents({"study_plan_id": ObjectId(plan_id)})
+
+        if not cascade:
+            if assignments_count > 0:
+                return False, f"No se puede eliminar el plan porque tiene {assignments_count} asignación(es) activas"
+            if modules_count > 0:
+                return False, f"No se puede eliminar el plan porque tiene {modules_count} módulo(s) asociados"
+
+            result = self.collection.delete_one({"_id": ObjectId(plan_id)})
+            if result.deleted_count > 0:
+                return True, "Plan de estudios eliminado correctamente"
+            return False, "No se pudo eliminar el plan de estudios"
+
+        cascade_service = CascadeDeletionService()
+
         try:
-            # Obtener todos los módulos del plan
-            modules = list(get_db().modules.find({"study_plan_id": ObjectId(plan_id)}))
-            module_ids = [module["_id"] for module in modules]
-            
-            # Inicializar contadores para el resumen
-            total_modules_deleted = 0
-            total_topics_deleted = 0
-            total_evaluations_deleted = 0
-            
-            # 1. Eliminar todos los temas asociados a los módulos
-            if module_ids:
-                topic_ids_to_delete = [t["_id"] for t in get_db().topics.find({"module_id": {"$in": module_ids}}, {"_id": 1})]
-                topics_result = get_db().topics.delete_many({"_id": {"$in": topic_ids_to_delete}})
-                total_topics_deleted = topics_result.deleted_count
-                
-                # 2. Eliminar todas las evaluaciones asociadas a los temas
-                if topic_ids_to_delete:
-                    evaluations_result = get_db().evaluations.delete_many({"topic_ids": {"$in": topic_ids_to_delete}})
-                    total_evaluations_deleted = evaluations_result.deleted_count
-                else:
-                    total_evaluations_deleted = 0
-                
-                # 3. Eliminar los módulos
-                modules_result = get_db().modules.delete_many({"_id": {"$in": module_ids}})
-                total_modules_deleted = modules_result.deleted_count
-            
-            # 4. Eliminar el plan en sí
-            plan_result = self.collection.delete_one({"_id": ObjectId(plan_id)})
-            
-            if plan_result.deleted_count == 0:
-                raise AppException("Plan de estudios no encontrado", AppException.NOT_FOUND)
-            
-        except AppException:
-            raise
-        except Exception as e:
-            raise AppException(f"Error al eliminar plan de estudios: {str(e)}", AppException.BAD_REQUEST)
+            cascade_result = cascade_service.delete_with_cascade('study_plans', plan_id)
+        except Exception as exc:
+            logging.error(f"Error al ejecutar eliminación en cascada del plan {plan_id}: {exc}")
+            return False, "Error al eliminar el plan de estudios en cascada"
+
+        if not cascade_result.get('success', False):
+            return False, cascade_result.get('error', 'No se pudo eliminar el plan de estudios')
+
+        total_deleted = cascade_result.get('total_deleted', 1)
+        dependencies_deleted = max(total_deleted - 1, 0)
+        if dependencies_deleted > 0:
+            return True, f"Plan de estudios eliminado junto con {dependencies_deleted} dependencias"
+        return True, "Plan de estudios eliminado correctamente"
 
 class StudyPlanAssignmentService(VerificationBaseService):
     def __init__(self):
@@ -816,32 +799,43 @@ class ModuleService(VerificationBaseService):
         except Exception as e:
             return False, str(e)
     
-    def delete_module(self, module_id: str) -> Tuple[bool, str]:
+    def delete_module(self, module_id: str, cascade: bool = False) -> Tuple[bool, str]:
         try:
-            # Verificar que el módulo existe
+            validate_object_id(module_id)
             module = self.collection.find_one({"_id": ObjectId(module_id)})
             if not module:
                 return False, "Módulo no encontrado"
-            
-            # Eliminar los temas asociados
-            topic_service = TopicService()
-            topics = topic_service.get_module_topics(module_id)
-            for topic in topics:
-                # Al eliminar un tema, también se deben eliminar sus contenidos asociados
-                contents = get_db().topic_contents.find({"topic_id": ObjectId(topic['_id'])})
-                content_ids_to_delete = [c['_id'] for c in contents]
-                if content_ids_to_delete:
-                    get_db().topic_contents.delete_many({"_id": {"$in": content_ids_to_delete}})
-                
-                topic_service.delete_topic(topic['_id'])
-            
-            # Eliminar el módulo
-            result = self.collection.delete_one({"_id": ObjectId(module_id)})
-            
-            if result.deleted_count > 0:
-                return True, "Módulo eliminado exitosamente"
-            return False, "No se pudo eliminar el módulo"
+
+            db = get_db()
+            topics_count = db.topics.count_documents({"module_id": ObjectId(module_id)})
+            virtual_modules_count = db.virtual_modules.count_documents({"module_id": ObjectId(module_id)})
+            generation_tasks_count = db.virtual_generation_tasks.count_documents({"module_id": ObjectId(module_id)})
+
+            if not cascade:
+                if topics_count > 0 or virtual_modules_count > 0 or generation_tasks_count > 0:
+                    return False, (
+                        "No se puede eliminar el módulo porque tiene dependencias: "
+                        f"{topics_count} tema(s), {virtual_modules_count} módulo(s) virtual(es) "
+                        f"y {generation_tasks_count} tarea(s) de generación."
+                    )
+
+                result = self.collection.delete_one({"_id": ObjectId(module_id)})
+                if result.deleted_count > 0:
+                    return True, "Módulo eliminado exitosamente"
+                return False, "No se pudo eliminar el módulo"
+
+            cascade_service = CascadeDeletionService()
+            cascade_result = cascade_service.delete_with_cascade('modules', module_id)
+            if not cascade_result.get('success', False):
+                return False, cascade_result.get('error', 'No se pudo eliminar el módulo en cascada')
+
+            total_deleted = cascade_result.get('total_deleted', 1)
+            dependencies_deleted = max(total_deleted - 1, 0)
+            if dependencies_deleted > 0:
+                return True, f"Módulo eliminado junto con {dependencies_deleted} dependencias"
+            return True, "Módulo eliminado exitosamente"
         except Exception as e:
+            logging.error(f"Error al eliminar módulo {module_id}: {e}")
             return False, str(e)
     
     def get_module(self, module_id: str) -> Optional[Dict]:
@@ -1299,54 +1293,62 @@ class TopicService(VerificationBaseService):
         except Exception as e:
             return False, str(e)
     
-    def delete_topic(self, topic_id: str) -> Tuple[bool, str]:
+    def delete_topic(self, topic_id: str, cascade: bool = False) -> Tuple[bool, str]:
         """
-        Elimina un tema y sus contenidos asociados.
-        También gestiona las evaluaciones vinculadas: las elimina si solo estaban vinculadas a este tema,
-        o actualiza la lista de temas si estaban vinculadas a múltiples.
+        Elimina un tema. Si cascade=True, elimina también los contenidos, evaluaciones,
+        recursos y entidades virtuales asociadas siguiendo las reglas del CascadeDeletionService.
         """
         try:
+            validate_object_id(topic_id)
             topic_id_obj = ObjectId(topic_id)
             db = get_db()
 
-            # Verificar que el tema existe
-            if not db.topics.find_one({"_id": topic_id_obj}):
+            topic = self.collection.find_one({"_id": topic_id_obj})
+            if not topic:
                 return False, "Tema no encontrado"
 
-            # 1. Gestionar Evaluaciones vinculadas
-            evaluations_to_update = list(db.evaluations.find({"topic_ids": topic_id_obj}))
-            evals_to_delete_ids = []
-            
-            for evac in evaluations_to_update:
-                # Si la evaluación solo está vinculada a este tema, se elimina
-                if len(evac.get("topic_ids", [])) == 1:
-                    evals_to_delete_ids.append(evac["_id"])
-                # Si está vinculada a más temas, se quita la referencia a este tema
-                else:
+            contents_count = db.topic_contents.count_documents({"topic_id": topic_id_obj})
+            virtual_topics_count = db.virtual_topics.count_documents({"topic_id": topic_id_obj})
+            evaluations = list(db.evaluations.find({"topic_ids": topic_id_obj}, {"_id": 1, "topic_ids": 1}))
+
+            if not cascade:
+                if contents_count > 0 or virtual_topics_count > 0 or len(evaluations) > 0:
+                    return False, (
+                        "No se puede eliminar el tema porque tiene dependencias: "
+                        f"{contents_count} contenido(s), {virtual_topics_count} instancia(s) virtual(es) "
+                        f"y {len(evaluations)} evaluación(es) asociadas."
+                    )
+
+                result = self.collection.delete_one({"_id": topic_id_obj})
+                if result.deleted_count > 0:
+                    return True, "Tema eliminado exitosamente"
+                return False, "No se pudo eliminar el tema"
+
+            cascade_service = CascadeDeletionService()
+
+            # Ajustar evaluaciones para evitar eliminar evaluaciones compartidas
+            for evaluation in evaluations:
+                topic_ids = evaluation.get("topic_ids", [])
+                if len(topic_ids) > 1:
                     db.evaluations.update_one(
-                        {"_id": evac["_id"]},
+                        {"_id": evaluation["_id"]},
                         {"$pull": {"topic_ids": topic_id_obj}}
                     )
-            
-            if evals_to_delete_ids:
-                db.evaluations.delete_many({"_id": {"$in": evals_to_delete_ids}})
-                # También eliminar los resultados de esas evaluaciones
-                db.evaluation_results.delete_many({"evaluation_id": {"$in": evals_to_delete_ids}})
+                else:
+                    cascade_service.delete_with_cascade('evaluations', str(evaluation["_id"]))
 
-            # 2. Eliminar todos los TopicContent asociados a este tema
-            content_result = db.topic_contents.delete_many({"topic_id": topic_id_obj})
-            
-            # 3. Finalmente, eliminar el tema en sí
-            result = self.collection.delete_one({"_id": topic_id_obj})
-            
-            if result.deleted_count > 0:
-                msg = f"Tema, {content_result.deleted_count} contenidos y {len(evals_to_delete_ids)} evaluaciones eliminados exitosamente."
-                return True, msg
-            
-            return False, "No se pudo eliminar el tema después de procesar sus dependencias"
+            cascade_result = cascade_service.delete_with_cascade('topics', topic_id)
+            if not cascade_result.get('success', False):
+                return False, cascade_result.get('error', 'No se pudo eliminar el tema en cascada')
+
+            total_deleted = cascade_result.get('total_deleted', 1)
+            dependencies_deleted = max(total_deleted - 1, 0)
+            if dependencies_deleted > 0:
+                return True, f"Tema eliminado junto con {dependencies_deleted} dependencias"
+            return True, "Tema eliminado exitosamente"
 
         except Exception as e:
-            logging.error(f"Error al eliminar el tema {topic_id}: {str(e)}")
+            logging.error(f"Error al eliminar el tema {topic_id}: {e}")
             return False, f"Error interno al eliminar el tema: {str(e)}"
     
     def get_topic(self, topic_id: str) -> Optional[Dict]:
@@ -1968,23 +1970,46 @@ class EvaluationService(VerificationBaseService):
         except Exception as e:
             return False, str(e)
     
-    def delete_evaluation(self, evaluation_id: str) -> Tuple[bool, str]:
+    def delete_evaluation(self, evaluation_id: str, cascade: bool = False) -> Tuple[bool, str]:
         try:
-            # Verificar que la evaluación existe
-            evaluation = self.collection.find_one({"_id": ObjectId(evaluation_id)})
+            validate_object_id(evaluation_id)
+            evaluation_id_obj = ObjectId(evaluation_id)
+            db = get_db()
+
+            evaluation = self.collection.find_one({"_id": evaluation_id_obj})
             if not evaluation:
                 return False, "Evaluación no encontrada"
-            
-            # Eliminar resultados de la evaluación
-            get_db().evaluation_results.delete_many({"evaluation_id": ObjectId(evaluation_id)})
-            
-            # Eliminar la evaluación
-            result = self.collection.delete_one({"_id": ObjectId(evaluation_id)})
-            
-            if result.deleted_count > 0:
-                return True, "Evaluación eliminada exitosamente"
-            return False, "No se pudo eliminar la evaluación"
+
+            resources_count = db.evaluation_resources.count_documents({"evaluation_id": evaluation_id_obj})
+            submissions_count = db.evaluation_submissions.count_documents({"evaluation_id": evaluation_id_obj})
+            results_count = db.evaluation_results.count_documents({"evaluation_id": evaluation_id_obj})
+            content_results_count = db.content_results.count_documents({"evaluation_id": evaluation_id_obj})
+
+            if not cascade:
+                if any([resources_count, submissions_count, results_count, content_results_count]):
+                    return False, (
+                        "No se puede eliminar la evaluación porque tiene dependencias: "
+                        f"{resources_count} recurso(s), {submissions_count} entrega(s), "
+                        f"{results_count} resultado(s) registrado(s) y {content_results_count} contenido(s) relacionado(s)."
+                    )
+
+                result = self.collection.delete_one({"_id": evaluation_id_obj})
+                if result.deleted_count > 0:
+                    return True, "Evaluación eliminada exitosamente"
+                return False, "No se pudo eliminar la evaluación"
+
+            cascade_service = CascadeDeletionService()
+            cascade_result = cascade_service.delete_with_cascade('evaluations', evaluation_id)
+            if not cascade_result.get('success', False):
+                return False, cascade_result.get('error', 'No se pudo eliminar la evaluación en cascada')
+
+            total_deleted = cascade_result.get('total_deleted', 1)
+            dependencies_deleted = max(total_deleted - 1, 0)
+            if dependencies_deleted > 0:
+                return True, f"Evaluación eliminada junto con {dependencies_deleted} dependencias"
+            return True, "Evaluación eliminada exitosamente"
         except Exception as e:
+            logging.error(f"Error al eliminar evaluación {evaluation_id}: {e}")
             return False, str(e)
     
     def get_evaluation(self, evaluation_id: str) -> Optional[Dict]:

@@ -12,6 +12,7 @@ from src.shared.constants import STATUS
 from src.shared.standardization import VerificationBaseService, ErrorCodes
 from src.shared.exceptions import AppException
 from src.shared.utils import normalize_objectid
+from src.shared.cascade_deletion_service import CascadeDeletionService
 from .models import ContentType, TopicContent, VirtualTopicContent, ContentResult, ContentTypes, DeprecatedContentTypes, LearningMethodologyTypes
 from .slide_style_service import SlideStyleService
 import re
@@ -2296,15 +2297,34 @@ class ContentService(VerificationBaseService):
             logging.error(f"Error actualizando contenido: {str(e)}")
             return False, f"Error interno: {str(e)}"
 
-    def delete_content(self, content_id: str) -> Tuple[bool, str]:
+    def delete_content(self, content_id: str, cascade: bool = False) -> Tuple[bool, str]:
         """
-        Elimina contenido (soft delete) y sus contenidos hijos en cascada.
+        Elimina contenido. Con cascade=True se eliminan físicamente todas las dependencias
+        registradas en CascadeDeletionService; de lo contrario se aplica un soft delete.
         """
         try:
-            # Primero eliminar contenidos hijos (cascada)
-            child_contents = self.collection.find({"parent_content_id": ObjectId(content_id)})
+            content_id_obj = ObjectId(content_id)
+            content = self.collection.find_one({"_id": content_id_obj})
+            if not content:
+                return False, "Contenido no encontrado"
+
+            if cascade:
+                cascade_service = CascadeDeletionService()
+                cascade_result = cascade_service.delete_with_cascade('topic_contents', content_id)
+                if not cascade_result.get('success', False):
+                    return False, cascade_result.get('error', 'No se pudo eliminar el contenido en cascada')
+
+                total_deleted = cascade_result.get('total_deleted', 0)
+                dependencies_deleted = max(total_deleted - 1, 0)
+                message = "Contenido eliminado en cascada"
+                if dependencies_deleted > 0:
+                    message += f" (incluye {dependencies_deleted} dependencias)"
+                return True, message
+
+            # Soft delete conservando histórico
+            child_contents = self.collection.find({"parent_content_id": content_id_obj})
             child_count = 0
-            
+
             for child in child_contents:
                 child_result = self.collection.update_one(
                     {"_id": child["_id"]},
@@ -2312,13 +2332,12 @@ class ContentService(VerificationBaseService):
                 )
                 if child_result.modified_count > 0:
                     child_count += 1
-            
-            # Luego eliminar el contenido principal
+
             result = self.collection.update_one(
-                {"_id": ObjectId(content_id)},
+                {"_id": content_id_obj},
                 {"$set": {"status": "deleted", "updated_at": datetime.now()}}
             )
-            
+
             if result.modified_count > 0:
                 message = "Contenido eliminado exitosamente"
                 if child_count > 0:
@@ -2326,7 +2345,7 @@ class ContentService(VerificationBaseService):
                 return True, message
             else:
                 return False, "No se encontró el contenido"
-                
+
         except Exception as e:
             logging.error(f"Error eliminando contenido: {str(e)}")
             return False, f"Error interno: {str(e)}"

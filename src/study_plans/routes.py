@@ -147,8 +147,13 @@ def update_study_plan(plan_id):
 @APIRoute.standard(auth_required_flag=True, roles=[ROLES["TEACHER"], ROLES["INSTITUTE_ADMIN"]])
 def delete_study_plan(plan_id):
     """Elimina un plan de estudios y sus componentes asociados"""
-    study_plan_service.delete_study_plan(plan_id)
-    return APIRoute.success(message="Plan de estudios eliminado exitosamente")
+    payload = request.get_json(silent=True) or {}
+    cascade_delete = bool(payload.get("cascadeDelete") or payload.get("cascade"))
+
+    success, message = study_plan_service.delete_study_plan(plan_id, cascade=cascade_delete)
+    if success:
+        return APIRoute.success(data={"message": message}, message=message)
+    return APIRoute.error(ErrorCodes.DELETE_ERROR, message)
 
 # Rutas para Asignación de Planes a Clases
 @study_plan_bp.route('/assignment', methods=['POST'])
@@ -231,7 +236,10 @@ def update_module(module_id):
 @APIRoute.standard(auth_required_flag=True, roles=[ROLES["TEACHER"]])
 def delete_module(module_id):
     """Elimina un módulo y sus componentes asociados"""
-    success, message = module_service.delete_module(module_id)
+    payload = request.get_json(silent=True) or {}
+    cascade_delete = bool(payload.get("cascadeDelete") or payload.get("cascade"))
+
+    success, message = module_service.delete_module(module_id, cascade=cascade_delete)
     if success:
         return APIRoute.success(data={"message": message}, message=message)
     return APIRoute.error(ErrorCodes.DELETE_ERROR, message)
@@ -281,7 +289,10 @@ def update_topic(topic_id):
 @APIRoute.standard(auth_required_flag=True, roles=[ROLES["TEACHER"]])
 def delete_topic(topic_id):
     """Elimina un topic"""
-    success, message = topic_service.delete_topic(topic_id)
+    payload = request.get_json(silent=True) or {}
+    cascade_delete = bool(payload.get("cascadeDelete") or payload.get("cascade"))
+
+    success, message = topic_service.delete_topic(topic_id, cascade=cascade_delete)
     if success:
         return APIRoute.success(data={"message": message}, message=message)
     return APIRoute.error(ErrorCodes.DELETE_ERROR, message)
@@ -728,7 +739,10 @@ def update_evaluation(evaluation_id):
 @APIRoute.standard(auth_required_flag=True, roles=[ROLES["TEACHER"]])
 def delete_evaluation(evaluation_id):
     """Elimina una evaluación y sus resultados asociados"""
-    success, message = evaluation_service.delete_evaluation(evaluation_id)
+    payload = request.get_json(silent=True) or {}
+    cascade_delete = bool(payload.get("cascadeDelete") or payload.get("cascade"))
+
+    success, message = evaluation_service.delete_evaluation(evaluation_id, cascade=cascade_delete)
     if success:
         return APIRoute.success(data={"message": message}, message=message)
     return APIRoute.error(ErrorCodes.DELETE_ERROR, message)

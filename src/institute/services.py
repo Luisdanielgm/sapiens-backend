@@ -9,8 +9,10 @@ from src.shared.constants import ROLES, COLLECTIONS, STATUS
 from src.shared.standardization import VerificationBaseService, ErrorCodes
 from src.shared.exceptions import AppException
 from src.shared.logging import log_error
+from src.shared.cascade_deletion_service import CascadeDeletionService
 from .models import Institute, EducationalProgram, Level, InstituteMember
 from src.analytics.services import InstituteAnalyticsService
+from src.academic.services import SectionService, SubjectService, PeriodService
 
 class InstituteService(VerificationBaseService):
     def __init__(self):
@@ -276,12 +278,25 @@ class ProgramService(VerificationBaseService):
         except Exception as e:
             return False, str(e)
 
-    def delete_program(self, program_id: str) -> Tuple[bool, str]:
+    def delete_program(self, program_id: str, cascade: bool = False) -> Tuple[bool, str]:
         try:
-            # Verificar si existen niveles asociados
-            levels_count = get_db().levels.count_documents({"program_id": ObjectId(program_id)})
-            if levels_count > 0:
-                return False, f"No se puede eliminar el programa porque tiene {levels_count} niveles asociados"
+            db = get_db()
+
+            if cascade:
+                level_service = LevelService()
+                level_ids = [
+                    str(level["_id"])
+                    for level in db.levels.find({"program_id": ObjectId(program_id)}, {"_id": 1})
+                ]
+
+                for level_id in level_ids:
+                    success, message = level_service.delete_level(level_id, cascade=True)
+                    if not success:
+                        return False, f"Error al eliminar nivel dependiente {level_id}: {message}"
+            else:
+                levels_count = db.levels.count_documents({"program_id": ObjectId(program_id)})
+                if levels_count > 0:
+                    return False, f"No se puede eliminar el programa porque tiene {levels_count} niveles asociados"
                 
             # Eliminar el programa
             result = self.collection.delete_one({"_id": ObjectId(program_id)})
@@ -403,14 +418,64 @@ class LevelService(VerificationBaseService):
         except Exception as e:
             return False, str(e)
 
-    def delete_level(self, level_id: str) -> Tuple[bool, str]:
+    def delete_level(self, level_id: str, cascade: bool = False) -> Tuple[bool, str]:
         try:
-            # Verificar si hay dependencias (materias, secciones, etc.)
-            subjects_count = get_db().subjects.count_documents({"level_id": ObjectId(level_id)})
-            sections_count = get_db().sections.count_documents({"level_id": ObjectId(level_id)})
+            db = get_db()
+
+            subjects_count = db.subjects.count_documents({"level_id": ObjectId(level_id)})
+            sections_count = db.sections.count_documents({"level_id": ObjectId(level_id)})
+            periods_count = db.academic_periods.count_documents({"level_id": ObjectId(level_id)})
+            classes_count = db.classes.count_documents({"level_id": ObjectId(level_id)})
             
-            if subjects_count > 0 or sections_count > 0:
-                return False, f"No se puede eliminar el nivel porque tiene {subjects_count} materias y {sections_count} secciones asociadas"
+            if not cascade:
+                if any([subjects_count, sections_count, periods_count, classes_count]):
+                    return False, (
+                        "No se puede eliminar el nivel porque tiene dependencias: "
+                        f"{subjects_count} materias, {sections_count} secciones, "
+                        f"{periods_count} períodos académicos y {classes_count} clases asociadas"
+                    )
+            else:
+                cascade_service = CascadeDeletionService()
+
+                class_ids = [
+                    str(class_doc["_id"])
+                    for class_doc in db.classes.find({"level_id": ObjectId(level_id)}, {"_id": 1})
+                ]
+                for class_id in class_ids:
+                    cascade_result = cascade_service.delete_with_cascade('classes', class_id)
+                    if not cascade_result.get('success', False):
+                        return False, f"Error al eliminar clases del nivel {level_id}: {cascade_result.get('error', 'desconocido')}"
+
+                section_service = SectionService()
+                subject_service = SubjectService()
+                period_service = PeriodService()
+
+                section_ids = [
+                    str(section["_id"])
+                    for section in db.sections.find({"level_id": ObjectId(level_id)}, {"_id": 1})
+                ]
+                for section_id in section_ids:
+                    success, message = section_service.delete_section(section_id, cascade=True)
+                    if not success:
+                        return False, f"Error al eliminar sección {section_id}: {message}"
+
+                subject_ids = [
+                    str(subject["_id"])
+                    for subject in db.subjects.find({"level_id": ObjectId(level_id)}, {"_id": 1})
+                ]
+                for subject_id in subject_ids:
+                    success, message = subject_service.delete_subject(subject_id, cascade=True)
+                    if not success:
+                        return False, f"Error al eliminar materia {subject_id}: {message}"
+
+                period_ids = [
+                    str(period["_id"])
+                    for period in db.academic_periods.find({"level_id": ObjectId(level_id)}, {"_id": 1})
+                ]
+                for period_id in period_ids:
+                    success, message = period_service.delete_period(period_id, cascade=True)
+                    if not success:
+                        return False, f"Error al eliminar período académico {period_id}: {message}"
                 
             # Eliminar el nivel
             result = self.collection.delete_one({"_id": ObjectId(level_id)})
@@ -500,3 +565,4 @@ class GenericAcademicService(VerificationBaseService):
         except Exception as e:
             logging.error(f"Error al crear/obtener entidades genéricas: {str(e)}")
             raise AppException("No se pudieron generar las entidades académicas genéricas.", ErrorCodes.SERVER_ERROR)
+

@@ -8,6 +8,7 @@ import logging
 from src.shared.database import get_db
 from src.shared.standardization import VerificationBaseService, ErrorCodes
 from src.shared.exceptions import AppException
+from src.shared.cascade_deletion_service import CascadeDeletionService
 from .models import (
     AcademicPeriod,
     Section,
@@ -161,7 +162,7 @@ class PeriodService(VerificationBaseService):
         except Exception as e:
             return False, str(e)
             
-    def delete_period(self, period_id: str) -> Tuple[bool, str]:
+    def delete_period(self, period_id: str, cascade: bool = False) -> Tuple[bool, str]:
         try:
             # Verificar si existen clases asociadas a este período
             classes_with_period = self.db.classes.count_documents({
@@ -169,7 +170,19 @@ class PeriodService(VerificationBaseService):
             })
             
             if classes_with_period > 0:
-                return False, f"No se puede eliminar el período porque está siendo usado por {classes_with_period} clases"
+                if not cascade:
+                    return False, f"No se puede eliminar el período porque está siendo usado por {classes_with_period} clases"
+                
+                cascade_service = CascadeDeletionService()
+                class_ids = [
+                    str(class_doc["_id"])
+                    for class_doc in self.db.classes.find({"academic_period_id": ObjectId(period_id)}, {"_id": 1})
+                ]
+
+                for class_id in class_ids:
+                    cascade_result = cascade_service.delete_with_cascade('classes', class_id)
+                    if not cascade_result.get('success', False):
+                        return False, f"Error al eliminar clases asociadas al período {period_id}: {cascade_result.get('error', 'desconocido')}"
             
             # Si no hay dependencias, eliminar el período
             result = self.collection.delete_one({"_id": ObjectId(period_id)})
@@ -287,7 +300,7 @@ class SectionService(VerificationBaseService):
         except Exception as e:
             return False, str(e)
             
-    def delete_section(self, section_id: str) -> Tuple[bool, str]:
+    def delete_section(self, section_id: str, cascade: bool = False) -> Tuple[bool, str]:
         try:
             # Verificar si existen clases asociadas a esta sección
             classes_with_section = self.db.classes.count_documents({
@@ -295,7 +308,19 @@ class SectionService(VerificationBaseService):
             })
             
             if classes_with_section > 0:
-                return False, f"No se puede eliminar la sección porque está siendo usada por {classes_with_section} clases"
+                if not cascade:
+                    return False, f"No se puede eliminar la sección porque está siendo usada por {classes_with_section} clases"
+                
+                cascade_service = CascadeDeletionService()
+                class_ids = [
+                    str(class_doc["_id"])
+                    for class_doc in self.db.classes.find({"section_id": ObjectId(section_id)}, {"_id": 1})
+                ]
+
+                for class_id in class_ids:
+                    cascade_result = cascade_service.delete_with_cascade('classes', class_id)
+                    if not cascade_result.get('success', False):
+                        return False, f"Error al eliminar clases asociadas a la sección {section_id}: {cascade_result.get('error', 'desconocido')}"
             
             # Si no hay dependencias, eliminar la sección
             result = self.collection.delete_one({"_id": ObjectId(section_id)})
@@ -415,7 +440,7 @@ class SubjectService(VerificationBaseService):
         except Exception as e:
             return False, str(e)
             
-    def delete_subject(self, subject_id: str) -> Tuple[bool, str]:
+    def delete_subject(self, subject_id: str, cascade: bool = False) -> Tuple[bool, str]:
         try:
             # Verificar si existen clases asociadas a esta materia
             classes_with_subject = self.db.classes.count_documents({
@@ -423,7 +448,19 @@ class SubjectService(VerificationBaseService):
             })
             
             if classes_with_subject > 0:
-                return False, f"No se puede eliminar la materia porque está siendo usada por {classes_with_subject} clases"
+                if not cascade:
+                    return False, f"No se puede eliminar la materia porque está siendo usada por {classes_with_subject} clases"
+                
+                cascade_service = CascadeDeletionService()
+                class_ids = [
+                    str(class_doc["_id"])
+                    for class_doc in self.db.classes.find({"subject_id": ObjectId(subject_id)}, {"_id": 1})
+                ]
+
+                for class_id in class_ids:
+                    cascade_result = cascade_service.delete_with_cascade('classes', class_id)
+                    if not cascade_result.get('success', False):
+                        return False, f"Error al eliminar clases asociadas a la materia {subject_id}: {cascade_result.get('error', 'desconocido')}"
             
             # Si no hay dependencias, eliminar la materia
             result = self.collection.delete_one({"_id": ObjectId(subject_id)})

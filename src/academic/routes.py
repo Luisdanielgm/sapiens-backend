@@ -100,7 +100,10 @@ def delete_period(period_id):
     Elimina un período académico específico por su ID.
     """
     try:
-        success, result = period_service.delete_period(period_id)
+        payload = request.get_json(silent=True) or {}
+        cascade_delete = bool(payload.get("cascadeDelete") or payload.get("cascade"))
+
+        success, result = period_service.delete_period(period_id, cascade=cascade_delete)
 
         if success:
             return APIRoute.success(data={"message": result}, message=result)
@@ -197,7 +200,10 @@ def delete_section(section_id):
     Elimina una sección específica por su ID.
     """
     try:
-        success, result = section_service.delete_section(section_id)
+        payload = request.get_json(silent=True) or {}
+        cascade_delete = bool(payload.get("cascadeDelete") or payload.get("cascade"))
+
+        success, result = section_service.delete_section(section_id, cascade=cascade_delete)
 
         if success:
             return APIRoute.success(data={"message": result}, message=result)
@@ -294,7 +300,10 @@ def delete_subject(subject_id):
     Elimina una materia específica por su ID.
     """
     try:
-        success, result = subject_service.delete_subject(subject_id)
+        payload = request.get_json(silent=True) or {}
+        cascade_delete = bool(payload.get("cascadeDelete") or payload.get("cascade"))
+
+        success, result = subject_service.delete_subject(subject_id, cascade=cascade_delete)
 
         if success:
             return APIRoute.success(data={"message": result}, message=result)
@@ -302,3 +311,4 @@ def delete_subject(subject_id):
             return APIRoute.error(ErrorCodes.DELETION_ERROR, result)
     except Exception as e:
         return APIRoute.error(ErrorCodes.SERVER_ERROR, str(e), status_code=500)
+
