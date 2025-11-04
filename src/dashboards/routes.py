@@ -199,22 +199,36 @@ def get_institute_dashboard(institute_id):
             # - Un workspace tiene un institute_id que referencia al instituto al que pertenece
             
             # Caso 1: Si el workspace_id actual es igual al institute_id solicitado
-            # Esto puede pasar si el workspace_id fue confundido con un institute_id
-            # Buscar si existe un workspace con ese _id que pertenezca al usuario
+            # Esto significa que el frontend está usando el workspace_id como institute_id
+            # El usuario está trabajando en ese workspace, así que tiene acceso
+            # Usaremos el institute_id del workspace para generar el dashboard
             if workspace_id == institute_id:
                 logger.info(f"Workspace ID ({workspace_id}) coincide con institute_id solicitado ({institute_id})")
+                logger.info("El frontend está usando workspace_id como institute_id - esto es válido")
                 # Buscar el workspace del usuario con ese _id
+                logger.info(f"Buscando workspace con _id={workspace_id} y user_id={user_id}")
                 workspace_membership = db.institute_members.find_one({
                     "_id": ObjectId(workspace_id),
                     "user_id": ObjectId(user_id)
                 })
                 if workspace_membership:
-                    # Si el workspace pertenece al usuario, verificar si el institute_id del workspace
-                    # coincide con el solicitado (raro pero posible)
+                    # El workspace pertenece al usuario, tiene acceso
+                    # Pero usaremos el institute_id real del workspace para generar el dashboard
                     workspace_inst_id = str(workspace_membership.get('institute_id'))
-                    if workspace_inst_id == institute_id:
-                        has_access = True
-                        logger.info(f"Usuario {user_id} tiene acceso: workspace pertenece al instituto solicitado")
+                    logger.info(f"✅ Workspace encontrado! Institute ID real del workspace: {workspace_inst_id}")
+                    has_access = True
+                    # Actualizar institute_id para usar el real del workspace
+                    institute_id = workspace_inst_id
+                    logger.info(f"✅ Actualizado institute_id a {institute_id} para generar el dashboard correcto")
+                    logger.info(f"✅ ACCESO CONCEDIDO - Usuario puede ver dashboard del instituto {institute_id}")
+                else:
+                    logger.warning(f"❌ Workspace {workspace_id} no encontrado o no pertenece al usuario {user_id}")
+                    # Intentar buscar sin el filtro de user_id para debugging
+                    any_workspace = db.institute_members.find_one({"_id": ObjectId(workspace_id)})
+                    if any_workspace:
+                        logger.info(f"Workspace existe pero pertenece a otro usuario: {any_workspace.get('user_id')}")
+                    else:
+                        logger.warning(f"Workspace {workspace_id} no existe en la base de datos")
             
             # Caso 2: Si el institute_id del workspace actual coincide con el solicitado
             if not has_access and workspace_institute_id == institute_id:
