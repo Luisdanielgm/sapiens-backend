@@ -179,7 +179,12 @@ class ContentService(VerificationBaseService):
         except Exception:
             return False
 
-    def validate_slide_html_content(self, html_content: str, allow_full_document: bool = False) -> Tuple[bool, str]:
+    def validate_slide_html_content(
+        self,
+        html_content: str,
+        allow_full_document: bool = False,
+        allow_iframe: bool = False,
+    ) -> Tuple[bool, str]:
         """
         Valida que el HTML de una diapositiva sea seguro y tenga estructura básica.
         Reglas:
@@ -211,7 +216,11 @@ class ContentService(VerificationBaseService):
             low = raw.lower()
 
             # Prohibir tags peligrosos explícitos
-            dangerous_tags = ["script", "iframe", "object", "embed"] if allow_full_document else ["script", "iframe", "object", "embed", "link", "meta", "base"]
+            base_dangerous = ["script", "object", "embed"]
+            if not allow_iframe:
+                base_dangerous.append("iframe")
+
+            dangerous_tags = base_dangerous if allow_full_document else base_dangerous + ["link", "meta", "base"]
             for tag in dangerous_tags:
                 if f"<{tag}" in low or f"</{tag}" in low:
                     logging.warning(f"validate_slide_html_content: encontrado tag prohibido <{tag}>")
@@ -2640,7 +2649,7 @@ class ContentService(VerificationBaseService):
                 return False, "El contenido no es una diapositiva"
 
             raw_html = html_content
-            valid, msg = self.validate_slide_html_content(raw_html, allow_full_document=True)
+            valid, msg = self.validate_slide_html_content(raw_html, allow_full_document=True, allow_iframe=True)
             if not valid:
                 logging.info(f"update_slide_html: validacion fallida para slide {content_id}: {msg} (documento completo)")
                 return False, f"content_html invalido: {msg}"
