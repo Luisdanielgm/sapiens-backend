@@ -302,7 +302,7 @@ class TemplateService:
                 update_data["html"] = html_content
             
             # Si viene html, crear una nueva versión y actualizar campos derivados
-            update_dict = {"updated_at": datetime.now()}
+            update_dict = {"$set": {"updated_at": datetime.now()}}
             if "html" in update_data and isinstance(update_data["html"], str):
                 # agregar nueva versión al array versions
                 latest_version_number = template.get_latest_version_number()
