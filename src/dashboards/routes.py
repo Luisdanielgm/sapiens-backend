@@ -184,37 +184,86 @@ def get_institute_dashboard(institute_id):
         user = db.users.find_one({"_id": ObjectId(user_id)})
         is_system_admin = user and user.get("role") == ROLES["ADMIN"]
         
-        if not is_system_admin:
-            # Si no es admin del sistema, verificar si es miembro del instituto solicitado
-            logger.info(f"Verificando membresía del usuario {user_id} en instituto {institute_id}")
+        has_access = False
+        
+        if is_system_admin:
+            has_access = True
+            logger.info(f"Usuario {user_id} es ADMIN del sistema, acceso concedido")
+        else:
+            workspace_id = workspace_info.get('workspace_id')
+            workspace_institute_id = workspace_info.get('institute_id')
             
-            # Primero buscar todas las membresías del usuario para debugging
-            all_memberships = list(db.institute_members.find({
-                "user_id": ObjectId(user_id),
-                "role": "INSTITUTE_ADMIN"
-            }))
-            logger.info(f"Usuario {user_id} tiene {len(all_memberships)} membresías como INSTITUTE_ADMIN")
-            for membership in all_memberships:
-                logger.info(f"  - Instituto: {membership.get('institute_id')}, Role: {membership.get('role')}")
+            # IMPORTANTE: 
+            # - workspace_id = _id de un documento en institute_members (la membresía)
+            # - institute_id = _id de un documento en institutes (el instituto)
+            # - Un workspace tiene un institute_id que referencia al instituto al que pertenece
             
-            # Buscar membresía específica del instituto solicitado
-            institute_member = db.institute_members.find_one({
-                "user_id": ObjectId(user_id),
-                "institute_id": ObjectId(institute_id),
-                "role": "INSTITUTE_ADMIN"
-            })
+            # Caso 1: Si el workspace_id actual es igual al institute_id solicitado
+            # Esto puede pasar si el workspace_id fue confundido con un institute_id
+            # Buscar si existe un workspace con ese _id que pertenezca al usuario
+            if workspace_id == institute_id:
+                logger.info(f"Workspace ID ({workspace_id}) coincide con institute_id solicitado ({institute_id})")
+                # Buscar el workspace del usuario con ese _id
+                workspace_membership = db.institute_members.find_one({
+                    "_id": ObjectId(workspace_id),
+                    "user_id": ObjectId(user_id)
+                })
+                if workspace_membership:
+                    # Si el workspace pertenece al usuario, verificar si el institute_id del workspace
+                    # coincide con el solicitado (raro pero posible)
+                    workspace_inst_id = str(workspace_membership.get('institute_id'))
+                    if workspace_inst_id == institute_id:
+                        has_access = True
+                        logger.info(f"Usuario {user_id} tiene acceso: workspace pertenece al instituto solicitado")
             
-            if not institute_member:
-                logger.warning(f"Usuario {user_id} no tiene acceso al instituto {institute_id}")
-                logger.info(f"Workspace actual: {workspace_info.get('workspace_id')}, Institute solicitado: {institute_id}")
-                logger.info(f"Institute ID del workspace: {workspace_info.get('institute_id')}")
-                return APIRoute.error(
-                    ErrorCodes.ACCESS_DENIED,
-                    "No tienes acceso a este instituto",
-                    status_code=403
-                )
-            else:
-                logger.info(f"Membresía encontrada para usuario {user_id} en instituto {institute_id}")
+            # Caso 2: Si el institute_id del workspace actual coincide con el solicitado
+            if not has_access and workspace_institute_id == institute_id:
+                logger.info(f"Institute ID del workspace ({workspace_institute_id}) coincide con solicitado ({institute_id})")
+                # Verificar que el usuario tiene membresía en ese workspace como INSTITUTE_ADMIN
+                workspace_membership = db.institute_members.find_one({
+                    "_id": ObjectId(workspace_id),
+                    "user_id": ObjectId(user_id),
+                    "role": "INSTITUTE_ADMIN"
+                })
+                if workspace_membership:
+                    has_access = True
+                    logger.info(f"Usuario {user_id} tiene acceso: es INSTITUTE_ADMIN en el workspace del instituto")
+            
+            # Caso 3: Verificar membresía directa del instituto solicitado
+            if not has_access:
+                logger.info(f"Verificando membresía directa del usuario {user_id} en instituto {institute_id}")
+                
+                # Buscar todas las membresías del usuario para debugging
+                all_memberships = list(db.institute_members.find({
+                    "user_id": ObjectId(user_id),
+                    "role": "INSTITUTE_ADMIN"
+                }))
+                logger.info(f"Usuario {user_id} tiene {len(all_memberships)} membresías como INSTITUTE_ADMIN")
+                for membership in all_memberships:
+                    inst_id = str(membership.get('institute_id'))
+                    ws_id = str(membership.get('_id'))
+                    logger.info(f"  - Workspace ID: {ws_id}, Instituto: {inst_id}, Role: {membership.get('role')}")
+                
+                # Buscar membresía específica del instituto solicitado
+                institute_member = db.institute_members.find_one({
+                    "user_id": ObjectId(user_id),
+                    "institute_id": ObjectId(institute_id),
+                    "role": "INSTITUTE_ADMIN"
+                })
+                
+                if institute_member:
+                    has_access = True
+                    logger.info(f"Membresía encontrada para usuario {user_id} en instituto {institute_id}")
+        
+        if not has_access:
+            logger.warning(f"Usuario {user_id} no tiene acceso al instituto {institute_id}")
+            logger.info(f"Workspace actual: {workspace_info.get('workspace_id')}, Institute solicitado: {institute_id}")
+            logger.info(f"Institute ID del workspace: {workspace_info.get('institute_id')}")
+            return APIRoute.error(
+                ErrorCodes.ACCESS_DENIED,
+                "No tienes acceso a este instituto",
+                status_code=403
+            )
         
         # Verificar que el instituto existe
         institute = db.institutes.find_one({"_id": ObjectId(institute_id)})
