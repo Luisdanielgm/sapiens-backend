@@ -110,21 +110,31 @@ class ClassService(VerificationBaseService):
             # Aplicar filtro de workspace si está disponible
             if workspace_info and workspace_info.get('workspace_id'):
                 workspace_type = workspace_info.get('workspace_type')
+                workspace_role = workspace_info.get('workspace_role')
+                institute_id = workspace_info.get('institute_id')
 
                 # Tratar workspace_type ausente como institucional por defecto
                 if workspace_type == 'INSTITUTE' or not workspace_type:
-                    # Para workspaces de instituto, buscar por workspace_id O por institute_id
-                    # (para compatibilidad con clases existentes sin workspace_id)
-                    filter_query = {
-                        "_id": ObjectId(class_id),
-                        "$or": [
-                            {"workspace_id": ObjectId(workspace_info['workspace_id'])},
-                            {
-                                "workspace_id": {"$exists": False},
-                                "institute_id": ObjectId(workspace_info.get('institute_id'))
-                            }
-                        ]
-                    }
+                    # Para admins de instituto, filtrar SOLO por institute_id (ignorar workspace_id)
+                    # Esto permite que todos los admins del mismo instituto vean todas las clases
+                    if workspace_role == 'INSTITUTE_ADMIN' and institute_id:
+                        filter_query = {
+                            "_id": ObjectId(class_id),
+                            "institute_id": ObjectId(institute_id)
+                        }
+                    else:
+                        # Para workspaces de instituto (no admin), buscar por workspace_id O por institute_id
+                        # (para compatibilidad con clases existentes sin workspace_id)
+                        filter_query = {
+                            "_id": ObjectId(class_id),
+                            "$or": [
+                                {"workspace_id": ObjectId(workspace_info['workspace_id'])},
+                                {
+                                    "workspace_id": {"$exists": False},
+                                    "institute_id": ObjectId(institute_id)
+                                }
+                            ]
+                        }
                 else:
                     # Para workspaces individuales, mantener filtro estricto
                     filter_query["workspace_id"] = ObjectId(workspace_info['workspace_id'])
@@ -316,21 +326,32 @@ class ClassService(VerificationBaseService):
             # Aplicar filtro de workspace si está disponible
             if workspace_info and workspace_info.get('workspace_id'):
                 workspace_type = workspace_info.get('workspace_type')
+                workspace_role = workspace_info.get('workspace_role')
+                institute_id = workspace_info.get('institute_id')
 
                 # Tratar workspace_type ausente como institucional por defecto
                 if workspace_type == 'INSTITUTE' or not workspace_type:
-                    # Para workspaces de instituto, buscar por workspace_id O por institute_id
-                    # (para compatibilidad con clases existentes sin workspace_id)
-                    filter_query = {
-                        "level_id": ObjectId(level_id),
-                        "$or": [
-                            {"workspace_id": ObjectId(workspace_info['workspace_id'])},
-                            {
-                                "workspace_id": {"$exists": False},
-                                "institute_id": ObjectId(workspace_info.get('institute_id'))
-                            }
-                        ]
-                    }
+                    # Para admins de instituto, filtrar SOLO por institute_id (ignorar workspace_id)
+                    # Esto permite que todos los admins del mismo instituto vean todas las clases
+                    # independientemente del workspace_id que tengan las clases
+                    if workspace_role == 'INSTITUTE_ADMIN' and institute_id:
+                        filter_query = {
+                            "level_id": ObjectId(level_id),
+                            "institute_id": ObjectId(institute_id)
+                        }
+                    else:
+                        # Para workspaces de instituto (no admin), buscar por workspace_id O por institute_id
+                        # (para compatibilidad con clases existentes sin workspace_id)
+                        filter_query = {
+                            "level_id": ObjectId(level_id),
+                            "$or": [
+                                {"workspace_id": ObjectId(workspace_info['workspace_id'])},
+                                {
+                                    "workspace_id": {"$exists": False},
+                                    "institute_id": ObjectId(institute_id)
+                                }
+                            ]
+                        }
                 else:
                     # Para workspaces individuales, mantener filtro estricto
                     filter_query["workspace_id"] = ObjectId(workspace_info['workspace_id'])
@@ -421,17 +442,28 @@ class ClassService(VerificationBaseService):
             # Aplicar filtro de workspace si está disponible
             if workspace_info and workspace_info.get('workspace_id'):
                 workspace_type = workspace_info.get('workspace_type')
+                workspace_role = workspace_info.get('workspace_role')
+                institute_id = workspace_info.get('institute_id')
+                
                 if workspace_type == 'INSTITUTE' or not workspace_type:
-                    filter_query = {
-                        "_id": ObjectId(class_id),
-                        "$or": [
-                            {"workspace_id": ObjectId(workspace_info['workspace_id'])},
-                            {
-                                "workspace_id": {"$exists": False},
-                                "institute_id": ObjectId(workspace_info.get('institute_id'))
-                            }
-                        ]
-                    }
+                    # Para admins de instituto, filtrar SOLO por institute_id (ignorar workspace_id)
+                    # Esto permite que todos los admins del mismo instituto puedan gestionar todas las clases
+                    if workspace_role == 'INSTITUTE_ADMIN' and institute_id:
+                        filter_query = {
+                            "_id": ObjectId(class_id),
+                            "institute_id": ObjectId(institute_id)
+                        }
+                    else:
+                        filter_query = {
+                            "_id": ObjectId(class_id),
+                            "$or": [
+                                {"workspace_id": ObjectId(workspace_info['workspace_id'])},
+                                {
+                                    "workspace_id": {"$exists": False},
+                                    "institute_id": ObjectId(institute_id)
+                                }
+                            ]
+                        }
                 else:
                     filter_query["workspace_id"] = ObjectId(workspace_info['workspace_id'])
             

@@ -237,20 +237,30 @@ def check_class_dependencies(class_id):
         
         # Verificar que la clase existe y pertenece al workspace
         workspace_type = workspace_info.get('workspace_type')
+        workspace_role = workspace_info.get('workspace_role')
+        institute_id = workspace_info.get('institute_id')
 
         # Tratar workspace_type ausente como INSTITUTE por compatibilidad
         if workspace_type == 'INSTITUTE' or not workspace_type:
-            # Para workspaces de instituto, buscar por workspace_id O por institute_id
-            filter_query = {
-                "_id": ObjectId(class_id),
-                "$or": [
-                    {"workspace_id": ObjectId(workspace_info['workspace_id'])},
-                    {
-                        "workspace_id": {"$exists": False},
-                        "institute_id": ObjectId(workspace_info.get('institute_id'))
-                    }
-                ]
-            }
+            # Para admins de instituto, filtrar SOLO por institute_id (ignorar workspace_id)
+            # Esto permite que todos los admins del mismo instituto puedan ver todas las clases
+            if workspace_role == 'INSTITUTE_ADMIN' and institute_id:
+                filter_query = {
+                    "_id": ObjectId(class_id),
+                    "institute_id": ObjectId(institute_id)
+                }
+            else:
+                # Para workspaces de instituto (no admin), buscar por workspace_id O por institute_id
+                filter_query = {
+                    "_id": ObjectId(class_id),
+                    "$or": [
+                        {"workspace_id": ObjectId(workspace_info['workspace_id'])},
+                        {
+                            "workspace_id": {"$exists": False},
+                            "institute_id": ObjectId(institute_id)
+                        }
+                    ]
+                }
         else:
             # Para otros tipos de workspace, mantener filtro estricto
             filter_query = {
