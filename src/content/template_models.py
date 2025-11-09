@@ -1,3 +1,4 @@
+import json
 import logging
 from datetime import datetime
 from bson import ObjectId
@@ -25,6 +26,7 @@ class Template:
                  style_tags: List[str] = None,
                  subject_tags: List[str] = None,
                  description: str = "",
+                 template_config: Optional[Dict] = None,
                  _id: Optional[ObjectId] = None,
                  created_at: Optional[datetime] = None,
                  updated_at: Optional[datetime] = None,
@@ -46,6 +48,7 @@ class Template:
         self.style_tags = style_tags or []
         self.subject_tags = subject_tags or []
         self.description = description
+        self.template_config = self._normalize_template_config(template_config)
         self.created_at = created_at or datetime.now()
         self.updated_at = updated_at or datetime.now()
         
@@ -108,6 +111,7 @@ class Template:
             "style_tags": self.style_tags,
             "subject_tags": self.subject_tags,
             "description": self.description,
+            "template_config": self.template_config,
             "created_at": self.created_at,
             "updated_at": self.updated_at,
             "personalization": self.personalization,
@@ -137,6 +141,80 @@ class Template:
         self.personalization["extraction_version"] = self.version
         self.updated_at = datetime.now()
 
+    def _normalize_template_config(self, template_config: Optional[Dict]) -> Dict:
+        """Ensure template_config has a consistent structure with safe defaults."""
+        if not isinstance(template_config, dict):
+            template_config = {}
+
+        instructions = template_config.get("instructions")
+        if not isinstance(instructions, str):
+            instructions = ""
+
+        raw_inputs = template_config.get("inputs", [])
+        normalized_inputs: List[Dict] = []
+        if isinstance(raw_inputs, list):
+            for entry in raw_inputs[:3]:  # Solo admitimos hasta 3 entradas configurables
+                if not isinstance(entry, dict):
+                    continue
+                name = str(entry.get("name", "")).strip()
+                if not name:
+                    continue
+
+                label = entry.get("label")
+                if not isinstance(label, str) or not label.strip():
+                    label = name
+
+                input_type = entry.get("type", "text")
+                if input_type not in {"text", "textarea", "url", "select"}:
+                    input_type = "text"
+
+                helper_text = entry.get("helper_text")
+                if helper_text is not None and not isinstance(helper_text, str):
+                    helper_text = str(helper_text)
+
+                ai_hint = entry.get("ai_hint")
+                if ai_hint is not None and not isinstance(ai_hint, str):
+                    ai_hint = str(ai_hint)
+
+                default_value = entry.get("default_value")
+                if isinstance(default_value, (dict, list)):
+                    try:
+                        default_value = json.dumps(default_value)
+                    except (TypeError, ValueError) as e:
+                        logging.warning(f"Failed to serialize default_value: {e}")
+                        default_value = str(default_value)
+
+                options = []
+                raw_options = entry.get("options")
+                if isinstance(raw_options, list):
+                    for opt in raw_options:
+                        if not isinstance(opt, dict):
+                            continue
+                        value = opt.get("value")
+                        label_opt = opt.get("label") or opt.get("name")
+                        if value is None:
+                            continue
+                        options.append({
+                            "label": str(label_opt) if label_opt is not None else str(value),
+                            "value": value
+                        })
+
+                normalized_inputs.append({
+                    "name": name,
+                    "label": label,
+                    "type": input_type,
+                    "required": bool(entry.get("required", False)),
+                    "default_value": default_value,
+                    "helper_text": helper_text,
+                    "ai_hint": ai_hint,
+                    "options": options
+                })
+
+        return {
+            "instructions": instructions,
+            "inputs": normalized_inputs
+        }
+
 class TemplateInstance:
     """
     Instancia de una plantilla ligada a un Topic específico.
@@ -151,6 +229,7 @@ class TemplateInstance:
                  props: Optional[Dict] = None,
                  assets: List[Dict] = None,
                  learning_mix: Optional[Dict] = None,
+                 metadata: Optional[Dict] = None,
                  status: str = "draft",  # draft, active
                  _id: Optional[ObjectId] = None,
                  created_at: Optional[datetime] = None,
@@ -175,6 +254,7 @@ class TemplateInstance:
             }
         
         self.status = status
+        self.metadata = metadata or {}
         self.created_at = created_at or datetime.now()
         self.updated_at = updated_at or datetime.now()
         
@@ -191,6 +271,7 @@ class TemplateInstance:
             "props": self.props,
             "assets": self.assets,
             "learning_mix": self.learning_mix,
+            "metadata": self.metadata,
             "status": self.status,
             "created_at": self.created_at,
             "updated_at": self.updated_at

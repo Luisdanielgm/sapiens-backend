@@ -92,45 +92,93 @@ class TemplateRecommendationService:
             logging.error(f"Error generating template recommendations: {str(e)}")
             raise e
     
-    def _calculate_rl_boost(self, template_id: str, slide_index: int, rl_recommendations: Dict) -> float:
+    def _calculate_rl_boost(self, template: Dict, slide_index: int, rl_context: Dict) -> Tuple[float, Dict]:
         """
-        Calcula el impulso de puntuación basado en las recomendaciones del sistema RL.
-        
-        Args:
-            template_id: ID de la plantilla
-            slide_index: Índice de la diapositiva actual
-            rl_recommendations: Recomendaciones del sistema RL
-            
-        Returns:
-            float: Impulso de puntuación (0.0 a 0.3)
+        Calcula el impulso de puntuación basado en las señales del sistema RL.
+        Devuelve el boost numérico y un detalle de qué reglas se aplicaron.
         """
+        details = {}
+        if not rl_context:
+            return 0.0, details
+
         try:
+            # Compatibilidad con formato legacy (template_preferences / position_recommendations)
+            if "template_preferences" in rl_context:
+                template_id = str(template.get("_id")) if template.get("_id") else None
+                if not template_id:
+                    return 0.0, details
+                boost = 0.0
+                prefs = rl_context.get("template_preferences", {})
+                if template_id in prefs:
+                    boost += prefs[template_id] * 0.2
+                    details["legacy_template_pref"] = prefs[template_id]
+
+                position_key = f"slide_{slide_index}"
+                position_map = rl_context.get("position_recommendations", {})
+                if template_id and position_key in position_map:
+                    boost += position_map[position_key].get(template_id, 0) * 0.1
+                    details["legacy_position_pref"] = position_map[position_key].get(template_id)
+
+                confidence = rl_context.get("confidence_score", 0.5)
+                boost *= confidence
+                details["confidence"] = confidence
+                return max(-0.2, min(boost, 0.3)), details
+
+            metadata = rl_context.get("rl_metadata") or rl_context.get("rl_model_response") or {}
+            if not metadata:
+                return 0.0, details
+
+            template_type = self._infer_template_content_type(template)
+            confidence = rl_context.get("confidence_score") or metadata.get("confidence") or 0.5
             boost = 0.0
-            
-            # Boost basado en preferencias de plantillas del RL
-            template_preferences = rl_recommendations.get("template_preferences", {})
-            if template_id in template_preferences:
-                preference_score = template_preferences[template_id]
-                boost += preference_score * 0.2  # Máximo 0.2 de boost
-            
-            # Boost basado en recomendaciones específicas por posición
-            position_recommendations = rl_recommendations.get("position_recommendations", {})
-            position_key = f"slide_{slide_index}"
-            if position_key in position_recommendations:
-                position_prefs = position_recommendations[position_key]
-                if template_id in position_prefs:
-                    boost += position_prefs[template_id] * 0.1  # Máximo 0.1 adicional
-            
-            # Boost basado en el nivel de confianza del RL
-            confidence = rl_recommendations.get("confidence_score", 0.5)
-            boost *= confidence  # Reducir boost si la confianza es baja
-            
-            # Limitar el boost máximo
-            return min(boost, 0.3)
-            
+
+            recommended_action = metadata.get("recommended_action") or {}
+            history_analysis = metadata.get("history_analysis") or {}
+            content_recs = rl_context.get("recommendations") or []
+
+            if template_type:
+                rec_type = (recommended_action.get("content_type") or "").lower()
+                if rec_type and template_type == rec_type:
+                    weight = recommended_action.get("dynamic_weight", 1.0)
+                    boost += 0.2 * weight
+                    details["matched_recommended_action"] = True
+
+                preferred = [t.lower() for t in history_analysis.get("preferred_content_types", [])]
+                if template_type in preferred:
+                    boost += 0.1
+                    details["matched_preferred_type"] = True
+
+                struggling = [t.lower() for t in history_analysis.get("struggling_content_types", [])]
+                if template_type in struggling:
+                    boost -= 0.1
+                    details["matched_struggling_type"] = True
+
+                performance_by_type = history_analysis.get("performance_by_type", {})
+                perf = performance_by_type.get(template_type)
+                if perf and perf.get("total_interactions"):
+                    success_rate = perf.get("success_rate")
+                    if success_rate is not None:
+                        boost += (success_rate - 0.5) * 0.1
+                        details["success_rate"] = success_rate
+
+                for rec in content_recs:
+                    rec_type = (rec.get("content_type") or "").lower()
+                    if rec_type and rec_type == template_type:
+                        effectiveness = rec.get("estimated_effectiveness", 0.5)
+                        priority = rec.get("priority", 1.0)
+                        boost += effectiveness * priority * 0.05
+                        details["content_recommendation_match"] = {
+                            "estimated_effectiveness": effectiveness,
+                            "priority": priority
+                        }
+
+            boost *= confidence
+            details["confidence"] = confidence
+            return max(-0.2, min(boost, 0.3)), details
+
         except Exception as e:
             logging.error(f"Error calculating RL boost: {str(e)}")
-            return 0.0
+            return 0.0, details
     
     def _get_topic_slides(self, topic_id: str) -> List[Dict]:
         """
@@ -316,14 +364,19 @@ class TemplateRecommendationService:
                 )
                 recommendations[str(slide["_id"])] = slide_recommendations
             
-            return True, {
+            response_payload = {
                 "topic_id": topic_id,
                 "total_slides": len(slides),
                 "recommendations": recommendations,
                 "rl_enhanced": rl_recommendations is not None,
                 "confidence_score": rl_recommendations.get("confidence_score", 0.5) if rl_recommendations else 0.5,
-                "generated_at": datetime.now().isoformat()
+                "generated_at": datetime.now().isoformat(),
+                "prediction_id": rl_recommendations.get("prediction_id") if rl_recommendations else None,
+                "rl_metadata": rl_recommendations.get("rl_metadata") if rl_recommendations else {},
+                "learning_path_adjustment": rl_recommendations.get("learning_path_adjustment") if rl_recommendations else {}
             }
+            
+            return True, response_payload
             
         except Exception as e:
             logging.error(f"Error generando recomendaciones de plantillas: {str(e)}")
@@ -346,13 +399,14 @@ class TemplateRecommendationService:
                 compatibility_score = self._calculate_template_compatibility(
                     slide_analysis, template, topic_context, student_profile
                 )
-                
+                template_type = self._infer_template_content_type(template)
+
                 # Aplicar boost del sistema RL si está disponible
                 rl_boost = 0.0
-                if rl_recommendations and "template_preferences" in rl_recommendations:
-                    template_id = str(template["_id"])
-                    rl_boost = self._calculate_rl_boost(
-                        template_id, slide_index, rl_recommendations
+                rl_boost_details = {}
+                if rl_recommendations:
+                    rl_boost, rl_boost_details = self._calculate_rl_boost(
+                        template, slide_index, rl_recommendations
                     )
                 
                 final_score = compatibility_score["total_score"] + rl_boost
@@ -360,8 +414,10 @@ class TemplateRecommendationService:
                 template_scores.append({
                     "template_id": str(template["_id"]),
                     "template_name": template["name"],
+                    "template_content_type": template_type,
                     "compatibility_score": compatibility_score["total_score"],
                     "rl_boost": rl_boost,
+                    "rl_boost_details": rl_boost_details,
                     "final_score": final_score,
                     "score_breakdown": compatibility_score["breakdown"],
                     "recommended_props": self._generate_template_props(
@@ -526,6 +582,45 @@ class TemplateRecommendationService:
             return 0.8  # Score neutro
         
         return 0.7  # Score por defecto
+
+    def _infer_template_content_type(self, template: Dict) -> str:
+        """
+        Intenta inferir el tipo de contenido (video, quiz, interactive, etc.) de una plantilla
+        para mapearlo con las recomendaciones del RL.
+        """
+        try:
+            template_config = template.get("template_config") or {}
+            capabilities = template.get("capabilities") or {}
+            explicit_type = (
+                template_config.get("content_type")
+                or capabilities.get("content_type")
+                or template.get("content_type")
+            )
+            if isinstance(explicit_type, str) and explicit_type.strip():
+                return explicit_type.strip().lower()
+
+            style_tags = {tag.lower() for tag in template.get("style_tags", [])}
+            if "quiz" in style_tags or "assessment" in style_tags:
+                return "quiz"
+            if "game" in style_tags:
+                return "game"
+            if "simulation" in style_tags:
+                return "simulation"
+            if "interactive" in style_tags:
+                return "interactive"
+            if "diagram" in style_tags:
+                return "diagram"
+            if "audio" in style_tags:
+                return "audio"
+            if "video" in style_tags:
+                return "video"
+            if "experiment" in style_tags or "lab" in style_tags:
+                return "virtual_lab"
+            if "text" in style_tags or "summary" in style_tags:
+                return "text"
+            return "slides"
+        except Exception:
+            return "slides"
     
     def _estimate_template_duration(self, template: Dict) -> int:
         """
@@ -625,27 +720,68 @@ class TemplateRecommendationService:
             Tuple[bool, str]: (éxito, mensaje)
         """
         try:
-            # Preparar datos de feedback para el sistema RL
-            rl_feedback = {
-                "student_id": student_id,
+            completion_rate = feedback_data.get("completion_rate")
+            performance_score = feedback_data.get("performance_score")
+            if performance_score is None:
+                if completion_rate is not None:
+                    if completion_rate <= 1:
+                        performance_score = min(completion_rate, 1.0) * 100
+                    else:
+                        performance_score = min(completion_rate, 100)
+                else:
+                    performance_score = feedback_data.get("engagement_score", 0.7) * 100
+
+            engagement_metrics = {
+                "time_spent_seconds": feedback_data.get("completion_time"),
+                "interaction_count": feedback_data.get("interaction_count"),
+                "completion_rate": completion_rate,
+                "satisfaction_score": feedback_data.get("satisfaction_score"),
+                "difficulty_rating": feedback_data.get("difficulty_rating")
+            }
+
+            session_type = feedback_data.get("session_type", "template_usage")
+            session_data = {
+                "content_id": template_id,
+                "topic_id": topic_id,
+                "slide_id": slide_id,
+                "session_type": session_type,
+                "time_spent": feedback_data.get("completion_time"),
+                "prediction_id": feedback_data.get("prediction_id")
+            }
+
+            performance_metrics = {
+                "score": min(max(performance_score, 0), 100) / 100.0 if performance_score is not None else None,
+                "completion_time": feedback_data.get("completion_time"),
+                "interaction_count": feedback_data.get("interaction_count"),
+                "engagement_level": feedback_data.get("engagement_score"),
+                "difficulty_rating": feedback_data.get("difficulty_rating"),
+                "satisfaction_rating": feedback_data.get("satisfaction_score")
+            }
+
+            context_data = {
                 "topic_id": topic_id,
                 "slide_id": slide_id,
                 "template_id": template_id,
-                "feedback_type": "template_usage",
-                "engagement_score": feedback_data.get("engagement_score", 0.5),
-                "completion_time": feedback_data.get("completion_time", 0),
-                "interaction_count": feedback_data.get("interaction_count", 0),
-                "completion_rate": feedback_data.get("completion_rate", 0.0),
-                "difficulty_rating": feedback_data.get("difficulty_rating", 3),
-                "satisfaction_score": feedback_data.get("satisfaction_score", 0.5),
-                "timestamp": datetime.now().isoformat()
+                "session_type": session_type,
+                "prediction_id": feedback_data.get("prediction_id")
+            }
+
+            rl_feedback = {
+                "student_id": student_id,
+                "content_id": template_id,
+                "interaction_type": "template_usage",
+                "performance_score": performance_score,
+                "engagement_metrics": engagement_metrics,
+                "context_data": context_data,
+                "session_data": session_data,
+                "performance_metrics": performance_metrics,
+                "learning_outcomes": feedback_data.get("learning_outcomes"),
+                "contextual_factors": feedback_data.get("contextual_factors"),
+                "user_feedback": feedback_data.get("user_feedback")
             }
             
             # Enviar feedback al sistema de personalización adaptativa
-            success, result = self.personalization_service.submit_learning_feedback(
-                student_id=student_id,
-                feedback_data=rl_feedback
-            )
+            success, result = self.personalization_service.submit_learning_feedback(rl_feedback)
             
             if success:
                 logging.info(f"Feedback de plantilla enviado exitosamente para estudiante {student_id}")

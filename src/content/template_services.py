@@ -1,6 +1,7 @@
 import logging
 import re
 import json
+import copy
 from datetime import datetime
 from bson import ObjectId
 from typing import Dict, List, Optional, Union, Tuple
@@ -42,7 +43,8 @@ class TemplateService:
                 style_tags=template_data.get("style_tags", []),
                 subject_tags=template_data.get("subject_tags", []),
                 baseline_mix=template_data.get("baseline_mix"),
-                capabilities=template_data.get("capabilities", {})
+                capabilities=template_data.get("capabilities", {}),
+                template_config=copy.deepcopy(template_data.get("template_config", {}))
             )
             
             # Insertar en base de datos
@@ -99,6 +101,7 @@ class TemplateService:
             cleaned['style_tags'] = template_data.get('style_tags', [])
             cleaned['subject_tags'] = template_data.get('subject_tags', [])
             cleaned['versions'] = template_data.get('versions', [])
+            cleaned['template_config'] = template_data.get('template_config', {})
 
             # Campos de fecha
             cleaned['_id'] = template_data.get('_id')
@@ -325,7 +328,7 @@ class TemplateService:
                 scalar_fields = [
                     "name", "description", "scope", "status",
                     "style_tags", "subject_tags", "baseline_mix", "capabilities",
-                    "props_schema", "defaults", "personalization"
+                    "props_schema", "defaults", "personalization", "template_config"
                 ]
                 for field in scalar_fields:
                     if field in update_data:
@@ -352,7 +355,7 @@ class TemplateService:
                 scalar_fields = [
                     "name", "description", "scope", "status",
                     "style_tags", "subject_tags", "baseline_mix", "capabilities",
-                    "props_schema", "defaults", "personalization"
+                    "props_schema", "defaults", "personalization", "template_config"
                 ]
                 update_dict = {"$set": {"updated_at": datetime.now()}}
                 for field in scalar_fields:
@@ -422,6 +425,7 @@ class TemplateService:
                 capabilities=original.capabilities.copy(),
                 style_tags=original.style_tags.copy(),
                 subject_tags=original.subject_tags.copy(),
+                template_config=copy.deepcopy(getattr(original, "template_config", {})),
                 scope="private",  # Los forks siempre empiezan como privados
                 status="draft"
             )
@@ -1047,7 +1051,8 @@ class TemplateInstanceService:
                 creator_id=instance_data.get("creator_id"),
                 props=initial_props,
                 assets=instance_data.get("assets", []),
-                learning_mix=instance_data.get("learning_mix")
+                learning_mix=instance_data.get("learning_mix"),
+                metadata=instance_data.get("metadata") if instance_data.get("metadata") is not None else instance_data.get("template_metadata")
             )
             
             # Insertar en base de datos
@@ -1098,7 +1103,7 @@ class TemplateInstanceService:
                 raise ValueError("Instancia no encontrada")
             
             # Campos actualizables
-            allowed_fields = ["props", "assets", "learning_mix", "status"]
+            allowed_fields = ["props", "assets", "learning_mix", "status", "metadata"]
             
             update_dict = {"updated_at": datetime.now()}
             for field in allowed_fields:

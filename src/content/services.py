@@ -21,6 +21,7 @@ from .structured_sequence_service import StructuredSequenceService
 from .template_recommendation_service import TemplateRecommendationService
 from .embedded_content_service import EmbeddedContentService
 from .content_personalization_service import ContentPersonalizationService
+from src.personalization.services import AdaptivePersonalizationService
 import bleach
 
 # Constants for policy validation error messages
@@ -538,6 +539,65 @@ class ContentService(VerificationBaseService):
             logging.error(f"Error validando política de payload en {context}: {str(e)}")
             return False, f"Error interno validando política: {str(e)}"
 
+    def _normalize_baseline_mix(self, value) -> Optional[Dict]:
+        if not isinstance(value, dict):
+            return None
+        normalized: Dict = {}
+        for key, raw in value.items():
+            if isinstance(raw, (int, float)):
+                normalized[key] = raw
+            elif isinstance(raw, str):
+                try:
+                    normalized[key] = float(raw)
+                except ValueError:
+                    continue
+        return normalized or None
+
+    def _resolve_baseline_mix(self, payload: Optional[Dict]) -> Optional[Dict]:
+        if not isinstance(payload, dict):
+            return None
+
+        def from_source(value) -> Optional[Dict]:
+            return self._normalize_baseline_mix(value)
+
+        for candidate in (
+            payload.get("baseline_mix"),
+            payload.get("learning_mix"),
+        ):
+            normalized = from_source(candidate)
+            if normalized:
+                return normalized
+
+        content_field = payload.get("content")
+        if isinstance(content_field, dict):
+            normalized = from_source(content_field.get("baseline_mix"))
+            if normalized:
+                return normalized
+
+        interactive_data = payload.get("interactive_data")
+        if isinstance(interactive_data, dict):
+            metadata = interactive_data.get("metadata")
+            if isinstance(metadata, dict):
+                normalized = from_source(metadata.get("baseline_mix"))
+                if normalized:
+                    return normalized
+
+        personalization = payload.get("personalization_data")
+        if isinstance(personalization, dict):
+            normalized = from_source(personalization.get("baseline_mix"))
+            if normalized:
+                return normalized
+
+        markers = payload.get("personalization_markers")
+        if isinstance(markers, dict):
+            template_metadata = markers.get("template_metadata")
+            if isinstance(template_metadata, dict):
+                normalized = from_source(template_metadata.get("baseline_mix"))
+                if normalized:
+                    return normalized
+
+        return None
+
     def create_content(self, content_data: Dict, allow_deprecated: bool = False, creator_roles: Optional[List[str]] = None) -> Tuple[bool, str]:
         """
         Crea contenido de cualquier tipo (estático o interactivo).
@@ -675,6 +735,8 @@ class ContentService(VerificationBaseService):
                 content_for_markers or json.dumps(content_data.get("interactive_data", {}))
             )
 
+            baseline_mix = self._resolve_baseline_mix(content_data)
+
             # Determinar estado inicial para diapositivas en función de los campos provistos
             # SOLO si el cliente no proporcionó un status explícito, salvo que el caso sea skeleton
             initial_status = content_data.get("status", "draft")
@@ -753,6 +815,8 @@ class ContentService(VerificationBaseService):
                 generation_prompt=content_data.get("generation_prompt"),
                 ai_credits=content_data.get("ai_credits", True),
                 personalization_markers=markers,
+                learning_mix=content_data.get("learning_mix"),
+                baseline_mix=baseline_mix,
                 status=initial_status,
                 order=content_data.get("order"),
                 parent_content_id=content_data.get("parent_content_id"),
@@ -1462,6 +1526,7 @@ class ContentService(VerificationBaseService):
                         kwargs["slide_plan"] = slide_plan
                 
                 # Crear objeto de contenido
+                baseline_mix = self._resolve_baseline_mix(content_data)
                 content = TopicContent(
                     topic_id=content_data.get("topic_id"),
                     content_type=content_data.get("content_type"),
@@ -1474,6 +1539,8 @@ class ContentService(VerificationBaseService):
                     generation_prompt=content_data.get("generation_prompt"),
                     ai_credits=content_data.get("ai_credits", True),
                     personalization_markers=markers,
+                    learning_mix=content_data.get("learning_mix"),
+                    baseline_mix=baseline_mix,
 
                     status=initial_status,
                     order=content_data.get("order"),
@@ -1610,6 +1677,7 @@ class ContentService(VerificationBaseService):
                 if payload.get("slide_plan") is not None:
                     kwargs["slide_plan"] = payload.get("slide_plan")
 
+                baseline_mix = self._resolve_baseline_mix(slide)
                 content_obj = TopicContent(
                     topic_id=slide.get("topic_id"),
                     content_type="slide",
@@ -1622,6 +1690,8 @@ class ContentService(VerificationBaseService):
                     generation_prompt=slide.get("generation_prompt"),
                     ai_credits=slide.get("ai_credits", True),
                     personalization_markers=markers,
+                    learning_mix=slide.get("learning_mix"),
+                    baseline_mix=baseline_mix,
                     # Force skeleton status regardless of provided status
                     status="skeleton",
                     order=slide.get("order"),
@@ -2202,6 +2272,19 @@ class ContentService(VerificationBaseService):
 
             # Fusionar todo en content_updates
             content_updates = {**content_updates, **moved_root_fields, **dotted_content_updates}
+
+            raw_baseline_mix = content_updates.get('baseline_mix')
+            if raw_baseline_mix is None:
+                raw_baseline_mix = update_data.get('baseline_mix')
+            normalized_baseline_mix = self._normalize_baseline_mix(raw_baseline_mix)
+            if normalized_baseline_mix:
+                content_updates['baseline_mix'] = normalized_baseline_mix
+                update_data['baseline_mix'] = normalized_baseline_mix
+            else:
+                if raw_baseline_mix is not None and 'baseline_mix' in content_updates:
+                    content_updates.pop('baseline_mix', None)
+                if raw_baseline_mix is not None and 'baseline_mix' in update_data:
+                    update_data.pop('baseline_mix', None)
 
             # Aplicar validaciones en content_updates unificado
             if content_updates.get('content_html') is not None:
@@ -3426,3 +3509,483 @@ class ContentService(VerificationBaseService):
         except Exception as e:
             logging.error(f"Error en get_topic_slides_optimized para topic {topic_id}: {e}")
             return {}
+
+
+class ContentResultService:
+    """
+    Gestiona el almacenamiento y consulta de resultados de contenido (slides, juegos, quizzes, etc.).
+    Reúne metadatos del contenido virtual/original para que evaluaciones, personalización y RL tengan
+    información consistente sin depender del frontend.
+    """
+
+    def __init__(self):
+        self.db = get_db()
+        self.collection = self.db.content_results
+        self.virtual_contents = self.db.virtual_topic_contents
+        self.virtual_topics = self.db.virtual_topics
+        self.topic_contents = self.db.topic_contents
+
+    # ---------------------------------------------------------------------
+    # Public API
+    # ---------------------------------------------------------------------
+    def record_result(self, result_data: Dict) -> Tuple[bool, str]:
+        """
+        Inserta un ContentResult normalizado en MongoDB.
+        """
+        try:
+            normalized = self._normalize_payload(result_data)
+            content_result = ContentResult(**normalized)
+            insert_result = self.collection.insert_one(content_result.to_dict())
+            self._refresh_vakr_async(str(content_result.student_id))
+            return True, str(insert_result.inserted_id)
+        except ValueError as ve:
+            logging.warning(f"ContentResult inválido: {ve}")
+            return False, str(ve)
+        except Exception as exc:
+            logging.error(f"Error guardando ContentResult: {exc}")
+            return False, "Error interno al guardar el resultado"
+
+    def get_student_results(
+        self,
+        student_id: str,
+        content_type: Optional[str] = None,
+        virtual_content_id: Optional[str] = None,
+        evaluation_id: Optional[str] = None,
+        topic_id: Optional[str] = None,
+        limit: int = 200,
+    ) -> List[Dict]:
+        """
+        Obtiene los resultados de un estudiante con filtros opcionales.
+        """
+        try:
+            student_oid = self._safe_object_id(student_id)
+            if not student_oid:
+                raise ValueError("student_id inválido")
+
+            query: Dict[str, Any] = {"student_id": student_oid}
+
+            if content_type:
+                query["content_type"] = content_type
+
+            if virtual_content_id:
+                vc_oid = self._safe_object_id(virtual_content_id)
+                if vc_oid:
+                    query["virtual_content_id"] = vc_oid
+
+            if evaluation_id:
+                eval_oid = self._safe_object_id(evaluation_id)
+                if eval_oid:
+                    query["evaluation_id"] = eval_oid
+
+            if topic_id:
+                topic_oid = self._safe_object_id(topic_id)
+                if topic_oid:
+                    query["topic_id"] = topic_oid
+
+            cursor = (
+                self.collection.find(query)
+                .sort("recorded_at", -1)
+                .limit(max(limit, 1))
+            )
+            return [self._serialize_result(doc) for doc in cursor]
+        except Exception as exc:
+            logging.error(f"Error obteniendo resultados de estudiante {student_id}: {exc}")
+            return []
+
+    def get_results_by_content(
+        self,
+        content_id: str,
+        student_id: Optional[str] = None,
+        limit: int = 200,
+    ) -> List[Dict]:
+        """
+        Devuelve resultados asociados a un TopicContent específico.
+        """
+        try:
+            content_oid = self._safe_object_id(content_id)
+            if not content_oid:
+                raise ValueError("content_id inválido")
+
+            query: Dict[str, Any] = {"content_id": content_oid}
+            if student_id:
+                student_oid = self._safe_object_id(student_id)
+                if student_oid:
+                    query["student_id"] = student_oid
+
+            cursor = (
+                self.collection.find(query)
+                .sort("recorded_at", -1)
+                .limit(max(limit, 1))
+            )
+            return [self._serialize_result(doc) for doc in cursor]
+        except Exception as exc:
+            logging.error(f"Error obteniendo resultados del contenido {content_id}: {exc}")
+            return []
+
+    def get_selection_statistics(
+        self,
+        topic_id: Optional[str] = None,
+        student_id: Optional[str] = None,
+        since: Optional[datetime] = None,
+    ) -> Dict[str, Any]:
+        """
+        Devuelve métricas agregadas por estrategia de selección (heurística vs worker/RL).
+        """
+        try:
+            match_stage: Dict[str, Any] = {}
+
+            if topic_id:
+                topic_oid = self._safe_object_id(topic_id)
+                if topic_oid:
+                    match_stage["topic_id"] = topic_oid
+
+            if student_id:
+                student_oid = self._safe_object_id(student_id)
+                if student_oid:
+                    match_stage["student_id"] = student_oid
+
+            if since and isinstance(since, datetime):
+                match_stage["recorded_at"] = {"$gte": since}
+
+            pipeline = []
+            if match_stage:
+                pipeline.append({"$match": match_stage})
+
+            pipeline.extend(
+                [
+                    {
+                        "$group": {
+                            "_id": {
+                                "strategy": {
+                                    "$ifNull": ["$metrics.selection_strategy", "$metrics.selection_source"]
+                                },
+                                "source": "$metrics.selection_source",
+                            },
+                            "count": {"$sum": 1},
+                            "avg_score": {"$avg": "$score"},
+                            "avg_vark_score": {"$avg": "$metrics.vark_score"},
+                            "rl_usage": {"$avg": {"$cond": ["$metrics.selection_via_rl", 1, 0]}},
+                        }
+                    },
+                    {
+                        "$project": {
+                            "_id": 0,
+                            "strategy": "$_id.strategy",
+                            "source": "$_id.source",
+                            "count": 1,
+                            "avg_score": 1,
+                            "avg_vark_score": 1,
+                            "selection_via_rl_ratio": "$rl_usage",
+                        }
+                    },
+                    {"$sort": {"count": -1}},
+                ]
+            )
+
+            results = list(self.collection.aggregate(pipeline))
+            total = sum(item.get("count", 0) for item in results) or 1
+
+            for item in results:
+                item["percentage"] = round(item.get("count", 0) / total, 4)
+
+            return {"total_results": total, "strategies": results}
+        except Exception as exc:
+            logging.error(f"Error agregando métricas de selección: {exc}")
+            return {"total_results": 0, "strategies": []}
+
+    # ---------------------------------------------------------------------
+    # Normalización y helpers
+    # ---------------------------------------------------------------------
+    def _normalize_payload(self, data: Dict) -> Dict[str, Any]:
+        if not isinstance(data, dict):
+            raise ValueError("Payload inválido para ContentResult")
+
+        payload = dict(data)
+        session_data = payload.get("session_data") or {}
+        if not isinstance(session_data, dict):
+            session_data = {}
+
+        metrics = payload.get("metrics") or {}
+        if not isinstance(metrics, dict):
+            metrics = {}
+
+        learning_metrics = payload.get("learning_metrics") or {}
+        if not isinstance(learning_metrics, dict):
+            learning_metrics = {}
+
+        rl_context = payload.get("rl_context") or {}
+        if not isinstance(rl_context, dict):
+            rl_context = {}
+
+        fallback_mode_signal = metrics.get("fallback_mode")
+        if fallback_mode_signal is None:
+            metrics["fallback_mode"] = bool(rl_context.get("fallback_mode"))
+        else:
+            metrics["fallback_mode"] = bool(fallback_mode_signal)
+
+        if not metrics.get("rl_error"):
+            rl_error = rl_context.get("rl_error") or rl_context.get("error_message")
+            if rl_error:
+                metrics["rl_error"] = rl_error
+
+        if "circuit_state" not in metrics:
+            circuit_state = rl_context.get("circuit_state")
+            if circuit_state is not None:
+                metrics["circuit_state"] = circuit_state
+
+        baseline_mix = payload.get("baseline_mix") or {}
+        if not isinstance(baseline_mix, dict):
+            baseline_mix = {}
+
+        completion_percentage = payload.get("completion_percentage")
+        if completion_percentage is None:
+            completion_percentage = session_data.get("completion_percentage")
+        if completion_percentage is not None:
+            metrics.setdefault("completion_percentage", completion_percentage)
+
+        metadata = {}
+        if payload.get("virtual_content_id"):
+            metadata = self._extract_virtual_content_metadata(payload["virtual_content_id"])
+
+        student_id = payload.get("student_id") or metadata.get("student_id")
+        if not student_id:
+            raise ValueError("student_id es requerido")
+        student_oid = self._safe_object_id(student_id)
+        if not student_oid:
+            raise ValueError("student_id inválido")
+        student_id = str(student_oid)
+
+        content_id = payload.get("content_id") or metadata.get("content_id")
+        evaluation_id = payload.get("evaluation_id")
+        if not content_id and evaluation_id:
+            content_id = evaluation_id
+        if content_id:
+            content_oid = self._safe_object_id(content_id)
+            if not content_oid:
+                raise ValueError("content_id inválido")
+            content_id = str(content_oid)
+
+        # ContentResult exige al menos content_id o virtual_content_id
+        if not content_id and not payload.get("virtual_content_id"):
+            raise ValueError("Se requiere content_id o virtual_content_id")
+
+        topic_id = payload.get("topic_id") or metadata.get("topic_id")
+        if topic_id:
+            topic_oid = self._safe_object_id(topic_id)
+            topic_id = str(topic_oid) if topic_oid else None
+
+        content_type = payload.get("content_type") or metadata.get("content_type") or "unknown"
+        variant_label = payload.get("variant_label") or metadata.get("variant_label")
+        template_instance_id = payload.get("template_instance_id") or metadata.get("template_instance_id")
+        if template_instance_id:
+            template_oid = self._safe_object_id(template_instance_id)
+            if template_oid:
+                template_instance_id = str(template_oid)
+        prediction_id = payload.get("prediction_id") or metadata.get("prediction_id")
+        baseline_mix = baseline_mix or metadata.get("baseline_mix") or {}
+
+        metrics.setdefault("virtual_topic_id", metadata.get("virtual_topic_id"))
+        metrics.setdefault("virtual_module_id", metadata.get("virtual_module_id"))
+        metrics.setdefault("topic_order", metadata.get("topic_order"))
+        metrics.setdefault("content_title", metadata.get("content_title"))
+        metrics.setdefault("variant_label", variant_label)
+
+        personalization_data = metadata.get("personalization_data") or {}
+        if personalization_data.get("selection_strategy") and "selection_strategy" not in metrics:
+            metrics["selection_strategy"] = personalization_data.get("selection_strategy")
+
+        score = self._normalize_score(
+            payload.get("score"),
+            session_data,
+            completion_percentage,
+        )
+
+        recorded_at = payload.get("recorded_at")
+        if isinstance(recorded_at, str):
+            try:
+                recorded_at = datetime.fromisoformat(recorded_at)
+            except ValueError:
+                recorded_at = None
+        if not isinstance(recorded_at, datetime):
+            recorded_at = datetime.now()
+
+        virtual_content_id = metadata.get("virtual_content_id") or payload.get("virtual_content_id")
+        if virtual_content_id:
+            vc_oid = self._safe_object_id(virtual_content_id)
+            if not vc_oid:
+                raise ValueError("virtual_content_id inválido")
+            virtual_content_id = str(vc_oid)
+
+        normalized = {
+            "student_id": str(student_id),
+            "score": score,
+            "content_id": str(content_id) if content_id else None,
+            "virtual_content_id": virtual_content_id,
+            "evaluation_id": evaluation_id,
+            "feedback": payload.get("feedback"),
+            "metrics": self._convert_objectids(metrics),
+            "session_type": payload.get("session_type", "content_interaction"),
+            "topic_id": str(topic_id) if topic_id else None,
+            "content_type": content_type,
+            "variant_label": variant_label,
+            "template_instance_id": str(template_instance_id) if template_instance_id else None,
+            "baseline_mix": baseline_mix,
+            "prediction_id": prediction_id,
+            "rl_context": self._convert_objectids(rl_context),
+            "session_data": self._convert_objectids(session_data),
+            "learning_metrics": self._convert_objectids(learning_metrics),
+            "recorded_at": recorded_at,
+        }
+        return normalized
+
+    def _extract_virtual_content_metadata(self, virtual_content_id: str) -> Dict[str, Any]:
+        metadata: Dict[str, Any] = {}
+        vc_oid = self._safe_object_id(virtual_content_id)
+        if not vc_oid:
+            raise ValueError("virtual_content_id inválido")
+
+        virtual_content = self.virtual_contents.find_one({"_id": vc_oid})
+        if not virtual_content:
+            raise ValueError("Contenido virtual no encontrado")
+
+        personalization_data = virtual_content.get("personalization_data") or {}
+        metadata["virtual_content_id"] = str(virtual_content["_id"])
+        metadata["content_id"] = self._stringify_object_id(
+            virtual_content.get("content_id") or virtual_content.get("original_content_id")
+        )
+        metadata["content_type"] = virtual_content.get("content_type")
+        metadata["virtual_topic_id"] = self._stringify_object_id(virtual_content.get("virtual_topic_id"))
+        metadata["student_id"] = self._stringify_object_id(virtual_content.get("student_id"))
+        metadata["personalization_data"] = personalization_data
+        metadata["baseline_mix"] = personalization_data.get("baseline_mix")
+        metadata["prediction_id"] = personalization_data.get("prediction_id")
+        metadata["variant_label"] = personalization_data.get("variant_label") or personalization_data.get("variant")
+        metadata["template_instance_id"] = self._stringify_object_id(
+            virtual_content.get("instance_id") or personalization_data.get("template_instance_id")
+        )
+
+        virtual_topic_id = virtual_content.get("virtual_topic_id")
+        if virtual_topic_id:
+            virtual_topic = self.virtual_topics.find_one({"_id": virtual_topic_id})
+            if virtual_topic:
+                metadata["topic_id"] = self._stringify_object_id(virtual_topic.get("topic_id"))
+                metadata["virtual_module_id"] = self._stringify_object_id(virtual_topic.get("virtual_module_id"))
+                metadata["topic_order"] = virtual_topic.get("order")
+
+        content_id = metadata.get("content_id")
+        content_oid = self._safe_object_id(content_id)
+        if content_oid:
+            topic_content = self.topic_contents.find_one({"_id": content_oid})
+            if topic_content:
+                metadata["content_type"] = metadata.get("content_type") or topic_content.get("content_type")
+                metadata["topic_id"] = metadata.get("topic_id") or self._stringify_object_id(topic_content.get("topic_id"))
+                metadata["baseline_mix"] = (
+                    metadata.get("baseline_mix")
+                    or topic_content.get("baseline_mix")
+                    or (topic_content.get("content", {}).get("baseline_mix") if isinstance(topic_content.get("content"), dict) else None)
+                    or topic_content.get("learning_mix")
+                )
+                variant = topic_content.get("variant") or {}
+                metadata["variant_label"] = metadata.get("variant_label") or variant.get("variant_label")
+                metadata["variant_index"] = variant.get("variant_index")
+                metadata["parent_order"] = variant.get("parent_order")
+                attachment = topic_content.get("attachment") or {}
+                if not metadata.get("template_instance_id"):
+                    metadata["template_instance_id"] = self._stringify_object_id(
+                        attachment.get("template_instance_id") or topic_content.get("instance_id")
+                    )
+                metadata["template_version"] = attachment.get("template_version") or topic_content.get("template_version")
+
+                content_field = topic_content.get("content")
+                if isinstance(content_field, dict):
+                    metadata["content_title"] = content_field.get("title")
+                else:
+                    metadata["content_title"] = topic_content.get("title")
+
+        return metadata
+
+    def _normalize_score(
+        self,
+        raw_score: Optional[Any],
+        session_data: Dict,
+        completion_percentage: Optional[Any],
+    ) -> float:
+        score = raw_score
+        if score is None:
+            score = session_data.get("score")
+        if score is None and completion_percentage is not None:
+            score = completion_percentage
+        if score is None:
+            score = session_data.get("completion_percentage")
+        if score is None:
+            score = 0.0
+
+        try:
+            score = float(score)
+        except (TypeError, ValueError):
+            score = 0.0
+
+        # Si el score viene en 0-100, normalizarlo
+        if score > 1.0:
+            if score <= 100:
+                score = score / 100.0
+            else:
+                score = 1.0
+        return max(0.0, min(1.0, score))
+
+    def _serialize_result(self, document: Dict) -> Dict:
+        result = dict(document)
+        result["_id"] = str(result["_id"])
+
+        for key in ["student_id", "content_id", "virtual_content_id", "evaluation_id", "topic_id", "template_instance_id"]:
+            if result.get(key):
+                result[key] = str(result[key])
+
+        recorded_at = result.get("recorded_at")
+        if isinstance(recorded_at, datetime):
+            result["recorded_at"] = recorded_at.isoformat()
+
+        result["metrics"] = self._convert_objectids(result.get("metrics") or {})
+        result["session_data"] = self._convert_objectids(result.get("session_data") or {})
+        result["learning_metrics"] = self._convert_objectids(result.get("learning_metrics") or {})
+        result["baseline_mix"] = result.get("baseline_mix") or {}
+        result["rl_context"] = self._convert_objectids(result.get("rl_context") or {})
+        return result
+
+    def _refresh_vakr_async(self, student_id: str) -> None:
+        def worker():
+            try:
+                service = AdaptivePersonalizationService()
+                service.get_vakr_statistics(student_id, force_refresh=True)
+                logging.info(f"VAKR stats refreshed for student {student_id}")
+            except Exception as exc:
+                logging.warning(f"Unable to refresh VAKR stats for {student_id}: {exc}")
+
+        thread = threading.Thread(target=worker, daemon=True)
+        thread.start()
+
+    def _safe_object_id(self, value: Optional[Any]) -> Optional[ObjectId]:
+        if not value:
+            return None
+        if isinstance(value, ObjectId):
+            return value
+        try:
+            return ObjectId(str(value))
+        except Exception:
+            return None
+
+    def _stringify_object_id(self, value: Optional[Any]) -> Optional[str]:
+        if isinstance(value, ObjectId):
+            return str(value)
+        if value is None:
+            return None
+        return str(value)
+
+    def _convert_objectids(self, value: Any) -> Any:
+        if isinstance(value, ObjectId):
+            return str(value)
+        if isinstance(value, list):
+            return [self._convert_objectids(item) for item in value]
+        if isinstance(value, dict):
+            return {key: self._convert_objectids(val) for key, val in value.items()}
+        return value

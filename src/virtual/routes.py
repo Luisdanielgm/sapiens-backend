@@ -7,7 +7,9 @@ from src.shared.decorators import auth_required, role_required, workspace_type_r
 from src.shared.middleware import apply_workspace_filter, get_current_workspace_info
 from bson import ObjectId
 from datetime import datetime
+from typing import Optional
 import logging
+import threading
 
 from .services import (
     VirtualModuleService,
@@ -21,6 +23,8 @@ from .services import (
 )
 from src.content.models import ContentTypes, LearningMethodologyTypes
 from src.study_plans.services import TopicService
+from src.content.services import ContentResultService
+from src.evaluations.services import evaluation_service
 
 virtual_bp = APIBlueprint('virtual', __name__)
 # quiz_bp eliminado - ahora los quizzes se manejan como TopicContent
@@ -32,6 +36,31 @@ topic_service = TopicService()
 queue_service = ServerlessQueueService()
 fast_generator = FastVirtualModuleGenerator()
 change_detector = ContentChangeDetector()
+content_result_service = ContentResultService()
+
+
+def _regrade_evaluations_async(student_id: str, topic_id: str, module_id: Optional[str]) -> None:
+    if not module_id or not topic_id:
+        logging.debug("No module or topic info to encolar regrading")
+        return
+
+    try:
+        success, task_id = queue_service.enqueue_generation_task(
+            student_id=student_id,
+            module_id=module_id,
+            task_type="regrade_evaluations",
+            priority=3,
+            payload={
+                "topic_id": topic_id,
+                "student_id": student_id
+            }
+        )
+        if success:
+            logging.info(f"Regrading task enqueued for student={student_id} topic={topic_id} task={task_id}")
+        else:
+            logging.warning(f"No se pudo encolar regrading: {task_id}")
+    except Exception as exc:
+        logging.warning(f"Error encolando regrading para topic {topic_id}: {exc}")
 
 # Rutas para Módulos Virtuales
 @virtual_bp.route('/module', methods=['POST'])
@@ -113,10 +142,11 @@ def get_virtual_topic_contents(virtual_topic_id):
 # Los resultados se envían con POST /virtual/content-result
 
 @virtual_bp.route('/content-result', methods=['POST'])
+@virtual_bp.route('/content-results', methods=['POST'])
 @APIRoute.standard(
     auth_required_flag=True,
     roles=[ROLES["STUDENT"]],
-    required_fields=['virtual_content_id', 'student_id', 'session_data']
+    required_fields=['virtual_content_id', 'session_data']
 )
 def submit_content_result():
     """
@@ -124,13 +154,30 @@ def submit_content_result():
     Reemplaza los endpoints específicos de quiz, game, etc.
     """
     try:
-        data = request.get_json()
+        data = request.get_json() or {}
         virtual_content_id = data.get('virtual_content_id')
-        student_id = data.get('student_id')
-        session_data = data.get('session_data')
+        session_data = data.get('session_data') or {}
+        if not isinstance(session_data, dict):
+            session_data = {}
+        student_id = get_jwt_identity()
+        if not student_id:
+            return APIRoute.error(
+                ErrorCodes.VALIDATION_ERROR,
+                "JWT identity is required",
+                status_code=401
+            )
         learning_metrics = data.get('learning_metrics', {})
+        if not isinstance(learning_metrics, dict):
+            learning_metrics = {}
         feedback = data.get('feedback', '')
         session_type = data.get('session_type', 'completion')
+        metrics = data.get('metrics', {}) or {}
+        if not isinstance(metrics, dict):
+            metrics = {}
+        score = data.get('score')
+        completion_percentage = data.get('completion_percentage')
+        if completion_percentage is None:
+            completion_percentage = session_data.get('completion_percentage', 100)
         
         # Verificar que el contenido virtual existe
         virtual_content = get_db().virtual_topic_contents.find_one({
@@ -145,7 +192,7 @@ def submit_content_result():
             )
         
         # Verificar que el estudiante coincide
-        if str(virtual_content.get("student_id")) != student_id:
+        if str(virtual_content.get("student_id")) != str(student_id):
             return APIRoute.error(
                 ErrorCodes.PERMISSION_DENIED,
                 "No tienes permiso para enviar resultados de este contenido",
@@ -153,24 +200,29 @@ def submit_content_result():
             )
         
         # Crear el resultado usando el servicio unificado
-        from src.content.services import ContentResultService
-        content_result_service = ContentResultService()
-        
         result_data = {
             "virtual_content_id": virtual_content_id,
             "student_id": student_id,
+            "score": score,
+            "completion_percentage": completion_percentage,
             "session_data": session_data,
+            "metrics": metrics,
             "learning_metrics": learning_metrics,
             "feedback": feedback,
-            "session_type": session_type
+            "session_type": session_type,
+            "prediction_id": data.get("prediction_id"),
+            "rl_context": data.get("rl_context"),
+            "baseline_mix": data.get("baseline_mix"),
+            "variant_label": data.get("variant_label"),
+            "template_instance_id": data.get("template_instance_id"),
+            "topic_id": data.get("topic_id"),
+            "content_type": data.get("content_type")
         }
         
         success, result_id = content_result_service.record_result(result_data)
         
         if success:
             # Actualizar tracking del contenido virtual
-            completion_percentage = session_data.get('completion_percentage', 100)
-            
             update_data = {
                 "interaction_tracking.last_accessed": datetime.now(),
                 "interaction_tracking.completion_percentage": completion_percentage,
@@ -269,7 +321,7 @@ def submit_content_result():
                                                 
                                                 if not existing_next:
                                                     # Encolar generación del siguiente módulo
-                                                    queue_service.enqueue_task(
+                                                    success, task_id = queue_service.enqueue_generation_task(
                                                         student_id=student_id,
                                                         module_id=str(next_module["_id"]),
                                                         task_type="generate",
@@ -279,12 +331,23 @@ def submit_content_result():
                                                             "source_module_id": str(module_id)
                                                         }
                                                     )
+                                                    if not success:
+                                                        logging.warning(
+                                                            f"Failed to enqueue next module generation (auto progress): {task_id}"
+                                                        )
                                     except Exception as next_module_err:
                                         logging.warning(f"Error generando siguiente módulo: {next_module_err}")
                         
                 except Exception as progress_err:
                     logging.warning(f"Error calculando progreso del tema: {progress_err}")
             
+            topic_id = data.get("topic_id")
+            module_id = virtual_content.get("virtual_module_id") or virtual_content.get("module_id")
+            if module_id:
+                module_id = str(module_id)
+            if topic_id:
+                _regrade_evaluations_async(student_id, topic_id, module_id)
+
             return APIRoute.success(
                 data={
                     "result_id": result_id,
@@ -1914,9 +1977,6 @@ def get_student_content_results(student_id):
     Reemplaza los endpoints específicos de quiz/game results.
     """
     try:
-        from src.content.services import ContentResultService
-        content_result_service = ContentResultService()
-        
         # Obtener parámetros opcionales
         content_type = request.args.get('content_type')  # Filtrar por tipo de contenido
         module_id = request.args.get('module_id')  # Filtrar por módulo
@@ -1953,6 +2013,8 @@ def get_student_content_results(student_id):
         # Enriquecer resultados con información adicional
         enriched_results = []
         for result in results:
+            if not result.get("virtual_content_id"):
+                continue
             # Obtener información del contenido virtual
             virtual_content = get_db().virtual_topic_contents.find_one({
                 "_id": ObjectId(result["virtual_content_id"])
@@ -2354,7 +2416,7 @@ def complete_virtual_module(module_id):
                     
                     if not existing_next:
                         # Encolar generación del siguiente módulo
-                        queue_service.enqueue_task(
+                        success, task_id = queue_service.enqueue_generation_task(
                             student_id=student_id,
                             module_id=str(next_module["_id"]),
                             task_type="generate",
@@ -2365,8 +2427,13 @@ def complete_virtual_module(module_id):
                                 "completion_time": completion_time.isoformat()
                             }
                         )
-                        next_module_generated = True
-                        logging.info(f"Siguiente módulo encolado para generación: {next_module['_id']}")
+                        if success:
+                            next_module_generated = True
+                            logging.info(f"Siguiente módulo encolado para generación: {next_module['_id']}")
+                        else:
+                            logging.warning(
+                                f"Failed to enqueue next module generation on completion: {task_id}"
+                            )
         
         except Exception as next_module_err:
             logging.warning(f"Error generando siguiente módulo: {next_module_err}")

@@ -861,13 +861,13 @@ def get_template_recommendations():
             topic_id=topic_id,
             context_data={"request_type": "template_recommendations"}
         )
-        
+        fallback_mode_flag = False
+        rl_error = None
         if not rl_success:
-            return jsonify({
-                "success": False,
-                "error": "RL_SERVICE_ERROR",
-                "message": f"Error obteniendo recomendaciones RL: {rl_result.get('message', 'Error desconocido')}"
-            }), 500
+            rl_error = rl_result.get('message', 'Error desconocido')
+            logging.warning(f"RL falló: {rl_error}. Seguimos con heurísticas.")
+            fallback_mode_flag = True
+            rl_result = {}
         
         # Obtener plantillas disponibles
         user_id = get_jwt_identity()
@@ -895,7 +895,7 @@ def get_template_recommendations():
         rl_recommendations = rl_result.get('recommendations', [])
         confidence_score = rl_result.get('confidence_score', 0.5)
         reasoning = rl_result.get('reasoning', 'Recomendaciones basadas en modelo RL')
-        fallback_mode = rl_result.get('fallback_mode', False)
+        fallback_mode = rl_result.get('fallback_mode', fallback_mode_flag)
         
         # Crear mapa de tipos de contenido recomendados por RL
         rl_content_types = {}

@@ -96,6 +96,7 @@ class TopicContent:
                  template_id: Optional[str] = None,  # Referencia directa a Template
                  template_version: Optional[str] = None,  # Versión de plantilla usada
                  learning_mix: Optional[Dict] = None,  # Mix VARK para este contenido
+                 baseline_mix: Optional[Dict] = None,
                  # Nuevos campos para Fase 1 y 2
                  order: Optional[int] = None,  # Orden secuencial para diapositivas
                  parent_content_id: Optional[str] = None,  # Vinculación con diapositiva padre
@@ -121,7 +122,11 @@ class TopicContent:
         self.instance_id = ObjectId(instance_id) if instance_id else None
         self.template_id = ObjectId(template_id) if template_id else None
         self.template_version = template_version
-        self.learning_mix = learning_mix or {}
+        self.learning_mix = learning_mix.copy() if isinstance(learning_mix, dict) else {}
+        processed_baseline_mix = baseline_mix if isinstance(baseline_mix, dict) else None
+        if processed_baseline_mix is None and self.learning_mix:
+            processed_baseline_mix = self.learning_mix
+        self.baseline_mix = processed_baseline_mix.copy() if isinstance(processed_baseline_mix, dict) else {}
         # Nuevos campos para Fase 1 y 2
         self.order = order
         self.parent_content_id = ObjectId(parent_content_id) if parent_content_id else None
@@ -155,11 +160,17 @@ class TopicContent:
                     self.content['narrative_text'] = kwargs.pop('narrative_text')
                 else:
                     kwargs.pop('narrative_text')
-            if 'slide_plan' in kwargs:
-                if 'slide_plan' not in self.content:
-                    self.content['slide_plan'] = kwargs.pop('slide_plan')
-                else:
-                    kwargs.pop('slide_plan')
+                if 'slide_plan' in kwargs:
+                    if 'slide_plan' not in self.content:
+                        self.content['slide_plan'] = kwargs.pop('slide_plan')
+                    else:
+                        kwargs.pop('slide_plan')
+
+        if isinstance(self.content, dict):
+            if self.baseline_mix:
+                self.content.setdefault('baseline_mix', self.baseline_mix.copy())
+            elif isinstance(self.content.get('baseline_mix'), dict):
+                self.baseline_mix = self.content['baseline_mix']
 
 
         if kwargs:
@@ -181,6 +192,7 @@ class TopicContent:
             "personalization_markers": self.personalization_markers,
             "render_engine": self.render_engine,
             "learning_mix": self.learning_mix,
+            "baseline_mix": self.baseline_mix,
             "order": self.order,
             "status": self.status,
             "created_at": self.created_at,
@@ -268,6 +280,15 @@ class ContentResult:
         feedback: Optional[str] = None,
         metrics: Optional[Dict] = None,
         session_type: str = "content_interaction",
+        topic_id: Optional[str] = None,
+        content_type: Optional[str] = None,
+        variant_label: Optional[str] = None,
+        template_instance_id: Optional[str] = None,
+        baseline_mix: Optional[Dict] = None,
+        prediction_id: Optional[str] = None,
+        rl_context: Optional[Dict] = None,
+        session_data: Optional[Dict] = None,
+        learning_metrics: Optional[Dict] = None,
         _id: Optional[ObjectId] = None,
         recorded_at: Optional[datetime] = None,
     ):
@@ -283,6 +304,15 @@ class ContentResult:
         self.feedback = feedback
         self.metrics = metrics or {}
         self.session_type = session_type
+        self.topic_id = ObjectId(topic_id) if topic_id else None
+        self.content_type = content_type
+        self.variant_label = variant_label
+        self.template_instance_id = ObjectId(template_instance_id) if template_instance_id else None
+        self.baseline_mix = baseline_mix or {}
+        self.prediction_id = prediction_id
+        self.rl_context = rl_context or {}
+        self.session_data = session_data or {}
+        self.learning_metrics = learning_metrics or {}
         self.recorded_at = recorded_at or datetime.now()
 
     def to_dict(self) -> dict:
@@ -293,6 +323,10 @@ class ContentResult:
             "feedback": self.feedback,
             "metrics": self.metrics,
             "session_type": self.session_type,
+            "baseline_mix": self.baseline_mix,
+            "rl_context": self.rl_context,
+            "session_data": self.session_data,
+            "learning_metrics": self.learning_metrics,
             "recorded_at": self.recorded_at,
         }
         if self.content_id:
@@ -301,6 +335,16 @@ class ContentResult:
             data["virtual_content_id"] = self.virtual_content_id
         if self.evaluation_id:
             data["evaluation_id"] = self.evaluation_id
+        if self.topic_id:
+            data["topic_id"] = self.topic_id
+        if self.content_type:
+            data["content_type"] = self.content_type
+        if self.variant_label:
+            data["variant_label"] = self.variant_label
+        if self.template_instance_id:
+            data["template_instance_id"] = self.template_instance_id
+        if self.prediction_id:
+            data["prediction_id"] = self.prediction_id
         return data
 
 

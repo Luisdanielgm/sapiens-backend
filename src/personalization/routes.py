@@ -248,6 +248,22 @@ def get_vakr_statistics(student_id):
         )
 
 
+@personalization_bp.route('/health', methods=['GET'])
+@APIRoute.standard(auth_required_flag=False)
+def get_personalization_health():
+    """Devuelve el estado del servicio de personalización/RL."""
+    try:
+        health = personalization_service.get_service_health()
+        return APIRoute.success(data=health)
+    except Exception as e:
+        logging.error(f"Error en endpoint de salud de personalización: {str(e)}")
+        return APIRoute.error(
+            ErrorCodes.SERVER_ERROR,
+            "No se pudo obtener el estado de personalización",
+            status_code=500
+        )
+
+
 @personalization_bp.route('/statistics/vakr/<student_id>', methods=['GET'])
 @APIRoute.standard(auth_required_flag=True)
 def get_vakr_statistics_legacy(student_id):
@@ -368,40 +384,133 @@ def compare_student_analytics(student_id):
         )
 
 
-@personalization_bp.route('/health', methods=['GET'])
-def personalization_health_check():
+@personalization_bp.route('/analytics/selection-strategy', methods=['GET'])
+@APIRoute.standard(auth_required_flag=True)
+def get_selection_strategy_metrics():
     """
-    Endpoint de salud del módulo de personalización
+    Devuelve métricas agregadas reales de selección (sin mocks) para los dashboards.
     """
     try:
-        # Verificar conectividad con el modelo RL
-        rl_status = "unknown"
-        try:
-            import requests
-            response = requests.get("http://149.50.139.104:8000/health", timeout=5)
-            rl_status = "healthy" if response.status_code == 200 else "unhealthy"
-        except:
-            rl_status = "unreachable"
+        since_hours = int(request.args.get('since_hours', 168))
+        if since_hours <= 0:
+            return APIRoute.error(
+                ErrorCodes.VALIDATION_ERROR,
+                "since_hours debe ser un entero positivo",
+                status_code=400
+            )
+        student_id = request.args.get('student_id') or get_jwt_identity()
+        current_user_id = get_jwt_identity()
+        if current_user_id != student_id:
+            return APIRoute.error(
+                ErrorCodes.PERMISSION_DENIED,
+                "No tienes permisos para ver las métricas de este estudiante",
+                status_code=403
+            )
+        topic_id = request.args.get('topic_id')
 
-        return APIRoute.success(data={
-            "module": "personalization",
-            "status": "healthy",
-            "rl_model_status": rl_status,
-            "features": [
-                "adaptive_recommendations",
-                "learning_feedback",
-                "vakr_statistics",
-                "analytics_comparison"
-            ]
-        })
+        metrics = personalization_service.get_selection_strategy_metrics(
+            student_id=student_id,
+            topic_id=topic_id,
+            since_hours=since_hours
+        )
 
+        return APIRoute.success(data=metrics, message="Métricas de selección obtenidas")
+    except ValueError:
+        return APIRoute.error(
+            ErrorCodes.VALIDATION_ERROR,
+            "since_hours debe ser un entero positivo",
+            status_code=400
+        )
     except Exception as e:
-        logging.error(f"Error en health check de personalización: {str(e)}")
+        logging.error(f"Error obteniendo métricas de selección: {str(e)}")
         return APIRoute.error(
             ErrorCodes.SERVER_ERROR,
-            "Error interno del servidor",
+            "Error interno al calcular métricas",
             status_code=500
         )
+
+
+@personalization_bp.route('/analytics/recent-interactions', methods=['GET'])
+@APIRoute.standard(auth_required_flag=True)
+def get_recent_interactions():
+    """
+    Devuelve interacciones reales recientes para alimentar dashboards sin mocks.
+    """
+    try:
+        since_hours = int(request.args.get('since_hours', 168))
+        limit = int(request.args.get('limit', 20))
+        if since_hours <= 0 or limit <= 0:
+            return APIRoute.error(
+                ErrorCodes.VALIDATION_ERROR,
+                "limit y since_hours deben ser enteros positivos",
+                status_code=400
+            )
+        limit = min(max(limit, 1), 100)
+        student_id = request.args.get('student_id') or get_jwt_identity()
+        current_user_id = get_jwt_identity()
+        if current_user_id != student_id:
+            return APIRoute.error(
+                ErrorCodes.PERMISSION_DENIED,
+                "No tienes permisos para ver las interacciones de este estudiante",
+                status_code=403
+            )
+        topic_id = request.args.get('topic_id')
+
+        interactions = personalization_service.get_recent_interactions(
+            student_id=student_id,
+            topic_id=topic_id,
+            limit=limit,
+            since_hours=since_hours
+        )
+
+        return APIRoute.success(
+            data={
+                "limit": min(max(limit, 1), 100),
+                "since_hours": since_hours,
+                "interactions": interactions
+            },
+            message="Interacciones recientes obtenidas"
+        )
+    except ValueError:
+        return APIRoute.error(
+            ErrorCodes.VALIDATION_ERROR,
+            "limit y since_hours deben ser enteros positivos",
+            status_code=400
+        )
+    except Exception as e:
+        logging.error(f"Error obteniendo interacciones recientes: {str(e)}")
+        return APIRoute.error(
+            ErrorCodes.SERVER_ERROR,
+            "Error interno al recuperar interacciones",
+            status_code=500
+        )
+
+
+@personalization_bp.route('/analytics/rl-result', methods=['GET'])
+@APIRoute.standard(auth_required_flag=True)
+def get_rl_result():
+    """
+    Devuelve la última respuesta completa del modelo RL para auditoría.
+    """
+    try:
+        student_id = request.args.get('student_id') or get_jwt_identity()
+        topic_id = request.args.get('topic_id')
+        current_user_id = get_jwt_identity()
+        if current_user_id != student_id:
+            return APIRoute.error(
+                ErrorCodes.PERMISSION_DENIED,
+                "No tienes permisos para ver los resultados RL de este estudiante",
+                status_code=403
+            )
+
+        result = personalization_service.get_latest_rl_model_response(student_id, topic_id)
+        if not result:
+            return APIRoute.error(ErrorCodes.NOT_FOUND, "No se encontraron recomendaciones RL", status_code=404)
+
+        return APIRoute.success(data=result, message="Respuesta RL más reciente")
+    except Exception as e:
+        logging.error(f"Error recuperando resultado RL: {str(e)}")
+        return APIRoute.error(ErrorCodes.SERVER_ERROR, "Error interno al recuperar respuesta RL", status_code=500)
 
 
 def _calculate_percentile_ranking(student_stats):

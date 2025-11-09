@@ -1,4 +1,5 @@
 from typing import Tuple, List, Dict, Optional, Any
+from collections import defaultdict
 from bson import ObjectId
 from datetime import datetime, timedelta
 import logging
@@ -1519,11 +1520,25 @@ class FastVirtualModuleGenerator(VerificationBaseService):
         """
         Genera contenidos usando el método tradicional.
         """
+        parent_variant_counters: Dict[str, int] = defaultdict(int)
+        parent_order_cache: Dict[str, Optional[float]] = {}
+        base_order_state = {"next_order": 1}
         for content in selected_contents:
-            self._create_traditional_virtual_content(virtual_topic_id, student_id, content, cognitive_profile)
-    
+            self._create_traditional_virtual_content(
+                virtual_topic_id,
+                student_id,
+                content,
+                cognitive_profile,
+                parent_variant_counters,
+                parent_order_cache,
+                base_order_state
+            )
+
     def _create_traditional_virtual_content(self, virtual_topic_id: str, student_id: str, 
-                                          content: Dict, cognitive_profile: Dict):
+                                          content: Dict, cognitive_profile: Dict,
+                                          parent_variant_counters: Dict[str, int],
+                                          parent_order_cache: Dict[str, Optional[float]],
+                                          base_order_state: Dict[str, float]):
         """
         Crea contenido virtual usando el método tradicional.
         """
@@ -1538,6 +1553,13 @@ class FastVirtualModuleGenerator(VerificationBaseService):
             # El contenido se usa tal como está almacenado en la base de datos
             personalized_content = content.get("content", "")
             
+            order_value = self._determine_virtual_order(
+                content,
+                parent_variant_counters,
+                parent_order_cache,
+                base_order_state
+            )
+
             virtual_content_data = {
                 "virtual_topic_id": ObjectId(virtual_topic_id),
                 "content_id": content["_id"],
@@ -1557,6 +1579,7 @@ class FastVirtualModuleGenerator(VerificationBaseService):
                     "interactions": []
                 },
                 "status": "active",
+                "order": order_value,
                 "created_at": datetime.now(),
                 "updated_at": datetime.now()
             }
@@ -1574,6 +1597,68 @@ class FastVirtualModuleGenerator(VerificationBaseService):
         except Exception as e_content:
             logging.error(f"Error creando contenido virtual tradicional para {content.get('_id')}: {e_content}")
     
+    def _determine_virtual_order(
+        self,
+        content: Dict,
+        parent_variant_counters: Dict[str, int],
+        parent_order_cache: Dict[str, Optional[float]],
+        base_order_state: Dict[str, float],
+    ) -> float:
+        """
+        Calcula el valor de orden para el contenido virtual, intercalando variantes inmediatamente
+        después de su diapositiva padre usando incrementos decimales.
+        """
+        order_value = content.get("order")
+        numeric_order: Optional[float] = None
+        if isinstance(order_value, (int, float)):
+            numeric_order = float(order_value)
+        else:
+            try:
+                numeric_order = float(order_value)
+            except (TypeError, ValueError):
+                numeric_order = None
+
+        parent_id = content.get("parent_content_id")
+        if parent_id:
+            if isinstance(parent_id, ObjectId):
+                parent_id_obj = parent_id
+                parent_id_str = str(parent_id)
+            else:
+                parent_id_str = str(parent_id)
+                try:
+                    parent_id_obj = ObjectId(parent_id)
+                except Exception:
+                    parent_id_obj = None
+
+            parent_order = parent_order_cache.get(parent_id_str)
+            if parent_order is None:
+                parent_doc = None
+                if parent_id_obj:
+                    parent_doc = self.db.topic_contents.find_one(
+                        {"_id": parent_id_obj}, {"order": 1}
+                    )
+                parent_order = float(parent_doc.get("order")) if parent_doc and isinstance(parent_doc.get("order"), (int, float)) else None
+                parent_order_cache[parent_id_str] = parent_order
+
+            if parent_order is None:
+                parent_order = numeric_order if numeric_order is not None else 0.0
+
+            variant_meta = content.get("variant") or {}
+            variant_index = variant_meta.get("variant_index")
+            if isinstance(variant_index, (int, float)):
+                variant_index_value = int(variant_index)
+            else:
+                parent_variant_counters[parent_id_str] += 1
+                variant_index_value = parent_variant_counters[parent_id_str] - 1
+            return round(float(parent_order) + (variant_index_value + 1) / 10.0, 4)
+
+        if numeric_order is not None:
+            return numeric_order
+
+        next_order = float(base_order_state.get("next_order", 1))
+        base_order_state["next_order"] = next_order + 1
+        return next_order
+
     def _calculate_content_priority(self, content_type: str) -> int:
         """
         Calcula la prioridad de generación basada en el tipo de contenido.
@@ -2068,9 +2153,13 @@ class VirtualContentProgressService(VerificationBaseService):
             from src.content.services import ContentResultService
             
             # Preparar datos para ContentResult
+            original_content_ref = (
+                virtual_content.get("content_id")
+                or virtual_content.get("original_content_id")
+            )
             content_result_data = {
                 "virtual_content_id": str(virtual_content["_id"]),
-                "content_id": str(virtual_content.get("original_content_id")) if virtual_content.get("original_content_id") else None,
+                "content_id": str(original_content_ref) if original_content_ref else None,
                 "student_id": student_id,
                 "score": score,
                 "feedback": "Contenido completado automáticamente",

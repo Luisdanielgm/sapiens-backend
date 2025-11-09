@@ -588,3 +588,6 @@ class EvaluationService:
                 
         except Exception as e:
             print(f"Error al recalcular calificaciones: {str(e)}")
+
+
+evaluation_service = EvaluationService()

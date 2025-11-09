@@ -12,6 +12,7 @@ from src.shared.standardization import APIRoute, ErrorCodes
 from .services import (
     ContentService,
     ContentTypeService,
+    ContentResultService,
 )
 from src.content.template_integration_service import TemplateIntegrationService
 from src.shared.constants import ROLES
@@ -21,8 +22,7 @@ content_bp = Blueprint('content', __name__, url_prefix='/api/content')
 # Servicios
 content_service = ContentService()
 content_type_service = ContentTypeService()
-# virtual_content_service = VirtualContentService()  # No existe en services.py
-# content_result_service = ContentResultService()    # No existe en services.py
+content_result_service = ContentResultService()
 template_integration_service = TemplateIntegrationService()
 
 # Helper for deprecation responses with headers
@@ -1271,12 +1271,11 @@ def record_result():
     }
     """
     try:
-        data = request.json
-        data['student_id'] = data.get('student_id', request.user_id)
-        
-        # TODO: Implementar ContentResultService
-        # success, result = content_result_service.record_result(data)
-        success, result = False, "ContentResultService no implementado"
+        data = request.json or {}
+        fallback_student = getattr(request, 'user_id', None) or get_jwt_identity()
+        data['student_id'] = data.get('student_id', fallback_student)
+
+        success, result = content_result_service.record_result(data)
 
         if success:
             return APIRoute.success(
@@ -1316,14 +1315,16 @@ def get_student_results(student_id):
         
         virtual_content_id = request.args.get('virtual_content_id')
         content_type = request.args.get('content_type')
-        
-        # TODO: Implementar ContentResultService
-        # results = content_result_service.get_student_results(
-        #     student_id, 
-        #     virtual_content_id=virtual_content_id,
-        #     content_type=content_type
-        # )
-        results = []  # Temporal hasta implementar ContentResultService
+        evaluation_id = request.args.get('evaluation_id')
+        topic_id = request.args.get('topic_id')
+
+        results = content_result_service.get_student_results(
+            student_id,
+            content_type=content_type,
+            virtual_content_id=virtual_content_id,
+            evaluation_id=evaluation_id,
+            topic_id=topic_id,
+        )
 
         return APIRoute.success(data={"results": results})
         
@@ -1345,10 +1346,12 @@ def get_my_results():
     try:
         student_id = get_jwt_identity()
         content_type = request.args.get('content_type')
-        
-        # TODO: Implementar ContentResultService
-        # results = content_result_service.get_student_results(student_id, content_type)
-        results = []  # Temporal hasta implementar ContentResultService
+        topic_id = request.args.get('topic_id')
+        results = content_result_service.get_student_results(
+            student_id,
+            content_type=content_type,
+            topic_id=topic_id,
+        )
 
         return APIRoute.success(data={"results": results})
         
@@ -1652,7 +1655,13 @@ def create_content_from_template():
         "props": {"param1": "value1"},
         "assets": [{"id": "asset1", "name": "imagen.jpg", "url": "...", "type": "image"}],
         "learning_mix": {"V": 70, "A": 10, "K": 15, "R": 5},
-        "content_type": "diagram" // opcional
+        "content_type": "diagram", // opcional
+        "template_metadata": {
+            "interactive_summary": "...",
+            "learning_objectives": ["..."],
+            "estimated_duration_seconds": 300,
+            "interaction_mode": "game"
+        }
     }
     """
     try:
@@ -1668,13 +1677,15 @@ def create_content_from_template():
                 return APIRoute.error(ErrorCodes.VALIDATION_ERROR, f"Campo requerido: {field}")
         
         # Crear contenido desde plantilla
+        template_metadata = data.get("template_metadata") if "template_metadata" in data else data.get("metadata")
         success, result = template_integration_service.create_content_from_template(
             template_id=data["template_id"],
             topic_id=data["topic_id"],
             props=data.get("props"),
             assets=data.get("assets"),
             learning_mix=data.get("learning_mix"),
-            content_type=data.get("content_type")
+            content_type=data.get("content_type"),
+            template_metadata=template_metadata
         )
         
         if success:

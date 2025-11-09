@@ -4,9 +4,13 @@ Servicios para personalización adaptativa basada en modelo RL y estadísticas V
 
 import logging
 import json
+import os
+import time
 import requests
 from datetime import datetime, timedelta
 from typing import Dict, List, Optional, Any, Tuple
+from collections import Counter
+import threading
 from bson import ObjectId
 
 from src.shared.database import get_db
@@ -26,7 +30,14 @@ class AdaptivePersonalizationService:
 
     def __init__(self):
         self.db = get_db()
-        self.rl_api_url = "http://149.50.139.104:8000/api/tools/msp/execute"
+        self.rl_api_url = os.getenv("RL_TUTOR_TOOL_URL", "http://149.50.139.104:8000/api/tools/msp/execute")
+        self.rl_request_timeout = int(os.getenv("RL_TUTOR_TOOL_TIMEOUT", "12"))
+        self.rl_request_retries = int(os.getenv("RL_TUTOR_TOOL_RETRIES", "2"))
+        self.rl_circuit_breaker_threshold = int(os.getenv("RL_CIRCUIT_BREAKER_THRESHOLD", "3"))
+        self.rl_circuit_reset_seconds = int(os.getenv("RL_CIRCUIT_BREAKER_RESET_SECONDS", "60"))
+        self._rl_failure_count = 0
+        self._rl_circuit_open_until: Optional[datetime] = None
+        self._circuit_lock = threading.Lock()
         self.content_results_collection = self.db.content_results
         self.cognitive_profiles_collection = self.db.cognitive_profiles
         self.recommendations_collection = self.db.adaptive_recommendations
@@ -84,6 +95,8 @@ class AdaptivePersonalizationService:
                     "learning_path_adjustment": recommendations["learning_path_adjustment"],
                     "confidence_score": recommendations["confidence_score"],
                     "reasoning": recommendations["reasoning"],
+                    "prediction_id": None,
+                    "rl_metadata": {},
                     "fallback_mode": True,
                     "rl_error": rl_response.error_message
                 }
@@ -111,6 +124,8 @@ class AdaptivePersonalizationService:
                 "learning_path_adjustment": recommendations["learning_path_adjustment"],
                 "confidence_score": recommendations["confidence_score"],
                 "reasoning": recommendations["reasoning"],
+                "prediction_id": recommendations.get("learning_path_adjustment", {}).get("prediction_id"),
+                "rl_metadata": recommendations.get("rl_metadata", {}),
                 "recommendation_id": str(recommendation_doc._id)
             }
 
@@ -118,14 +133,93 @@ class AdaptivePersonalizationService:
             logging.error(f"Error obteniendo recomendaciones adaptativas: {str(e)}")
             return False, {"error": "Error interno del servidor", "message": str(e)}
 
+    def get_latest_rl_model_response(
+        self,
+        student_id: str,
+        topic_id: Optional[str] = None
+    ) -> Optional[Dict[str, Any]]:
+        filters: Dict[str, Any] = {
+            "student_id": self._safe_object_id(student_id)
+        }
+        if topic_id:
+            topic_oid = self._safe_object_id(topic_id)
+            if topic_oid:
+                filters["topic_id"] = topic_oid
+
+        doc = (
+            self.recommendations_collection
+            .find(filters)
+            .sort("created_at", -1)
+            .limit(1)
+        )
+        latest = list(doc)
+        if not latest:
+            return None
+        latest = latest[0]
+        latest["student_id"] = str(latest["student_id"])
+        latest["topic_id"] = str(latest["topic_id"])
+        latest["_id"] = str(latest["_id"])
+        latest["rl_model_response"] = latest.get("rl_model_response") or {}
+        return latest
+
+    def get_service_health(self) -> Dict:
+        """Retorna el estado básico del servicio RL y el modo fallback."""
+        status = {
+            "rl_service": {
+                "url": self.rl_api_url,
+                "reachable": False,
+                "status_code": None,
+                "message": None,
+            },
+            "fallback_mode": False,
+            "checked_at": datetime.now().isoformat(),
+            "rl_info": None,
+        }
+
+        info_url = os.getenv(
+            "RL_TUTOR_TOOL_INFO_URL",
+            "http://149.50.139.104:8000/api/tools/msp/info?group=rl_tutor_tool"
+        )
+        check_url = os.getenv("RL_HEALTH_CHECK_URL", info_url)
+        try:
+            timeout = int(os.getenv("RL_HEALTH_CHECK_TIMEOUT", "3"))
+        except (ValueError, TypeError):
+            timeout = 3
+
+        try:
+            info_resp = requests.get(info_url, timeout=timeout)
+            if info_resp.status_code == 200:
+                status["rl_info"] = info_resp.json()
+
+            response = requests.get(check_url, timeout=timeout)
+            status["rl_service"]["status_code"] = response.status_code
+            if response.status_code < 500:
+                status["rl_service"]["reachable"] = True
+            else:
+                status["rl_service"]["message"] = f"Respuesta inesperada: {response.status_code}"
+                status["fallback_mode"] = True
+        except requests.RequestException as exc:
+            status["rl_service"]["message"] = str(exc)
+            status["fallback_mode"] = True
+        except Exception as exc:
+            status["rl_service"]["message"] = str(exc)
+            status["fallback_mode"] = True
+        circuit_open = self._is_circuit_open()
+        status["circuit_breaker"] = {
+            "open": circuit_open,
+            "opens_at": self._rl_circuit_open_until.isoformat() if self._rl_circuit_open_until else None,
+        }
+        status["fallback_mode"] = status["fallback_mode"] or circuit_open
+        return status
+
     def _generate_fallback_recommendations(self, student_id: str, topic_id: str, rl_context: Dict) -> Dict:
         """
         Genera recomendaciones básicas cuando el servicio RL externo no está disponible
         """
         try:
             # Obtener perfil cognitivo del contexto
-            cognitive_profile = rl_context.get("student_profile", {})
-            recent_interactions = rl_context.get("recent_interactions", [])
+            cognitive_profile = rl_context.get("cognitive_profile", {})
+            recent_interactions = rl_context.get("recent_history", [])
             vakr_stats = rl_context.get("vakr_statistics", {})
             
             # Recomendaciones básicas basadas en perfil cognitivo
@@ -203,12 +297,12 @@ class AdaptivePersonalizationService:
             
             # Analizar rendimiento reciente si está disponible
             if recent_interactions:
-                avg_score = sum(interaction.get("score", 0) for interaction in recent_interactions) / len(recent_interactions)
+                avg_score = sum(interaction.get("score", 0) or 0 for interaction in recent_interactions) / len(recent_interactions)
                 
-                if avg_score < 60:
+                if avg_score < 0.6:
                     learning_path_adjustment["difficulty_adjustment"] = -1
                     learning_path_adjustment["recommended_duration"] = 45
-                elif avg_score > 85:
+                elif avg_score > 0.85:
                     learning_path_adjustment["difficulty_adjustment"] = 1
                     learning_path_adjustment["recommended_duration"] = 25
             
@@ -251,44 +345,201 @@ class AdaptivePersonalizationService:
                 "reasoning": "Recomendaciones mínimas por error en sistema de fallback"
             }
 
+    def get_selection_strategy_metrics(
+        self,
+        student_id: Optional[str] = None,
+        topic_id: Optional[str] = None,
+        since_hours: int = 168
+    ) -> Dict[str, Any]:
+        """
+        Agrega métricas de selección para dashboards sin depender de mocks.
+        """
+        filters: Dict[str, Any] = {
+            "metrics.selection_strategy": {"$exists": True}
+        }
+        if student_id:
+            oid = self._safe_object_id(student_id)
+            if oid:
+                filters["student_id"] = oid
+        if topic_id:
+            oid = self._safe_object_id(topic_id)
+            if oid:
+                filters["topic_id"] = oid
+        since_date = datetime.now() - timedelta(hours=since_hours)
+        filters["recorded_at"] = {"$gte": since_date}
+
+        pipeline = [
+            {"$match": filters},
+            {
+                "$group": {
+                    "_id": {
+                        "selection_strategy": "$metrics.selection_strategy",
+                        "selection_source": "$metrics.selection_source"
+                    },
+                    "count": {"$sum": 1},
+                    "avg_rl_confidence": {"$avg": "$metrics.rl_confidence"},
+                    "avg_selection_confidence": {"$avg": "$metrics.selection_confidence"},
+                    "avg_vark_score": {"$avg": "$metrics.vark_score"},
+                    "avg_final_score": {"$avg": "$metrics.final_score"},
+                    "fallback_events": {
+                        "$sum": {
+                            "$cond": [
+                                {"$eq": ["$metrics.fallback_mode", True]},
+                                1,
+                                0
+                            ]
+                        }
+                    }
+                }
+            },
+            {"$sort": {"count": -1}}
+        ]
+
+        results = list(self.content_results_collection.aggregate(pipeline))
+        metrics = []
+        for entry in results:
+            metrics.append({
+                "selection_strategy": entry["_id"].get("selection_strategy"),
+                "selection_source": entry["_id"].get("selection_source"),
+                "count": entry.get("count", 0),
+                "avg_rl_confidence": entry.get("avg_rl_confidence", 0),
+                "avg_selection_confidence": entry.get("avg_selection_confidence", 0),
+                "avg_vark_score": entry.get("avg_vark_score", 0),
+                "avg_final_score": entry.get("avg_final_score", 0),
+                "fallback_events": entry.get("fallback_events", 0),
+                "fallback_ratio": (
+                    entry.get("fallback_events", 0) / entry.get("count", 1) if entry.get("count") else 0
+                ),
+            })
+
+        return {
+            "since_hours": since_hours,
+            "filters": {
+                "student_id": student_id,
+                "topic_id": topic_id
+            },
+            "metrics": metrics
+        }
+
+    def get_recent_interactions(
+        self,
+        student_id: str,
+        topic_id: Optional[str] = None,
+        limit: int = 20,
+        since_hours: int = 168
+    ) -> List[Dict[str, Any]]:
+        filters: Dict[str, Any] = {}
+        student_oid = self._safe_object_id(student_id)
+        if student_oid:
+            filters["student_id"] = student_oid
+        if topic_id:
+            topic_oid = self._safe_object_id(topic_id)
+            if topic_oid:
+                filters["topic_id"] = topic_oid
+
+        if since_hours > 0:
+            since_date = datetime.now() - timedelta(hours=since_hours)
+            filters["recorded_at"] = {"$gte": since_date}
+
+        cursor = (
+            self.content_results_collection.find(filters)
+            .sort("recorded_at", -1)
+            .limit(max(1, min(limit, 100)))
+        )
+
+        interactions = []
+        for doc in cursor:
+            interactions.append({
+                "id": str(doc["_id"]),
+                "student_id": str(doc["student_id"]),
+                "content_id": str(doc.get("content_id") or doc.get("virtual_content_id")),
+                "virtual_content_id": str(doc["virtual_content_id"]) if doc.get("virtual_content_id") else None,
+                "topic_id": str(doc["topic_id"]) if doc.get("topic_id") else None,
+                "score": doc.get("score"),
+                "variant_label": doc.get("variant_label"),
+                "prediction_id": doc.get("prediction_id"),
+                "selection_strategy": doc.get("metrics", {}).get("selection_strategy"),
+                "selection_source": doc.get("metrics", {}).get("selection_source"),
+                "rl_confidence": doc.get("metrics", {}).get("rl_confidence"),
+                "fallback_mode": doc.get("metrics", {}).get("fallback_mode"),
+                "recorded_at": doc.get("recorded_at").isoformat() if isinstance(doc.get("recorded_at"), datetime) else doc.get("recorded_at"),
+                "session_data": doc.get("session_data", {}),
+                "learning_metrics": doc.get("learning_metrics", {}),
+                "rl_context": doc.get("rl_context", {})
+            })
+
+        return interactions
+
     def submit_learning_feedback(self, feedback_data: Dict) -> Tuple[bool, str]:
         """
         Envía feedback de aprendizaje al modelo RL
-
-        Args:
-            feedback_data: Datos del feedback
-
-        Returns:
-            Tuple[bool, str]: (éxito, mensaje)
         """
         try:
-            # 1. Crear objeto de feedback
+            engagement_metrics = feedback_data.get("engagement_metrics") or {}
+            if not isinstance(engagement_metrics, dict):
+                engagement_metrics = {}
+
+            context_block = feedback_data.get("context_data") or {}
+            if not isinstance(context_block, dict):
+                context_block = {}
+
+            # 1. Crear objeto de feedback local
             feedback = LearningFeedback(
                 student_id=feedback_data["student_id"],
                 content_id=feedback_data["content_id"],
                 interaction_type=feedback_data["interaction_type"],
                 performance_score=feedback_data["performance_score"],
-                engagement_metrics=feedback_data.get("engagement_metrics", {}),
-                context_data=feedback_data.get("context_data", {})
+                engagement_metrics=engagement_metrics,
+                context_data=context_block
             )
 
-            # 2. Guardar feedback localmente
             self.feedback_collection.insert_one(feedback.to_dict())
 
-            # 3. Preparar datos para RL
+            # 2. Preparar payload estructurado para el RL
+            session_block = (feedback_data.get("session_data") or {}).copy()
+            session_block.setdefault("content_id", feedback_data["content_id"])
+            session_block.setdefault("topic", context_block.get("topic") or context_block.get("topic_id"))
+            session_block.setdefault("session_type", context_block.get("session_type"))
+            session_block.setdefault("prediction_id", context_block.get("prediction_id") or feedback_data.get("prediction_id"))
+
+            if "time_spent" not in session_block and engagement_metrics.get("time_spent_seconds") is not None:
+                session_block["time_spent"] = engagement_metrics.get("time_spent_seconds")
+
+            performance_metrics = feedback_data.get("performance_metrics")
+            if not isinstance(performance_metrics, dict):
+                performance_metrics = {
+                    "score": self._normalize_score_value(feedback_data.get("performance_score")),
+                    "completion_time": engagement_metrics.get("time_spent_seconds"),
+                    "interaction_count": engagement_metrics.get("interaction_count") or engagement_metrics.get("clicks_count"),
+                    "engagement_level": context_block.get("engagement_level"),
+                    "difficulty_rating": context_block.get("difficulty_level")
+                }
+            performance_metrics = {k: v for k, v in performance_metrics.items() if v is not None}
+
+            learning_outcomes = feedback_data.get("learning_outcomes") or context_block.get("learning_outcomes") or {}
+            contextual_factors = feedback_data.get("contextual_factors") or context_block or {}
+            user_feedback = feedback_data.get("user_feedback") or {}
+
+            rl_context = {
+                "session_data": session_block,
+                "performance_metrics": performance_metrics,
+                "learning_outcomes": learning_outcomes,
+                "contextual_factors": contextual_factors,
+                "user_feedback": user_feedback
+            }
+
+            # 3. Enviar feedback al modelo RL (asincrónico)
             rl_request = RLModelRequest(
                 student_id=feedback_data["student_id"],
-                context_data={
-                    "feedback_type": feedback_data["interaction_type"],
-                    "performance_score": feedback_data["performance_score"],
-                    "engagement_metrics": feedback_data.get("engagement_metrics", {}),
-                    "content_id": feedback_data["content_id"]
-                },
+                context_data=rl_context,
                 action_type="submit_feedback",
-                additional_params={"feedback_id": str(feedback._id)}
+                additional_params={
+                    "feedback_id": str(feedback._id),
+                    "prediction_id": session_block.get("prediction_id"),
+                    "content_id": feedback_data["content_id"]
+                }
             )
 
-            # 4. Enviar a modelo RL (sin bloquear la respuesta)
             try:
                 self._call_rl_model_async(rl_request)
                 logging.info(f"Feedback enviado al modelo RL: {str(feedback._id)}")
@@ -353,87 +604,278 @@ class AdaptivePersonalizationService:
 
     def _prepare_rl_context(self, student_id: str, topic_id: str, context_data: Dict) -> Dict:
         """
-        Prepara el contexto para el modelo RL
+        Prepara el contexto estructurado que espera el modelo RL.
         """
         try:
-            # Obtener perfil cognitivo
-            cognitive_profile = self.cognitive_profiles_collection.find_one({
-                "user_id": ObjectId(student_id),
-                "status": "completed"
+            cognitive_profile_doc = self.cognitive_profiles_collection.find_one({
+                "user_id": ObjectId(student_id)
             })
+            cognitive_profile = self._format_cognitive_profile(cognitive_profile_doc)
 
-            # Obtener historial reciente de interacciones
-            recent_interactions = list(self.content_results_collection.find({
-                "student_id": ObjectId(student_id),
-                "recorded_at": {"$gte": datetime.now() - timedelta(days=7)}
-            }).sort("recorded_at", -1).limit(20))
+            recent_results = list(
+                self.content_results_collection
+                .find({
+                    "student_id": ObjectId(student_id),
+                    "recorded_at": {"$gte": datetime.now() - timedelta(days=7)}
+                })
+                .sort("recorded_at", -1)
+                .limit(20)
+            )
+            recent_history = [self._format_recent_interaction(result) for result in recent_results]
 
-            # Obtener estadísticas V-A-K-R recientes
-            vakr_stats = self.vakr_stats_collection.find_one({
-                "student_id": ObjectId(student_id)
-            }, sort=[("created_at", -1)])
+            vakr_stats_doc = self.vakr_stats_collection.find_one(
+                {"student_id": ObjectId(student_id)},
+                sort=[("created_at", -1)]
+            )
+            vakr_statistics = self._summarize_vakr_stats(vakr_stats_doc)
+
+            session_context = self._build_session_context(topic_id, context_data, recent_history)
+            topic_context = {
+                "topic_id": topic_id,
+                "recent_score": session_context.get("previous_performance"),
+                "total_recent_interactions": len(recent_history)
+            }
 
             return {
-                "student_profile": cognitive_profile or {},
-                "recent_interactions": recent_interactions,
-                "vakr_statistics": vakr_stats or {},
-                "current_topic": topic_id,
-                "context_data": context_data,
-                "timestamp": datetime.now().isoformat()
+                "cognitive_profile": cognitive_profile,
+                "session_context": session_context,
+                "recent_history": recent_history,
+                "vakr_statistics": vakr_statistics,
+                "topic_context": topic_context
             }
 
         except Exception as e:
             logging.error(f"Error preparando contexto RL: {str(e)}")
             return {
-                "student_profile": {},
-                "recent_interactions": [],
+                "cognitive_profile": {},
+                "session_context": self._build_session_context(topic_id, context_data, []),
+                "recent_history": [],
                 "vakr_statistics": {},
-                "current_topic": topic_id,
-                "context_data": context_data,
-                "timestamp": datetime.now().isoformat()
+                "topic_context": {"topic_id": topic_id, "total_recent_interactions": 0}
             }
+
+    def _format_cognitive_profile(self, profile_doc: Optional[Dict]) -> Dict:
+        if not profile_doc:
+            return {}
+
+        profile_payload = {}
+        raw_profile = profile_doc.get("profile")
+        if isinstance(raw_profile, str):
+            try:
+                profile_payload = json.loads(raw_profile)
+            except Exception:
+                profile_payload = {}
+        elif isinstance(raw_profile, dict):
+            profile_payload = raw_profile
+
+        learning_style = profile_doc.get("learning_style") or profile_payload.get("learning_style") or {}
+        diagnosis = profile_doc.get("diagnosis") or profile_payload.get("diagnosis") or []
+        cognitive_strengths = profile_doc.get("cognitive_strengths") or profile_payload.get("cognitive_strengths") or []
+        recommended_strategies = profile_doc.get("recommended_strategies") or profile_payload.get("recommended_strategies") or []
+
+        return {
+            "learning_style": self._normalize_learning_style(learning_style),
+            "diagnosis": diagnosis,
+            "cognitive_strengths": cognitive_strengths,
+            "recommended_strategies": recommended_strategies
+        }
+
+    def _normalize_learning_style(self, learning_style: Dict) -> Dict:
+        if not isinstance(learning_style, dict):
+            learning_style = {}
+
+        defaults = {
+            "visual": learning_style.get("visual") or learning_style.get("V") or 0,
+            "auditory": learning_style.get("auditory") or learning_style.get("A") or 0,
+            "reading_writing": learning_style.get("reading_writing") or learning_style.get("R") or 0,
+            "kinesthetic": learning_style.get("kinesthetic") or learning_style.get("K") or 0
+        }
+
+        total = sum(value for value in defaults.values() if isinstance(value, (int, float)))
+        if total > 0:
+            return {key: round((value / total) * 100, 2) for key, value in defaults.items()}
+        return {key: 0 for key in defaults}
+
+    def _format_recent_interaction(self, result: Dict) -> Dict:
+        metrics = result.get("metrics") or {}
+        session_data = result.get("session_data") or {}
+        learning_metrics = result.get("learning_metrics") or {}
+
+        recorded_at = result.get("recorded_at")
+        if isinstance(recorded_at, datetime):
+            timestamp = recorded_at.isoformat()
+        else:
+            timestamp = datetime.now().isoformat()
+
+        completion_time = (
+            session_data.get("time_spent")
+            or metrics.get("completion_time")
+            or metrics.get("time_spent_seconds")
+        )
+        interaction_count = (
+            session_data.get("interactions")
+            or metrics.get("interaction_count")
+            or metrics.get("interactions")
+        )
+
+        return {
+            "content_id": str(result.get("content_id")) if result.get("content_id") else None,
+            "virtual_content_id": str(result.get("virtual_content_id")) if result.get("virtual_content_id") else None,
+            "topic_id": str(result.get("topic_id")) if result.get("topic_id") else None,
+            "content_type": result.get("content_type"),
+            "score": result.get("score"),
+            "completion_time": completion_time,
+            "interaction_count": interaction_count,
+            "timestamp": timestamp,
+            "variant_label": result.get("variant_label"),
+            "baseline_mix": result.get("baseline_mix"),
+            "template_instance_id": str(result.get("template_instance_id")) if result.get("template_instance_id") else None,
+            "prediction_id": result.get("prediction_id"),
+            "engagement_level": learning_metrics.get("engagement_level"),
+            "difficulty_rating": learning_metrics.get("difficulty_rating"),
+            "rl_context": result.get("rl_context", {})
+        }
+
+    def _build_session_context(self, topic_id: str, context_data: Dict, recent_history: List[Dict]) -> Dict:
+        context_data = context_data or {}
+        now = datetime.now()
+        scores = [entry.get("score") for entry in recent_history if isinstance(entry.get("score"), (int, float))]
+        previous_performance = round(sum(scores) / len(scores), 4) if scores else None
+
+        completion_times = [
+            entry.get("completion_time") for entry in recent_history
+            if isinstance(entry.get("completion_time"), (int, float))
+        ]
+        inferred_duration = round(sum(completion_times) / len(completion_times), 2) if completion_times else None
+
+        session_duration = context_data.get("session_duration") or context_data.get("time_spent") or inferred_duration or 0
+        session_type = context_data.get("session_type") or context_data.get("request_type") or "learning"
+
+        content_preference = context_data.get("content_type_preference")
+        if not content_preference and recent_history:
+            counts = Counter(entry.get("content_type") for entry in recent_history if entry.get("content_type"))
+            if counts:
+                content_preference = counts.most_common(1)[0][0]
+
+        difficulty_level = context_data.get("difficulty_level")
+        if not difficulty_level:
+            if scores and previous_performance is not None:
+                if previous_performance >= 0.85:
+                    difficulty_level = "advanced"
+                elif previous_performance <= 0.6:
+                    difficulty_level = "basic"
+                else:
+                    difficulty_level = "medium"
+            else:
+                difficulty_level = "medium"
+
+        return {
+            "current_topic": topic_id,
+            "session_type": session_type,
+            "session_duration": session_duration,
+            "previous_performance": previous_performance,
+            "content_type_preference": content_preference,
+            "difficulty_level": difficulty_level,
+            "time_of_day": now.strftime("%H:%M"),
+            "day_of_week": now.strftime("%A"),
+            "device_type": context_data.get("device_type"),
+            "learning_environment": context_data.get("environment"),
+            "module_phase": context_data.get("module_phase")
+        }
+
+    def _summarize_vakr_stats(self, vakr_doc: Optional[Dict]) -> Dict:
+        if not vakr_doc:
+            return {}
+
+        return {
+            "vakr_scores": vakr_doc.get("vakr_scores", {}),
+            "dominant_styles": vakr_doc.get("dominant_styles", []),
+            "content_type_effectiveness": vakr_doc.get("content_type_effectiveness", {}),
+            "analysis_period_days": vakr_doc.get("analysis_period_days", 30),
+            "recommendations": vakr_doc.get("recommendations", [])
+        }
+
+    def _normalize_score_value(self, score: Optional[float]) -> Optional[float]:
+        if score is None:
+            return None
+        try:
+            value = float(score)
+            if value > 1:
+                value = value / 100.0
+            return max(0.0, min(1.0, value))
+        except (TypeError, ValueError):
+            return None
+
+    def _map_difficulty_to_path(self, difficulty_adjustment: Optional[float]) -> str:
+        if difficulty_adjustment is None:
+            return "maintain"
+        if difficulty_adjustment >= 0.5:
+            return "accelerate"
+        if difficulty_adjustment <= -0.5:
+            return "slow_down"
+        return "maintain"
 
     def _call_rl_model(self, rl_request: RLModelRequest) -> RLModelResponse:
         """
         Llama al modelo RL externo
         """
-        try:
-            payload = rl_request.to_rl_payload()
+        payload = rl_request.to_rl_payload()
+        last_error = None
 
-            response = requests.post(
-                self.rl_api_url,
-                json=payload,
-                timeout=10  # 10 segundos timeout
-            )
+        if self._is_circuit_open():
+            return RLModelResponse(success=False, error_message="Circuit breaker abierto por errores repetidos en el servicio RL")
 
-            if response.status_code == 200:
-                response_data = response.json()
-                return RLModelResponse(
-                    success=True,
-                    recommendations=response_data.get("recommendations", []),
-                    raw_response=response_data
-                )
-            else:
-                return RLModelResponse(
-                    success=False,
-                    error_message=f"Error HTTP {response.status_code}: {response.text}"
+        for attempt in range(max(1, self.rl_request_retries)):
+            try:
+                response = requests.post(
+                    self.rl_api_url,
+                    json=payload,
+                    timeout=self.rl_request_timeout
                 )
 
-        except requests.exceptions.Timeout:
-            return RLModelResponse(
-                success=False,
-                error_message="Timeout en la comunicación con el modelo RL"
-            )
-        except requests.exceptions.RequestException as e:
-            return RLModelResponse(
-                success=False,
-                error_message=f"Error de conexión con el modelo RL: {str(e)}"
-            )
-        except Exception as e:
-            return RLModelResponse(
-                success=False,
-                error_message=f"Error interno en llamada RL: {str(e)}"
-            )
+                if response.status_code == 200:
+                    response_data = response.json()
+                    result_block = (
+                        (response_data.get("data") or {}).get("result")
+                        or response_data.get("result")
+                        or response_data
+                    )
+                    self._record_rl_success()
+                    return RLModelResponse(
+                        success=True,
+                        recommendations=result_block,
+                        raw_response=result_block
+                    )
+
+                last_error = f"Error HTTP {response.status_code}: {response.text}"
+
+            except requests.exceptions.Timeout:
+                last_error = "Timeout en la comunicación con el modelo RL"
+            except requests.exceptions.RequestException as e:
+                last_error = f"Error de conexión con el modelo RL: {str(e)}"
+            except Exception as e:
+                last_error = f"Error interno en llamada RL: {str(e)}"
+
+            if attempt < self.rl_request_retries - 1:
+                time.sleep(1)
+
+        self._record_rl_failure()
+        return RLModelResponse(success=False, error_message=last_error or "Error desconocido al llamar al modelo RL")
+
+    def _is_circuit_open(self) -> bool:
+        with self._circuit_lock:
+            return bool(self._rl_circuit_open_until and datetime.now() < self._rl_circuit_open_until)
+
+    def _record_rl_success(self) -> None:
+        with self._circuit_lock:
+            self._rl_failure_count = 0
+            self._rl_circuit_open_until = None
+
+    def _record_rl_failure(self) -> None:
+        with self._circuit_lock:
+            self._rl_failure_count += 1
+            if self._rl_failure_count >= self.rl_circuit_breaker_threshold:
+                self._rl_circuit_open_until = datetime.now() + timedelta(seconds=self.rl_circuit_reset_seconds)
 
     def _call_rl_model_async(self, rl_request: RLModelRequest) -> None:
         """
@@ -451,39 +893,56 @@ class AdaptivePersonalizationService:
         thread.start()
 
     def _process_rl_recommendations(self, student_id: str, topic_id: str,
-                                   rl_recommendations: List[Dict]) -> Dict:
+                                   rl_result: Any) -> Dict:
         """
         Procesa las recomendaciones del modelo RL para adaptarlas al formato del sistema
         """
         try:
-            # Adaptar recomendaciones del RL al formato esperado
+            if isinstance(rl_result, list) and rl_result:
+                rl_result = rl_result[0]
+            if not isinstance(rl_result, dict):
+                rl_result = {}
+
+            recommended_action = rl_result.get("recommended_action", {})
+            history_analysis = rl_result.get("history_analysis", {})
+            adaptive_factors = rl_result.get("adaptive_factors", {})
+
             content_recommendations = []
-            learning_path_adjustment = {}
+            if recommended_action:
+                reasoning = recommended_action.get("learning_methodology") or "Prioridad establecida por el modelo RL"
+                content_recommendations.append({
+                    "content_type": recommended_action.get("content_type", "slide"),
+                    "priority": recommended_action.get("dynamic_weight", 1.0),
+                    "reasoning": reasoning,
+                    "estimated_effectiveness": recommended_action.get("cognitive_alignment_score", rl_result.get("confidence", 0.5))
+                })
 
-            for rec in rl_recommendations:
-                if rec.get("type") == "content":
-                    content_recommendations.append({
-                        "content_type": rec.get("content_type"),
-                        "priority": rec.get("priority", 1),
-                        "reasoning": rec.get("reasoning", ""),
-                        "estimated_effectiveness": rec.get("estimated_effectiveness", 0.5)
-                    })
-                elif rec.get("type") == "learning_path":
-                    learning_path_adjustment = rec
+            learning_path_adjustment = {
+                "type": self._map_difficulty_to_path(recommended_action.get("difficulty_adjustment")),
+                "difficulty_adjustment": recommended_action.get("difficulty_adjustment", 0.0),
+                "pace_adjustment": adaptive_factors.get("bandit_temperature"),
+                "state": rl_result.get("state"),
+                "prediction_id": rl_result.get("prediction_id")
+            }
 
-            # Calcular confianza basada en consistencia de recomendaciones
-            confidence_score = min(1.0, len(content_recommendations) * 0.2)
+            confidence_score = rl_result.get("confidence")
+            if confidence_score is None:
+                confidence_score = recommended_action.get("cognitive_alignment_score", 0.5)
 
-            # Generar explicación
             reasoning = self._generate_recommendation_reasoning(
                 content_recommendations, learning_path_adjustment
             )
+
+            history_summary = history_analysis.get("preferred_content_types")
+            if history_summary:
+                reasoning += f" Preferencias detectadas: {', '.join(history_summary)}."
 
             return {
                 "content_recommendations": content_recommendations,
                 "learning_path_adjustment": learning_path_adjustment,
                 "confidence_score": confidence_score,
-                "reasoning": reasoning
+                "reasoning": reasoning,
+                "rl_metadata": rl_result
             }
 
         except Exception as e:
@@ -492,7 +951,8 @@ class AdaptivePersonalizationService:
                 "content_recommendations": [],
                 "learning_path_adjustment": {},
                 "confidence_score": 0.0,
-                "reasoning": "Error procesando recomendaciones del modelo"
+                "reasoning": "Error procesando recomendaciones del modelo",
+                "rl_metadata": {}
             }
 
     def _calculate_vakr_statistics(self, student_id: str) -> Dict:

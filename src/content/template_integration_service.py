@@ -27,7 +27,8 @@ class TemplateIntegrationService:
                                    props: Dict = None,
                                    assets: List[Dict] = None,
                                    learning_mix: Dict = None,
-                                   content_type: str = None) -> Tuple[bool, str]:
+                                   content_type: str = None,
+                                   template_metadata: Optional[Dict] = None) -> Tuple[bool, str]:
         """
         Crea contenido para un tema basado en una plantilla.
         
@@ -52,13 +53,17 @@ class TemplateIntegrationService:
             if not self.content_service.check_topic_exists(topic_id):
                 return False, "Tema no encontrado"
             
+            # Preparar metadatos pedagógicos
+            normalized_metadata = self._prepare_template_metadata(template_metadata)
+
             # Crear instancia de plantilla
             instance_data = {
                 "template_id": template_id,
                 "topic_id": topic_id,
                 "props": props or {},
                 "assets": assets or [],
-                "learning_mix": learning_mix
+                "learning_mix": learning_mix,
+                "metadata": normalized_metadata
             }
             
             instance = self.instance_service.create_instance(instance_data)
@@ -68,9 +73,10 @@ class TemplateIntegrationService:
                 content_type = self._infer_content_type_from_template(template)
             
             # Crear TopicContent asociado
+            content_payload = normalized_metadata.copy() if isinstance(normalized_metadata, dict) else {}
             content_data = {
                 "topic_id": topic_id,
-                "content": "",  # El contenido será renderizado dinámicamente
+                "content": content_payload,
                 "content_type": content_type,
                 "render_engine": "html_template",
                 "instance_id": str(instance._id),
@@ -80,7 +86,8 @@ class TemplateIntegrationService:
                 "status": "draft",
                 "interactive_data": {
                     "template_based": True,
-                    "capabilities": template.capabilities
+                    "capabilities": template.capabilities,
+                    "metadata": normalized_metadata or {}
                 },
                 "personalization_markers": {
                     "template_id": template_id,
@@ -88,6 +95,15 @@ class TemplateIntegrationService:
                     "is_template_based": True
                 }
             }
+
+            if normalized_metadata:
+                metadata_markers = {
+                    key: normalized_metadata.get(key)
+                    for key in ["interactive_summary", "interaction_mode", "estimated_duration_seconds"]
+                    if normalized_metadata.get(key) is not None
+                }
+                if metadata_markers:
+                    content_data["personalization_markers"]["template_metadata"] = metadata_markers
             
             success, content_id = self.content_service.create_content(content_data)
             
@@ -102,6 +118,61 @@ class TemplateIntegrationService:
         except Exception as e:
             logging.error(f"Error creating content from template: {str(e)}")
             return False, f"Error interno: {str(e)}"
+
+    def _prepare_template_metadata(self, metadata: Optional[Dict]) -> Dict:
+        """
+        Normaliza los metadatos pedagógicos asociados a una instancia/TopicContent.
+        """
+        if not isinstance(metadata, dict):
+            return {}
+
+        normalized: Dict[str, Any] = {}
+
+        summary = metadata.get("interactive_summary")
+        if isinstance(summary, str):
+            summary = summary.strip()
+            if summary:
+                normalized["interactive_summary"] = summary
+
+        objectives = metadata.get("learning_objectives")
+        if isinstance(objectives, list):
+            cleaned = [str(obj).strip() for obj in objectives if str(obj).strip()]
+            if cleaned:
+                normalized["learning_objectives"] = cleaned
+        elif isinstance(objectives, str):
+            cleaned = [segment.strip() for segment in objectives.split("\n") if segment.strip()]
+            if cleaned:
+                normalized["learning_objectives"] = cleaned
+
+        duration = metadata.get("estimated_duration_seconds") or metadata.get("estimated_duration")
+        if isinstance(duration, (int, float)):
+            duration_int = int(duration)
+            if duration_int > 0:
+                normalized["estimated_duration_seconds"] = duration_int
+        elif isinstance(duration, str) and duration.isdigit():
+            duration_int = int(duration)
+            if duration_int > 0:
+                normalized["estimated_duration_seconds"] = duration_int
+
+        interaction_mode = metadata.get("interaction_mode") or metadata.get("activity_mode")
+        if isinstance(interaction_mode, str):
+            interaction_mode = interaction_mode.strip()
+            if interaction_mode:
+                normalized["interaction_mode"] = interaction_mode
+
+        accessibility = metadata.get("accessibility_tags")
+        if isinstance(accessibility, list):
+            cleaned = [str(tag).strip() for tag in accessibility if str(tag).strip()]
+            if cleaned:
+                normalized["accessibility_tags"] = cleaned
+
+        audience = metadata.get("target_audience")
+        if isinstance(audience, str):
+            audience = audience.strip()
+            if audience:
+                normalized["target_audience"] = audience
+
+        return normalized
     
     def get_template_content(self, content_id: str) -> Optional[Dict]:
         """
@@ -167,7 +238,13 @@ class TemplateIntegrationService:
                 return False, "Instancia de plantilla no encontrada"
             
             # Actualizar instancia si hay props
-            if "props" in update_data or "assets" in update_data or "learning_mix" in update_data:
+            normalized_metadata = None
+            if "template_metadata" in update_data or "metadata" in update_data:
+                normalized_metadata = self._prepare_template_metadata(
+                    update_data.get("template_metadata") or update_data.get("metadata")
+                )
+
+            if "props" in update_data or "assets" in update_data or "learning_mix" in update_data or normalized_metadata:
                 instance_update = {}
                 if "props" in update_data:
                     instance_update["props"] = update_data["props"]
@@ -175,6 +252,8 @@ class TemplateIntegrationService:
                     instance_update["assets"] = update_data["assets"]
                 if "learning_mix" in update_data:
                     instance_update["learning_mix"] = update_data["learning_mix"]
+                if normalized_metadata:
+                    instance_update["metadata"] = normalized_metadata
                 
                 _ = self.instance_service.update_instance(instance_id, instance_update)
                 
@@ -192,6 +271,31 @@ class TemplateIntegrationService:
             for field in content_fields:
                 if field in update_data:
                     content_update[field] = update_data[field]
+
+            if normalized_metadata:
+                existing_content = content.get("content") if isinstance(content.get("content"), dict) else {}
+                new_content_block = existing_content.copy()
+                new_content_block.update(normalized_metadata)
+                content_update["content"] = new_content_block
+
+                existing_interactive_data = content_update.get("interactive_data") or content.get("interactive_data") or {}
+                interactive_data_update = existing_interactive_data.copy()
+                interactive_data_update["metadata"] = normalized_metadata
+                content_update["interactive_data"] = interactive_data_update
+
+                personalization_markers = content_update.get("personalization_markers")
+                if isinstance(personalization_markers, dict):
+                    personalization_markers = personalization_markers.copy()
+                else:
+                    personalization_markers = (content.get("personalization_markers") or {}).copy()
+                metadata_markers = {
+                    key: normalized_metadata.get(key)
+                    for key in ["interactive_summary", "interaction_mode", "estimated_duration_seconds"]
+                    if normalized_metadata.get(key) is not None
+                }
+                if metadata_markers:
+                    personalization_markers["template_metadata"] = metadata_markers
+                    content_update["personalization_markers"] = personalization_markers
             
             if content_update:
                 content_update["updated_at"] = datetime.now()

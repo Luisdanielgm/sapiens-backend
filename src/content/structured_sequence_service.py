@@ -60,6 +60,22 @@ class StructuredSequenceService:
                 
                 # Ordenar contenidos asociados por order si existe
                 associated_contents.sort(key=lambda x: x.get("order", 999))
+
+                parent_order = slide.get("order")
+                if parent_order is None:
+                    # Si la diapositiva no tiene order explícito, calcularlo a partir de la posición actual
+                    parent_order = len(structured_sequence)
+
+                for idx, content in enumerate(associated_contents):
+                    try:
+                        base_order = float(parent_order)
+                    except (TypeError, ValueError):
+                        base_order = float(len(structured_sequence))
+                    # Insertar inmediatamente después de la diapositiva usando fracciones
+                    intercalated_order = base_order + (idx + 1) / 100.0
+                    content["order"] = intercalated_order
+                    content["_intercalated_parent_order"] = base_order
+
                 structured_sequence.extend(associated_contents)
             
             # Agregar contenidos de evaluación al final
