@@ -7,7 +7,7 @@ from src.shared.decorators import auth_required, role_required, workspace_type_r
 from src.shared.middleware import apply_workspace_filter, get_current_workspace_info
 from bson import ObjectId
 from datetime import datetime
-from typing import Optional
+from typing import Optional, Dict, Any
 import logging
 import threading
 
@@ -199,6 +199,23 @@ def submit_content_result():
                 status_code=403
             )
         
+        # Normalizar score y tomar métricas para enriquecer el tracking
+        normalized_score = content_result_service.normalize_score(score, session_data, completion_percentage)
+        time_spent_seconds = session_data.get("time_spent")
+        virtual_tracking = virtual_content.get("interaction_tracking") or {}
+        prev_sessions = virtual_tracking.get("sessions", 0) or 0
+        session_completed = completion_percentage >= 100
+        if session_completed:
+            total_sessions = prev_sessions + 1
+            prev_avg = virtual_tracking.get("avg_score") or 0.0
+            avg_score_value = (
+                normalized_score
+                if prev_sessions == 0
+                else (prev_avg * prev_sessions + normalized_score) / total_sessions
+            )
+        else:
+            avg_score_value = virtual_tracking.get("avg_score")
+
         # Crear el resultado usando el servicio unificado
         result_data = {
             "virtual_content_id": virtual_content_id,
@@ -224,20 +241,34 @@ def submit_content_result():
         if success:
             # Actualizar tracking del contenido virtual
             update_data = {
-                "interaction_tracking.last_accessed": datetime.now(),
-                "interaction_tracking.completion_percentage": completion_percentage,
-                "updated_at": datetime.now()
+            "interaction_tracking.last_accessed": datetime.now(),
+            "interaction_tracking.completion_percentage": completion_percentage,
+            "updated_at": datetime.now()
             }
-            
-            # Si completó al 100%, marcar como completado
-            if completion_percentage >= 100:
+
+            if session_completed:
                 update_data["interaction_tracking.completion_status"] = "completed"
             elif completion_percentage > 0:
                 update_data["interaction_tracking.completion_status"] = "in_progress"
-            
+
+            if avg_score_value is not None:
+                update_data["interaction_tracking.avg_score"] = avg_score_value
+
+            best_score = virtual_tracking.get("best_score")
+            if isinstance(normalized_score, (int, float)) and (best_score is None or normalized_score > best_score):
+                update_data["interaction_tracking.best_score"] = normalized_score
+
+            if isinstance(time_spent_seconds, (int, float)) and time_spent_seconds > 0:
+                update_data["interaction_tracking.time_spent_seconds"] = time_spent_seconds
+            inc_operations: Dict[str, Any] = {"interaction_tracking.access_count": 1}
+            if session_completed:
+                inc_operations["interaction_tracking.sessions"] = 1
+            if isinstance(time_spent_seconds, (int, float)) and time_spent_seconds > 0:
+                inc_operations["interaction_tracking.total_time_spent"] = time_spent_seconds
+
             get_db().virtual_topic_contents.update_one(
                 {"_id": ObjectId(virtual_content_id)},
-                {"$set": update_data, "$inc": {"interaction_tracking.access_count": 1}}
+                {"$set": update_data, "$inc": inc_operations}
             )
             
             # Calcular progreso del tema automáticamente

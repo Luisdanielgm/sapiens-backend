@@ -6,6 +6,7 @@ import logging
 import threading
 from pymongo import ReturnDocument
 from pymongo.errors import DuplicateKeyError
+from concurrent.futures import ThreadPoolExecutor
 
 from src.shared.database import get_db
 from src.shared.constants import STATUS
@@ -159,6 +160,7 @@ class ContentService(VerificationBaseService):
         self._cache_lock = threading.Lock()
         # Default TTL (seconds) for stats cache
         self._stats_cache_ttl = 10
+        self._eval_executor = ThreadPoolExecutor(max_workers=4, thread_name_prefix="content_eval")
 
     def _normalize_content_field(self, doc: Dict[str, Any]) -> Dict[str, Any]:
         """
@@ -3537,6 +3539,10 @@ class ContentResultService:
             content_result = ContentResult(**normalized)
             insert_result = self.collection.insert_one(content_result.to_dict())
             self._refresh_vakr_async(str(content_result.student_id))
+            self._trigger_evaluation_processing_async(
+                str(content_result.student_id),
+                normalized.get("topic_id"),
+            )
             return True, str(insert_result.inserted_id)
         except ValueError as ve:
             logging.warning(f"ContentResult inválido: {ve}")
@@ -3933,6 +3939,15 @@ class ContentResultService:
                 score = 1.0
         return max(0.0, min(1.0, score))
 
+    def normalize_score(
+        self,
+        raw_score: Optional[Any],
+        session_data: Optional[Dict] = None,
+        completion_percentage: Optional[Any] = None,
+    ) -> float:
+        """Exposes normalized score logic for reuse in routes."""
+        return self._normalize_score(raw_score, session_data or {}, completion_percentage)
+
     def _serialize_result(self, document: Dict) -> Dict:
         result = dict(document)
         result["_id"] = str(result["_id"])
@@ -3963,6 +3978,56 @@ class ContentResultService:
 
         thread = threading.Thread(target=worker, daemon=True)
         thread.start()
+
+    def _trigger_evaluation_processing_async(self, student_id: str, topic_id: Optional[str]) -> None:
+        if not student_id or not topic_id:
+            return
+
+        try:
+            self._eval_executor.submit(self._process_evaluation_updates, student_id, topic_id)
+        except Exception as exc:
+            logging.warning(f"Unable to submit evaluation processing task: {exc}")
+
+    def _process_evaluation_updates(self, student_id: str, topic_id: str) -> None:
+        try:
+            topic_oid = self._safe_object_id(topic_id)
+            if not topic_oid:
+                return
+
+            evaluations = list(
+                self.db.evaluations.find({"topic_ids": topic_oid}, {"_id": 1})
+            )
+            if not evaluations:
+                return
+
+            from src.evaluations.services import EvaluationService
+
+            evaluation_service = EvaluationService()
+            for evaluation in evaluations:
+                evaluation_id = str(evaluation["_id"])
+                try:
+                    evaluation_service.process_content_result_grading(
+                        evaluation_id, student_id
+                    )
+                    logging.info(
+                        "ContentResultService: evaluación %s actualizada para estudiante %s",
+                        evaluation_id,
+                        student_id,
+                    )
+                except Exception as exc:
+                    logging.warning(
+                        "ContentResultService: no se pudo actualizar evaluación %s para estudiante %s: %s",
+                        evaluation_id,
+                        student_id,
+                        exc,
+                    )
+        except Exception as exc:
+            logging.warning(
+                "ContentResultService: error disparando actualización de evaluaciones para topic %s / estudiante %s: %s",
+                topic_id,
+                student_id,
+                exc,
+            )
 
     def _safe_object_id(self, value: Optional[Any]) -> Optional[ObjectId]:
         if not value:
