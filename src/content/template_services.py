@@ -4,7 +4,7 @@ import json
 import copy
 from datetime import datetime
 from bson import ObjectId
-from typing import Dict, List, Optional, Union, Tuple
+from typing import Any, Dict, List, Optional, Union, Tuple
 from pymongo import MongoClient
 from pymongo.collection import Collection
 import os
@@ -21,6 +21,7 @@ class TemplateService:
     def __init__(self):
         self.db = get_db()
         self.templates_collection: Collection = self.db.templates
+        self.template_usage_collection: Collection = self.db.template_usage
         # No crear TemplateInstanceService aquí para evitar recursión entre inicializadores.
     
     def create_template(self, template_data: Dict, user_id: str) -> Template:
@@ -113,6 +114,60 @@ class TemplateService:
         except Exception as e:
             logging.error(f"Error limpiando datos de plantilla: {str(e)}")
             raise ValueError(f"Error procesando datos de plantilla: {str(e)}")
+
+    def record_template_usage(
+        self,
+        template: Template,
+        *,
+        topic_id: Optional[str],
+        content_id: str,
+        user_id: Optional[str] = None,
+        parent_content_id: Optional[str] = None,
+        order: Optional[Union[int, float]] = None,
+        metadata: Optional[Dict] = None,
+        status: Optional[str] = None,
+        source: Optional[str] = None,
+    ) -> None:
+        """
+        Registra un snapshot del uso de una plantilla para analytics.
+        Los errores se registran como warning sin interrumpir el flujo principal.
+        """
+        if not template or not content_id:
+            return
+
+        metadata_payload: Dict[str, Any] = {}
+        if isinstance(metadata, dict):
+            metadata_payload = metadata
+        elif isinstance(getattr(template, "defaults", None), dict):
+            metadata_payload = template.defaults  # type: ignore[assignment]
+
+        usage_doc: Dict[str, Any] = {
+            "template_id": self._object_id_or_str(getattr(template, "_id", None)),
+            "template_name": getattr(template, "name", None),
+            "template_version": getattr(template, "version", None),
+            "topic_id": self._object_id_or_str(topic_id),
+            "content_id": self._object_id_or_str(content_id),
+            "parent_content_id": self._object_id_or_str(parent_content_id),
+            "order": order,
+            "baseline_mix": getattr(template, "baseline_mix", None),
+            "style_tags": getattr(template, "style_tags", None),
+            "subject_tags": getattr(template, "subject_tags", None),
+            "capabilities": getattr(template, "capabilities", None),
+            "metadata": metadata_payload,
+            "created_by": self._object_id_or_str(user_id),
+            "status": status,
+            "source": source or "template.apply",
+            "used_at": datetime.utcnow(),
+        }
+
+        try:
+            usage_doc = {k: v for k, v in usage_doc.items() if v is not None}
+            if usage_doc:
+                self.template_usage_collection.insert_one(usage_doc)
+        except Exception as exc:
+            logging.warning(
+                f"record_template_usage failed for template {getattr(template, '_id', None)}: {exc}"
+            )
     
     def list_templates(self, 
                       owner_filter: str = "all", 
@@ -1017,6 +1072,19 @@ class TemplateService:
         except Exception as e:
             logging.error(f"Error in get_migration_status: {e}")
             return {"error": str(e)}
+    def _object_id_or_str(self, value: Optional[Union[str, ObjectId]]) -> Optional[Union[str, ObjectId]]:
+        """
+        Convierte valores a ObjectId cuando es posible; devuelve strings limpios en caso contrario.
+        """
+        if value is None:
+            return None
+        if isinstance(value, ObjectId):
+            return value
+        try:
+            return ObjectId(value)
+        except Exception:
+            return str(value)
+
 
 class TemplateInstanceService:
     """

@@ -5,8 +5,9 @@ from bson import ObjectId
 from typing import Dict, Any
 import traceback
 
-from .template_services import TemplateService, TemplateInstanceService, TemplateMarkupExtractor
-from .template_models import Template, TemplateInstance
+from .template_services import TemplateService, TemplateMarkupExtractor
+from .template_integration_service import TemplateIntegrationService
+from .template_models import Template
 from .services import ContentService
 from .models import ContentTypes
 from src.shared.decorators import auth_required, role_required
@@ -14,10 +15,11 @@ from src.shared.constants import ROLES
 from src.shared.utils import ensure_json_serializable
 
 template_bp = Blueprint('templates', __name__, url_prefix='/api/templates')
+preview_bp = Blueprint('templates_preview', __name__, url_prefix='/preview')
 
 # Inicializar servicios
 template_service = TemplateService()
-instance_service = TemplateInstanceService()
+template_integration_service = TemplateIntegrationService()
 
 @template_bp.route('', methods=['POST'])
 @auth_required
@@ -125,6 +127,72 @@ def list_templates():
         
     except Exception as e:
         logging.error(f"Error listing templates: {str(e)}")
+        return jsonify({
+            "success": False,
+            "error": "INTERNAL_ERROR",
+            "message": "Error interno del servidor"
+        }), 500
+
+@template_bp.route('/<template_id>/apply', methods=['POST'])
+@auth_required
+@role_required([ROLES["TEACHER"], ROLES["ADMIN"]])
+def apply_template_to_topic(template_id):
+    """
+    Inserta un artefacto basado en plantilla directamente en un tema/diapositiva.
+    Espera un payload con `topic_id` y `content` (estructura completa del contenido a persistir).
+    """
+    try:
+        user_id = get_jwt_identity()
+        data = request.get_json() or {}
+
+        topic_id = data.get("topic_id")
+        content_payload = data.get("content")
+
+        if not topic_id:
+            return jsonify({
+                "success": False,
+                "error": "VALIDATION_ERROR",
+                "message": "topic_id es requerido"
+            }), 400
+
+        if not isinstance(content_payload, dict):
+            return jsonify({
+                "success": False,
+                "error": "VALIDATION_ERROR",
+                "message": "content debe ser un objeto"
+            }), 400
+
+        success, content_id = template_integration_service.apply_template_to_content(
+            template_id=template_id,
+            topic_id=topic_id,
+            content_payload=content_payload,
+            order=data.get("order"),
+            parent_content_id=data.get("parent_content_id"),
+            learning_mix=data.get("learning_mix"),
+            content_type=data.get("content_type", "slide"),
+            status=data.get("status", "draft"),
+            template_metadata=data.get("template_metadata"),
+            personalization_markers=data.get("personalization_markers"),
+            created_by=user_id
+        )
+
+        if not success:
+            return jsonify({
+                "success": False,
+                "error": "OPERATION_FAILED",
+                "message": content_id  # contiene detalle del error
+            }), 400
+
+        return jsonify({
+            "success": True,
+            "data": {
+                "content_id": content_id,
+                "message": "Plantilla aplicada exitosamente"
+            }
+        }), 201
+
+    except Exception as e:
+        logging.error(f"Error applying template {template_id}: {str(e)}")
         return jsonify({
             "success": False,
             "error": "INTERNAL_ERROR",
@@ -426,318 +494,6 @@ def delete_template(template_id):
             "error": "INTERNAL_ERROR",
             "message": "Error interno del servidor"
         }), 500
-
-@template_bp.route('/topic/<topic_id>/use_template/<template_id>', methods=['POST'])
-@auth_required
-@role_required([ROLES["TEACHER"], ROLES["ADMIN"]])
-def use_template_on_topic(topic_id, template_id):
-    """
-    Crear contenido desde un template específico y vincularlo a un topic.
-    Body (optional):
-      {
-        "props": {...},
-        "auto_generate": true|false,
-        "migration_source": {...},
-        "create_topic_content": true|false,
-        "content_type_for_instance": "slide" (default)
-      }
-    """
-    try:
-        user_id = get_jwt_identity()
-        data = request.get_json() or {}
-
-        props = data.get("props")
-        auto_generate = bool(data.get("auto_generate", False))
-        migration_source = data.get("migration_source")
-        create_topic_content = bool(data.get("create_topic_content", False))
-        content_type_for_instance = data.get("content_type_for_instance", "slide")
-
-        # Use the TemplateService helper that encapsulates validation and creation
-        result = template_service.create_template_instance_for_topic(
-            template_id=template_id,
-            topic_id=topic_id,
-            creator_id=user_id,
-            props=props,
-            auto_generate=auto_generate,
-            migration_source=migration_source,
-            create_topic_content=create_topic_content,
-            content_type_for_instance=content_type_for_instance
-        )
-
-        if not result or not result.get("success"):
-            err = result.get("error", "No se pudo crear la instancia")
-            return jsonify({
-                "success": False,
-                "error": "OPERATION_FAILED",
-                "message": err
-            }), 400
-
-        return jsonify({
-            "success": True,
-            "data": {
-                "message": "Instancia creada y vinculada al topic exitosamente",
-                "instance_id": result.get("instance_id"),
-                "created_content_id": result.get("created_content_id")
-            }
-        }), 201
-
-    except Exception as e:
-        logging.error(f"Error using template {template_id} on topic {topic_id}: {e}")
-        traceback.print_exc()
-        return jsonify({
-            "success": False,
-            "error": "INTERNAL_ERROR",
-            "message": "Error interno del servidor"
-        }), 500
-
-# === TEMPLATE INSTANCES ENDPOINTS ===
-
-instance_bp = Blueprint('template_instances', __name__, url_prefix='/api/template-instances')
-
-@instance_bp.route('', methods=['POST'])
-@auth_required
-@role_required([ROLES["TEACHER"], ROLES["ADMIN"]])
-def create_instance():
-    """
-    Crear una nueva instancia de plantilla.
-    
-    Body:
-    {
-        "template_id": "template_id",
-        "topic_id": "topic_id",
-        "props": {"param1": "value1"},
-        "assets": [{"id": "asset1", "name": "imagen.jpg", "url": "...", "type": "image"}],
-        "learning_mix": {"mode": "manual", "values": {"V": 70, "A": 10, "K": 15, "R": 5}}
-    }
-    """
-    try:
-        data = request.get_json()
-        
-        if not data:
-            return jsonify({
-                "success": False,
-                "error": "VALIDATION_ERROR",
-                "message": "No data provided"
-            }), 400
-        
-        # Validar campos requeridos
-        required_fields = ["template_id", "topic_id"]
-        for field in required_fields:
-            if field not in data:
-                return jsonify({"error": f"Campo requerido: {field}"}), 400
-        
-        # Crear instancia
-        instance = instance_service.create_instance(data)
-        
-        return jsonify({
-            "success": True,
-            "data": {
-                "message": "Instancia de plantilla creada exitosamente",
-                "instance": ensure_json_serializable(instance.to_dict())
-            }
-        }), 201
-        
-    except ValueError as e:
-        return jsonify({
-            "success": False,
-            "error": "VALIDATION_ERROR",
-            "message": str(e)
-        }), 400
-    except Exception as e:
-        logging.error(f"Error creating template instance: {str(e)}")
-        return jsonify({
-            "success": False,
-            "error": "INTERNAL_ERROR",
-            "message": "Error interno del servidor"
-        }), 500
-
-@instance_bp.route('/<instance_id>', methods=['GET'])
-@auth_required
-def get_instance(instance_id):
-    """
-    Obtener una instancia específica.
-    """
-    try:
-        instance = instance_service.get_instance(instance_id)
-        
-        if not instance:
-            return jsonify({
-                "success": False,
-                "error": "NOT_FOUND",
-                "message": "Instancia no encontrada"
-            }), 404
-        
-        return jsonify({
-            "success": True,
-            "data": {
-                "instance": ensure_json_serializable(instance.to_dict())
-            }
-        }), 200
-        
-    except Exception as e:
-        logging.error(f"Error getting template instance {instance_id}: {str(e)}")
-        return jsonify({
-            "success": False,
-            "error": "INTERNAL_ERROR",
-            "message": "Error interno del servidor"
-        }), 500
-
-@instance_bp.route('/topic/<topic_id>', methods=['GET'])
-@auth_required
-def get_instances_by_topic(topic_id):
-    """
-    Obtener todas las instancias de un tema.
-    """
-    try:
-        instances = instance_service.get_instances_by_topic(topic_id)
-        
-        instances_data = ensure_json_serializable([instance.to_dict() for instance in instances])
-        
-        return jsonify({
-            "success": True,
-            "data": {
-                "instances": instances_data,
-                "total": len(instances_data)
-            }
-        }), 200
-        
-    except Exception as e:
-        logging.error(f"Error getting instances for topic {topic_id}: {str(e)}")
-        return jsonify({
-            "success": False,
-            "error": "INTERNAL_ERROR",
-            "message": "Error interno del servidor"
-        }), 500
-
-@instance_bp.route('/<instance_id>', methods=['PUT'])
-@auth_required
-@role_required([ROLES["TEACHER"], ROLES["ADMIN"]])
-def update_instance(instance_id):
-    """
-    Actualizar una instancia de plantilla.
-    
-    Body: Campos a actualizar (props, assets, learning_mix, status)
-    """
-    try:
-        data = request.get_json()
-        
-        if not data:
-            return jsonify({
-                "success": False,
-                "error": "VALIDATION_ERROR",
-                "message": "No data provided"
-            }), 400
-        
-        # Actualizar instancia
-        instance = instance_service.update_instance(instance_id, data)
-        
-        return jsonify({
-            "success": True,
-            "data": {
-                "message": "Instancia actualizada exitosamente",
-                "instance": ensure_json_serializable(instance.to_dict())
-            }
-        }), 200
-        
-    except ValueError as e:
-        return jsonify({
-            "success": False,
-            "error": "VALIDATION_ERROR",
-            "message": str(e)
-        }), 400
-    except Exception as e:
-        logging.error(f"Error updating template instance {instance_id}: {str(e)}")
-        return jsonify({
-            "success": False,
-            "error": "INTERNAL_ERROR",
-            "message": "Error interno del servidor"
-        }), 500
-
-@instance_bp.route('/<instance_id>/publish', methods=['POST'])
-@auth_required
-@role_required([ROLES["TEACHER"], ROLES["ADMIN"]])
-def publish_instance(instance_id):
-    """
-    Marcar una instancia como publicada/activa.
-    """
-    try:
-        instance = instance_service.publish_instance(instance_id)
-        
-        return jsonify({
-            "success": True,
-            "data": {
-                "message": "Instancia publicada exitosamente",
-                "instance": ensure_json_serializable(instance.to_dict())
-            }
-        }), 200
-        
-    except ValueError as e:
-        return jsonify({
-            "success": False,
-            "error": "VALIDATION_ERROR",
-            "message": str(e)
-        }), 400
-    except PermissionError as e:
-        return jsonify({
-            "success": False,
-            "error": "PERMISSION_DENIED",
-            "message": str(e)
-        }), 403
-    except Exception as e:
-        logging.error(f"Error publishing template instance {instance_id}: {str(e)}")
-        return jsonify({
-            "success": False,
-            "error": "INTERNAL_ERROR",
-            "message": "Error interno del servidor"
-        }), 500
-
-@instance_bp.route('/<instance_id>', methods=['DELETE'])
-@auth_required
-@role_required([ROLES["TEACHER"], ROLES["ADMIN"]])
-def delete_instance(instance_id):
-    """
-    Eliminar una instancia de plantilla.
-    """
-    try:
-        success = instance_service.delete_instance(instance_id)
-        
-        if not success:
-            return jsonify({
-                "success": False,
-                "error": "OPERATION_FAILED",
-                "message": "No se pudo eliminar la instancia"
-            }), 400
-        
-        return jsonify({
-            "success": True,
-            "data": {
-                "message": "Instancia eliminada exitosamente"
-            }
-        }), 200
-        
-    except ValueError as e:
-        return jsonify({
-            "success": False,
-            "error": "VALIDATION_ERROR",
-            "message": str(e)
-        }), 400
-    except PermissionError as e:
-        return jsonify({
-            "success": False,
-            "error": "PERMISSION_DENIED",
-            "message": str(e)
-        }), 403
-    except Exception as e:
-        logging.error(f"Error deleting template instance {instance_id}: {str(e)}")
-        return jsonify({
-            "success": False,
-            "error": "INTERNAL_ERROR",
-            "message": "Error interno del servidor"
-        }), 500
-
-# === PREVIEW ENDPOINTS ===
-
-preview_bp = Blueprint('template_preview', __name__, url_prefix='/preview')
 
 @preview_bp.route('/template/<template_id>')
 def preview_template(template_id):
@@ -1140,70 +896,6 @@ def migration_suggestions_simulations():
 
     except Exception as e:
         logging.error(f"Error in migration_suggestions_simulations: {e}")
-        traceback.print_exc()
-        return jsonify({
-            "success": False,
-            "error": "INTERNAL_ERROR",
-            "message": "Error interno del servidor"
-        }), 500
-
-@template_bp.route('/migration/execute', methods=['POST'])
-@auth_required
-@role_required([ROLES["TEACHER"], ROLES["ADMIN"]])
-def execute_migration():
-    """
-    Ejecuta la migración automática de un game/simulation legacy a un template.
-    Body:
-      {
-        "content_id": "<legacy_content_id>",
-        "template_id": "<target_template_id>",
-        "mark_legacy": true|false,
-        "migration_notes": "texto opcional"
-      }
-    """
-    try:
-        user_id = get_jwt_identity()
-        data = request.get_json() or {}
-
-        content_id = data.get("content_id")
-        template_id = data.get("template_id")
-        mark_legacy = data.get("mark_legacy", True)
-        migration_notes = data.get("migration_notes")
-
-        if not content_id or not template_id:
-            return jsonify({
-                "success": False,
-                "error": "VALIDATION_ERROR",
-                "message": "content_id y template_id son requeridos"
-            }), 400
-
-        # Ejecutar migración
-        result = template_service.execute_content_migration(
-            content_id=content_id,
-            template_id=template_id,
-            mark_legacy=bool(mark_legacy),
-            creator_id=user_id,
-            migration_notes=migration_notes
-        )
-
-        if not result.get("success"):
-            return jsonify({
-                "success": False,
-                "error": "MIGRATION_FAILED",
-                "message": result.get("error", "La migración falló")
-            }), 400
-
-        return jsonify({
-            "success": True,
-            "data": {
-                "new_content_id": result.get("new_content_id"),
-                "instance_id": result.get("instance_id"),
-                "compatibility_score": result.get("compatibility_score")
-            }
-        }), 200
-
-    except Exception as e:
-        logging.error(f"Error executing migration: {e}")
         traceback.print_exc()
         return jsonify({
             "success": False,

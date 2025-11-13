@@ -731,6 +731,8 @@ class TemplateRecommendationService:
                 else:
                     performance_score = feedback_data.get("engagement_score", 0.7) * 100
 
+            template_usage_id = feedback_data.get("template_usage_id") or feedback_data.get("content_id")
+
             engagement_metrics = {
                 "time_spent_seconds": feedback_data.get("completion_time"),
                 "interaction_count": feedback_data.get("interaction_count"),
@@ -746,7 +748,8 @@ class TemplateRecommendationService:
                 "slide_id": slide_id,
                 "session_type": session_type,
                 "time_spent": feedback_data.get("completion_time"),
-                "prediction_id": feedback_data.get("prediction_id")
+                "prediction_id": feedback_data.get("prediction_id"),
+                "template_usage_id": template_usage_id
             }
 
             performance_metrics = {
@@ -763,12 +766,13 @@ class TemplateRecommendationService:
                 "slide_id": slide_id,
                 "template_id": template_id,
                 "session_type": session_type,
-                "prediction_id": feedback_data.get("prediction_id")
+                "prediction_id": feedback_data.get("prediction_id"),
+                "template_usage_id": template_usage_id
             }
 
             rl_feedback = {
                 "student_id": student_id,
-                "content_id": template_id,
+                "content_id": template_usage_id or template_id,
                 "interaction_type": "template_usage",
                 "performance_score": performance_score,
                 "engagement_metrics": engagement_metrics,

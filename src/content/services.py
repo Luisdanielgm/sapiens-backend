@@ -3787,6 +3787,15 @@ class ContentResultService:
             template_oid = self._safe_object_id(template_instance_id)
             if template_oid:
                 template_instance_id = str(template_oid)
+        template_usage_id = (
+            payload.get("template_usage_id")
+            or metadata.get("template_usage_id")
+            or session_data.get("template_usage_id")
+        )
+        if template_usage_id:
+            template_usage_id = str(template_usage_id)
+        elif content_id:
+            template_usage_id = str(content_id)
         prediction_id = payload.get("prediction_id") or metadata.get("prediction_id")
         baseline_mix = baseline_mix or metadata.get("baseline_mix") or {}
 
@@ -3835,6 +3844,7 @@ class ContentResultService:
             "content_type": content_type,
             "variant_label": variant_label,
             "template_instance_id": str(template_instance_id) if template_instance_id else None,
+            "template_usage_id": template_usage_id,
             "baseline_mix": baseline_mix,
             "prediction_id": prediction_id,
             "rl_context": self._convert_objectids(rl_context),
@@ -3859,6 +3869,8 @@ class ContentResultService:
         metadata["content_id"] = self._stringify_object_id(
             virtual_content.get("content_id") or virtual_content.get("original_content_id")
         )
+        if metadata.get("content_id") and not metadata.get("template_usage_id"):
+            metadata["template_usage_id"] = metadata["content_id"]
         metadata["content_type"] = virtual_content.get("content_type")
         metadata["virtual_topic_id"] = self._stringify_object_id(virtual_content.get("virtual_topic_id"))
         metadata["student_id"] = self._stringify_object_id(virtual_content.get("student_id"))
@@ -3907,6 +3919,8 @@ class ContentResultService:
                     metadata["content_title"] = content_field.get("title")
                 else:
                     metadata["content_title"] = topic_content.get("title")
+                if not metadata.get("template_usage_id"):
+                    metadata["template_usage_id"] = self._stringify_object_id(topic_content.get("_id"))
 
         return metadata
 
@@ -3952,7 +3966,7 @@ class ContentResultService:
         result = dict(document)
         result["_id"] = str(result["_id"])
 
-        for key in ["student_id", "content_id", "virtual_content_id", "evaluation_id", "topic_id", "template_instance_id"]:
+        for key in ["student_id", "content_id", "virtual_content_id", "evaluation_id", "topic_id", "template_instance_id", "template_usage_id"]:
             if result.get(key):
                 result[key] = str(result[key])
 

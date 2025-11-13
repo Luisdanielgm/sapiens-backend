@@ -232,6 +232,7 @@ def submit_content_result():
             "baseline_mix": data.get("baseline_mix"),
             "variant_label": data.get("variant_label"),
             "template_instance_id": data.get("template_instance_id"),
+            "template_usage_id": data.get("template_usage_id"),
             "topic_id": data.get("topic_id"),
             "content_type": data.get("content_type")
         }

@@ -6,7 +6,7 @@ from typing import Dict, List, Optional, Any, Tuple
 from src.shared.database import get_db
 from .services import ContentService
 from .template_services import TemplateService, TemplateInstanceService
-from .template_models import Template, TemplateInstance
+from .template_models import Template
 from .models import TopicContent
 
 class TemplateIntegrationService:
@@ -28,7 +28,8 @@ class TemplateIntegrationService:
                                    assets: List[Dict] = None,
                                    learning_mix: Dict = None,
                                    content_type: str = None,
-                                   template_metadata: Optional[Dict] = None) -> Tuple[bool, str]:
+                                   template_metadata: Optional[Dict] = None,
+                                   created_by: Optional[str] = None) -> Tuple[bool, str]:
         """
         Crea contenido para un tema basado en una plantilla.
         
@@ -56,18 +57,6 @@ class TemplateIntegrationService:
             # Preparar metadatos pedagógicos
             normalized_metadata = self._prepare_template_metadata(template_metadata)
 
-            # Crear instancia de plantilla
-            instance_data = {
-                "template_id": template_id,
-                "topic_id": topic_id,
-                "props": props or {},
-                "assets": assets or [],
-                "learning_mix": learning_mix,
-                "metadata": normalized_metadata
-            }
-            
-            instance = self.instance_service.create_instance(instance_data)
-            
             # Inferir content_type de la plantilla si no se proporciona
             if not content_type:
                 content_type = self._infer_content_type_from_template(template)
@@ -79,7 +68,6 @@ class TemplateIntegrationService:
                 "content": content_payload,
                 "content_type": content_type,
                 "render_engine": "html_template",
-                "instance_id": str(instance._id),
                 "template_id": template_id,
                 "template_version": template.version,
                 "learning_mix": learning_mix or template.baseline_mix,
@@ -91,7 +79,6 @@ class TemplateIntegrationService:
                 },
                 "personalization_markers": {
                     "template_id": template_id,
-                    "instance_id": str(instance._id),
                     "is_template_based": True
                 }
             }
@@ -108,15 +95,118 @@ class TemplateIntegrationService:
             success, content_id = self.content_service.create_content(content_data)
             
             if not success:
-                # Si falla la creación del contenido, limpiar la instancia
-                self.instance_service.delete_instance(str(instance._id))
                 return False, f"Error creando contenido: {content_id}"
+
+            self.template_service.record_template_usage(
+                template=template,
+                topic_id=topic_id,
+                content_id=content_id,
+                user_id=created_by,
+                metadata=normalized_metadata,
+                status=content_data.get("status"),
+                source="content.from_template"
+            )
             
             logging.info(f"Content created from template {template_id}: {content_id}")
             return True, content_id
             
         except Exception as e:
             logging.error(f"Error creating content from template: {str(e)}")
+            return False, f"Error interno: {str(e)}"
+
+    def apply_template_to_content(self,
+                                  template_id: str,
+                                  topic_id: str,
+                                  content_payload: Dict,
+                                  *,
+                                  order: Optional[int] = None,
+                                  parent_content_id: Optional[str] = None,
+                                  learning_mix: Optional[Dict] = None,
+                                  content_type: str = "slide",
+                                  status: str = "draft",
+                                  template_metadata: Optional[Dict] = None,
+                                  personalization_markers: Optional[Dict] = None,
+                                  created_by: Optional[str] = None) -> Tuple[bool, str]:
+        """
+        Inserta un artefacto basado en plantilla directamente como TopicContent sin crear template_instance.
+        """
+        try:
+            template = self.template_service.get_template(template_id)
+            if not template:
+                return False, "Plantilla no encontrada"
+
+            if not self.content_service.check_topic_exists(topic_id):
+                return False, "Tema no encontrado"
+
+            if not isinstance(content_payload, dict):
+                return False, "El contenido debe ser un objeto"
+
+            normalized_metadata = self._prepare_template_metadata(
+                template_metadata or (template.defaults if isinstance(getattr(template, "defaults", None), dict) else None)
+            )
+
+            final_content = content_payload.copy()
+
+            attachment = final_content.get("attachment") or {}
+            if not isinstance(attachment, dict):
+                attachment = {}
+            attachment.setdefault("type", "interactive_template")
+            attachment["template_id"] = template_id
+            attachment["template_version"] = template.version
+            final_content["attachment"] = attachment
+
+            if normalized_metadata:
+                final_content["template_metadata"] = normalized_metadata
+
+            learning_mix_payload = learning_mix or content_payload.get("baseline_mix") or template.baseline_mix
+            if isinstance(final_content.get("baseline_mix"), dict):
+                learning_mix_payload = final_content.get("baseline_mix")
+
+            merged_markers = {}
+            if isinstance(personalization_markers, dict):
+                merged_markers.update(personalization_markers)
+            existing_markers = content_payload.get("personalization_markers")
+            if isinstance(existing_markers, dict):
+                merged_markers.update(existing_markers)
+            merged_markers.update({
+                "template_id": template_id,
+                "template_name": template.name,
+                "template_metadata": normalized_metadata
+            })
+
+            content_data = {
+                "topic_id": topic_id,
+                "content": final_content,
+                "content_type": content_type or content_payload.get("content_type") or "slide",
+                "render_engine": "html_template",
+                "template_id": template_id,
+                "template_version": template.version,
+                "learning_mix": learning_mix_payload,
+                "order": order if order is not None else content_payload.get("order"),
+                "parent_content_id": parent_content_id or content_payload.get("parent_content_id"),
+                "status": status or content_payload.get("status") or "draft",
+                "personalization_markers": merged_markers
+            }
+
+            success, content_id = self.content_service.create_content(content_data)
+            if not success:
+                return False, content_id
+
+            usage_metadata = final_content.get("template_metadata") or normalized_metadata
+            self.template_service.record_template_usage(
+                template=template,
+                topic_id=topic_id,
+                content_id=content_id,
+                user_id=created_by,
+                parent_content_id=parent_content_id or content_payload.get("parent_content_id"),
+                order=content_data.get("order"),
+                metadata=usage_metadata,
+                status=content_data.get("status"),
+                source="templates.apply"
+            )
+            return True, content_id
+        except Exception as e:
+            logging.error(f"Error applying template to content: {str(e)}")
             return False, f"Error interno: {str(e)}"
 
     def _prepare_template_metadata(self, metadata: Optional[Dict]) -> Dict:

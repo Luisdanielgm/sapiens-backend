@@ -50,7 +50,7 @@ from src.personalization.routes import personalization_bp  # Sistema de personal
 from src.marketplace.routes import marketplace_bp # Sistema de marketplace
 from src.evaluations.routes import evaluation_routes  # Sistema de evaluaciones flexible
 # Sistema de plantillas
-from src.content.template_routes import template_bp, instance_bp, preview_bp
+from src.content.template_routes import template_bp, preview_bp
 # Sistema de eliminación en cascada
 from src.shared.cascade_routes import cascade_bp
 # Sistema de validación de LLM
@@ -255,7 +255,6 @@ def create_app(config_object=active_config):
     
     # Sistema de plantillas
     app.register_blueprint(template_bp)  # Ya incluye url_prefix='/api/templates'
-    app.register_blueprint(instance_bp)  # Ya incluye url_prefix='/api/template-instances'  
     app.register_blueprint(preview_bp)   # Ya incluye url_prefix='/preview'
     
     # Sistema de eliminación en cascada

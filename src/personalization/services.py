@@ -730,6 +730,7 @@ class AdaptivePersonalizationService:
             "variant_label": result.get("variant_label"),
             "baseline_mix": result.get("baseline_mix"),
             "template_instance_id": str(result.get("template_instance_id")) if result.get("template_instance_id") else None,
+            "template_usage_id": str(result.get("template_usage_id")) if result.get("template_usage_id") else None,
             "prediction_id": result.get("prediction_id"),
             "engagement_level": learning_metrics.get("engagement_level"),
             "difficulty_rating": learning_metrics.get("difficulty_rating"),

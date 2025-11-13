@@ -37,7 +37,7 @@ Este documento consolida todos los requerimientos, funcionalidades y políticas 
 - **Estado**: Planificado
 - **Descripción**: Contenido específico del profesor ligado a topics
 - **Requerimientos**:
-  - **Modelo template_instances**: ligado a templateId y topicId
+  - **Modelo template_usage_artifacts**: ligado a templateId y topicId
   - **Pin de versión**: templateVersion para estabilidad
   - **Personalización de contenido**: props, assets, learningMix por instancia
   - **Fachada estable**: topic_contents mantiene compatibilidad con campos legacy
@@ -403,7 +403,7 @@ Este documento consolida todos los requerimientos, funcionalidades y políticas 
 }
 ```
 
-### 8.2 Modelo template_instances
+### 8.2 Modelo template_usage_artifacts
 ```json
 {
   "_id": "inst_456",
@@ -487,7 +487,7 @@ Este documento consolida todos los requerimientos, funcionalidades y políticas 
 - **F/B**: Alinear los endpoints de Perfil Cognitivo (/api/profiles/cognitive) y Verificación de Usuario (/api/users/check)
 
 #### Fundamentos del Ecosistema de Plantillas (Backend):
-- **B**: Implementar en la base de datos los nuevos modelos: `templates` y `template_instances` con todos los campos especificados
+- **B**: Implementar en la base de datos los nuevos modelos: `templates` y `template_usage_artifacts` con todos los campos especificados
 - **B**: Modificar los modelos existentes `topic_contents` y `virtual_topic_contents` para añadir los campos `render_engine`, `instanceId`, `templateId`, `templateVersion`, `learningMix` (cacheado) y `overrides`, asegurando la retrocompatibilidad
 - **B**: Crear las APIs mínimas para el CRUD de plantillas: `POST /api/templates`, `GET /api/templates?owner=me...`, `PUT /api/templates/:id`
 
@@ -593,3 +593,4 @@ El sistema SapiensIA representa una plataforma educativa integral que combina pe
 5. **Escala eficientemente** para soportar crecimiento institucional
 
 La implementación exitosa de estos requerimientos posicionará a SapiensIA como una solución líder en el mercado de tecnología educativa, proporcionando una experiencia de aprendizaje verdaderamente personalizada y efectiva para estudiantes y educadores.
+

@@ -1665,6 +1665,7 @@ def create_content_from_template():
     }
     """
     try:
+        user_id = get_jwt_identity()
         data = request.get_json()
         
         if not data:
@@ -1685,7 +1686,8 @@ def create_content_from_template():
             assets=data.get("assets"),
             learning_mix=data.get("learning_mix"),
             content_type=data.get("content_type"),
-            template_metadata=template_metadata
+            template_metadata=template_metadata,
+            created_by=user_id
         )
         
         if success:
