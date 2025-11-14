@@ -284,6 +284,7 @@ class ContentResult:
         content_type: Optional[str] = None,
         variant_label: Optional[str] = None,
         template_instance_id: Optional[str] = None,
+        template_usage_id: Optional[str] = None,
         baseline_mix: Optional[Dict] = None,
         prediction_id: Optional[str] = None,
         rl_context: Optional[Dict] = None,
@@ -308,6 +309,7 @@ class ContentResult:
         self.content_type = content_type
         self.variant_label = variant_label
         self.template_instance_id = ObjectId(template_instance_id) if template_instance_id else None
+        self.template_usage_id = ObjectId(template_usage_id) if template_usage_id else None
         self.baseline_mix = baseline_mix or {}
         self.prediction_id = prediction_id
         self.rl_context = rl_context or {}
@@ -343,6 +345,8 @@ class ContentResult:
             data["variant_label"] = self.variant_label
         if self.template_instance_id:
             data["template_instance_id"] = self.template_instance_id
+        if self.template_usage_id:
+            data["template_usage_id"] = self.template_usage_id
         if self.prediction_id:
             data["prediction_id"] = self.prediction_id
         return data
