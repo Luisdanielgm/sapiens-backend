@@ -13,6 +13,7 @@ from .models import ContentTypes
 from src.shared.decorators import auth_required, role_required
 from src.shared.constants import ROLES
 from src.shared.utils import ensure_json_serializable
+import json
 
 template_bp = Blueprint('templates', __name__, url_prefix='/api/templates')
 preview_bp = Blueprint('templates_preview', __name__, url_prefix='/preview')
@@ -539,6 +540,28 @@ def preview_instance(instance_id):
         
         # Aplicar props a la plantilla
         processed_html = _apply_props_to_template(template.get_latest_html(), instance.props)
+
+        # Construir contexto para el runtime del iframe (IDs y metadatos)
+        context_payload = {
+            "templateInstanceId": str(getattr(instance, "_id", instance_id)),
+            "templateId": str(getattr(instance, "template_id", template._id)),
+            "virtualContentId": request.args.get("virtual_content_id"),
+            "templateUsageId": request.args.get("template_usage_id"),
+            "contentId": request.args.get("content_id"),
+        }
+        context_payload = {k: v for k, v in context_payload.items() if v}
+        if context_payload:
+            context_script = f"<script>window.__sapiensTemplateContext = {json.dumps(context_payload)};</script>"
+            lower_html = processed_html.lower()
+            closing_body_index = lower_html.rfind("</body>")
+            if closing_body_index != -1:
+                processed_html = (
+                    processed_html[:closing_body_index]
+                    + context_script
+                    + processed_html[closing_body_index:]
+                )
+            else:
+                processed_html = processed_html + context_script
         
         return processed_html, 200, {
             'Content-Type': 'text/html',

@@ -422,9 +422,11 @@ class VirtualTopicService(VerificationBaseService):
             original_topic_id = virtual_topic.get("topic_id")
 
             # 2. Obtener los contenidos virtuales (el nuevo sistema)
-            virtual_contents = list(self.db.virtual_topic_contents.find(
-                {"virtual_topic_id": ObjectId(virtual_topic_id)}
-            ).sort("created_at", 1))
+            virtual_contents = list(
+                self.db.virtual_topic_contents
+                .find({"virtual_topic_id": ObjectId(virtual_topic_id)})
+                .sort([("order", 1), ("created_at", 1)])
+            )
 
             # 3. Obtener los recursos del tema original (sistema legacy para compatibilidad)
             # Esto evita que el frontend entre en un bucle si todavía depende de 'topic_resources'
