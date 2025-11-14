@@ -1060,6 +1060,29 @@ class FastVirtualModuleGenerator(VerificationBaseService):
         "diagnostic_quiz"
     }
 
+    INTERACTIVE_CONTENT_TYPES = {
+        "interactive",
+        "interactive_slide",
+        "interactive_activity",
+        "interactive_exercise",
+        "interactive_video",
+        "simulation",
+        "virtual_lab",
+        "lab",
+        "game",
+        "diagram",
+        "infographic",
+        "case_study",
+        "scenario",
+        "microlesson",
+        "microlab",
+        "explorer"
+    }
+
+    EXCLUDED_CONTENT_TYPES = {
+        "slide_template"
+    }
+
     def __init__(self):
         super().__init__(collection_name="virtual_modules")
         
@@ -1610,6 +1633,10 @@ class FastVirtualModuleGenerator(VerificationBaseService):
         Calcula el valor de orden para el contenido virtual, intercalando variantes inmediatamente
         después de su diapositiva padre usando incrementos decimales.
         """
+        override_order = content.get("_virtual_normalized_order") or content.get("virtual_normalized_order")
+        if isinstance(override_order, (int, float)):
+            return float(override_order)
+
         order_value = content.get("order")
         numeric_order: Optional[float] = None
         if isinstance(order_value, (int, float)):
@@ -1688,13 +1715,24 @@ class FastVirtualModuleGenerator(VerificationBaseService):
         cognitive_profile: Dict,
         preferences: Dict = None
     ) -> List[Dict]:
-        """Selecciona contenidos preservando todas las diapositivas, evaluaciones y recursos."""
+        """
+        Selecciona los contenidos que conformarán el tema virtual respetando la relación
+        teórica → interactiva → evaluaciones. Solo se escoge una plantilla interactiva
+        por diapositiva y se normaliza el orden final.
+        """
         try:
             if not original_contents:
                 return []
 
             preferences = preferences or {}
-            avoid_types = set(preferences.get('avoid_types', []))
+            avoid_types = {str(t).lower() for t in preferences.get('avoid_types', [])}
+            preferred_modes = {
+                str(mode).lower() for mode in preferences.get('preferred_interaction_modes', [])
+            }
+            preferred_templates = {
+                str(tid) for tid in preferences.get('preferred_template_ids', [])
+            }
+
             valid_statuses = {
                 'draft',
                 'active',
@@ -1704,74 +1742,265 @@ class FastVirtualModuleGenerator(VerificationBaseService):
                 'skeleton',
                 'html_ready'
             }
+            vak_dimensions = ["visual", "auditory", "reading_writing", "kinesthetic"]
 
-            def sort_key(content: Dict) -> int:
+            def normalize_type(value: Any) -> str:
+                if isinstance(value, str):
+                    return value.lower()
+                if value is None:
+                    return ""
+                return str(value).lower()
+
+            def normalize_id(value: Any) -> Optional[str]:
+                if isinstance(value, ObjectId):
+                    return str(value)
+                if value is None:
+                    return None
+                return str(value)
+
+            def sort_key(content: Dict) -> float:
                 order_value = content.get('order')
                 if isinstance(order_value, (int, float)):
-                    return int(order_value)
+                    return float(order_value)
                 try:
-                    return int(order_value)
+                    return float(order_value)
                 except (TypeError, ValueError):
-                    return 999
+                    return 9999.0
 
-            slides = [
-                content for content in original_contents
-                if content.get('content_type') == 'slide'
-                and content.get('content_type') not in avoid_types
-                and (
-                    not content.get('status')
-                    or content.get('status') in valid_statuses
+            def extract_vak_vector(source: Optional[Dict]) -> Dict[str, float]:
+                vector = {dim: 0.0 for dim in vak_dimensions}
+                if not isinstance(source, dict):
+                    return vector
+
+                candidates = []
+                learning_style = source.get("learning_style")
+                if isinstance(learning_style, dict):
+                    candidates.append(learning_style)
+
+                profile_data = source.get("profile")
+                if isinstance(profile_data, dict):
+                    vak_scores = profile_data.get("vak_scores")
+                    if isinstance(vak_scores, dict):
+                        candidates.append(vak_scores)
+                    else:
+                        candidates.append(profile_data)
+
+                if not candidates:
+                    candidates.append(source)
+
+                for candidate in candidates:
+                    if not isinstance(candidate, dict):
+                        continue
+                    for dim in vak_dimensions:
+                        raw_value = candidate.get(dim)
+                        if isinstance(raw_value, (int, float)):
+                            vector[dim] = max(vector[dim], float(raw_value))
+
+                total = sum(vector.values())
+                if total > 0:
+                    vector = {dim: value / total for dim, value in vector.items()}
+                return vector
+
+            def extract_vak_from_content(content: Dict) -> Dict[str, float]:
+                vector = {dim: 0.0 for dim in vak_dimensions}
+                candidates = []
+                for key in ("baseline_mix", "learning_mix"):
+                    mix = content.get(key)
+                    if isinstance(mix, dict):
+                        if isinstance(mix.get("vak"), dict):
+                            candidates.append(mix["vak"])
+                        elif isinstance(mix.get("vak_scores"), dict):
+                            candidates.append(mix["vak_scores"])
+                        else:
+                            candidates.append(mix)
+
+                personalization = content.get("personalization_data")
+                if isinstance(personalization, dict):
+                    vak_scores = personalization.get("vak_scores")
+                    if isinstance(vak_scores, dict):
+                        candidates.append(vak_scores)
+
+                if not candidates:
+                    candidates.append(content.get("vak_profile") or {})
+
+                for candidate in candidates:
+                    if not isinstance(candidate, dict):
+                        continue
+                    for dim in vak_dimensions:
+                        raw_value = candidate.get(dim)
+                        if isinstance(raw_value, dict):
+                            raw_value = raw_value.get("value") or raw_value.get("score") or raw_value.get("weight")
+                        if isinstance(raw_value, (int, float)):
+                            vector[dim] = max(vector[dim], float(raw_value))
+
+                total = sum(vector.values())
+                if total > 0:
+                    vector = {dim: value / total for dim, value in vector.items()}
+                return vector
+
+            def vak_alignment_score(student_vak: Dict[str, float], content_vak: Dict[str, float]) -> float:
+                if not student_vak or not content_vak:
+                    return 0.0
+                return sum(student_vak.get(dim, 0.0) * content_vak.get(dim, 0.0) for dim in vak_dimensions)
+
+            def is_interactive_candidate(content: Dict) -> bool:
+                if content.get("render_engine") == "html_template":
+                    return True
+                if isinstance(content.get("interactive_data"), dict):
+                    return True
+                return normalize_type(content.get("content_type")) in self.INTERACTIVE_CONTENT_TYPES
+
+            def compute_interactive_score(content: Dict) -> float:
+                vak_vector = extract_vak_from_content(content)
+                vak_score = vak_alignment_score(student_vak, vak_vector)
+
+                personalization = content.get("personalization_data") or {}
+                rl_score = personalization.get("rl_score") or personalization.get("rl_confidence") or 0.0
+                final_score = (
+                    personalization.get("final_score")
+                    or personalization.get("match_score")
+                    or content.get("final_score")
+                    or content.get("rl_score")
+                    or 0.0
                 )
-            ]
+
+                interaction_mode = normalize_type(
+                    (content.get("interactive_data") or {}).get("interaction_mode")
+                    or personalization.get("interaction_mode")
+                )
+                interaction_bonus = 0.1 if interaction_mode and interaction_mode in preferred_modes else 0.0
+
+                template_usage_id = str(
+                    content.get("template_usage_id")
+                    or (content.get("attachment") or {}).get("template_id")
+                    or ""
+                )
+                template_bonus = 0.1 if template_usage_id and template_usage_id in preferred_templates else 0.0
+
+                base_match = 0.0
+                variant_meta = content.get("variant") or {}
+                variant_match = variant_meta.get("match_score")
+                if isinstance(variant_match, (int, float)):
+                    base_match = float(variant_match)
+
+                return (
+                    vak_score * 0.45
+                    + float(rl_score) * 0.25
+                    + float(final_score) * 0.15
+                    + interaction_bonus
+                    + template_bonus
+                    + base_match * 0.05
+                )
+
+            student_vak = extract_vak_vector(cognitive_profile or {})
+
+            slides: List[Dict] = []
+            evaluations: List[Dict] = []
+            optional_resources: List[Dict] = []
+            orphan_interactives: List[Dict] = []
+            interactive_by_parent: Dict[str, List[Dict]] = defaultdict(list)
+
+            for content in original_contents:
+                ctype = normalize_type(content.get('content_type'))
+                if not ctype or ctype in avoid_types or ctype in self.EXCLUDED_CONTENT_TYPES:
+                    continue
+
+                status = normalize_type(content.get('status'))
+                if status and status not in valid_statuses:
+                    continue
+
+                if ctype == 'slide':
+                    slides.append(content)
+                    continue
+
+                if ctype in self.EVALUATION_CONTENT_TYPES:
+                    evaluations.append(content)
+                    continue
+
+                parent_id = normalize_id(content.get("parent_content_id"))
+                if parent_id and is_interactive_candidate(content):
+                    interactive_by_parent[parent_id].append(content)
+                    continue
+
+                if is_interactive_candidate(content):
+                    orphan_interactives.append(content)
+                    continue
+
+                optional_resources.append(content)
+
             slides.sort(key=sort_key)
-
-            evaluations = [
-                content for content in original_contents
-                if content.get('content_type') in self.EVALUATION_CONTENT_TYPES
-                and content.get('content_type') not in avoid_types
-            ]
             evaluations.sort(key=sort_key)
-
-            optional_resources = [
-                content for content in original_contents
-                if content.get('content_type') not in ({'slide'} | self.EVALUATION_CONTENT_TYPES)
-                and content.get('content_type') not in avoid_types
-            ]
             optional_resources.sort(key=sort_key)
+            orphan_interactives.sort(key=sort_key)
 
-            ordered_contents = slides + evaluations + optional_resources
+            best_variants: Dict[str, Dict] = {}
+            for slide in slides:
+                slide_id = normalize_id(slide.get('_id') or slide.get('id'))
+                if not slide_id:
+                    continue
+                candidates = interactive_by_parent.get(slide_id, [])
+                if not candidates:
+                    continue
+                ranked = sorted(
+                    candidates,
+                    key=lambda item: compute_interactive_score(item),
+                    reverse=True
+                )
+                best_variants[slide_id] = ranked[0]
 
-            if not ordered_contents:
+            normalized_sequence: List[Dict] = []
+            seen_ids = set()
+            next_order = 1
+
+            def push_content(content: Dict):
+                nonlocal next_order
+                content_id = normalize_id(content.get('_id') or content.get('id'))
+                if content_id and content_id in seen_ids:
+                    return
+                if content_id:
+                    seen_ids.add(content_id)
+                content['_virtual_normalized_order'] = next_order
+                content['order'] = next_order
+                next_order += 1
+                normalized_sequence.append(content)
+
+            for slide in slides:
+                slide_id = normalize_id(slide.get('_id') or slide.get('id'))
+                push_content(slide)
+                if slide_id and slide_id in best_variants:
+                    selected_variant = best_variants[slide_id]
+                    selected_variant['_selected_interactive_for'] = slide_id
+                    push_content(selected_variant)
+
+            for resource in optional_resources + orphan_interactives:
+                push_content(resource)
+
+            evaluations_sorted: List[Dict] = sorted(
+                evaluations,
+                key=lambda item: (
+                    1 if normalize_type(item.get('content_type')) == 'quiz' else 0,
+                    sort_key(item)
+                )
+            )
+            for evaluation in evaluations_sorted:
+                push_content(evaluation)
+
+            if not normalized_sequence:
                 logging.warning(
                     "No se encontraron contenidos válidos tras aplicar la nueva lógica. Se devuelve el arreglo original (%s elementos).",
                     len(original_contents)
                 )
                 return original_contents
 
-            seen_ids = set()
-            unique_contents: List[Dict] = []
-            for content in ordered_contents:
-                content_id = content.get('_id') or content.get('id')
-                if isinstance(content_id, ObjectId):
-                    content_id = str(content_id)
-                elif content_id is not None:
-                    content_id = str(content_id)
-
-                if content_id:
-                    if content_id in seen_ids:
-                        continue
-                    seen_ids.add(content_id)
-                unique_contents.append(content)
-
             logging.info(
-                "Selección final de contenidos para topic: slides=%s, evaluaciones=%s, opcionales=%s, total=%s",
+                "Selección final para topic: slides=%s, interactivos=%s, evaluaciones=%s, recursos=%s, total=%s",
                 len(slides),
+                len(best_variants),
                 len(evaluations),
-                len(optional_resources),
-                len(unique_contents)
+                len(optional_resources) + len(orphan_interactives),
+                len(normalized_sequence)
             )
-
-            return unique_contents
+            return normalized_sequence
         except Exception as e:
             logging.error(f"Error en _select_personalized_contents (nueva lógica): {e}")
             return original_contents
