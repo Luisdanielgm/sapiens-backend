@@ -137,6 +137,42 @@ def get_virtual_topic_contents(virtual_topic_id):
     contents = virtual_topic_service.get_topic_contents(virtual_topic_id)
     return APIRoute.success(data={"contents": contents})
 
+@virtual_bp.route('/topic/<virtual_topic_id>/personalization', methods=['POST'])
+@APIRoute.standard(auth_required_flag=True, roles=[ROLES.get("STUDENT", "STUDENT")])
+def apply_topic_personalization_route(virtual_topic_id):
+    """
+    Persiste la selección de variantes y el orden definitivo enviado desde el frontend.
+    """
+    try:
+        payload = request.get_json() or {}
+        selections = payload.get('selections') or []
+        ordered_ids = payload.get('ordered_content_ids') or []
+
+        success, result = virtual_module_service.apply_topic_personalization(
+            virtual_topic_id,
+            selections,
+            ordered_ids,
+        )
+
+        if not success:
+            return APIRoute.error(
+                ErrorCodes.OPERATION_FAILED,
+                result.get("error", "No se pudo aplicar la personalización"),
+                status_code=400,
+            )
+
+        return APIRoute.success(
+            data=result,
+            message="Personalización aplicada correctamente",
+        )
+    except Exception as exc:
+        logging.error(f"Error aplicando personalización del tema {virtual_topic_id}: {exc}")
+        return APIRoute.error(
+            ErrorCodes.SERVER_ERROR,
+            "Error interno al aplicar la personalización",
+            status_code=500,
+        )
+
 # Rutas de Quiz eliminadas - ahora se manejan como TopicContent
 # Los quizzes se crean con POST /study_plan/topic/content (content_type="quiz")
 # Los resultados se envían con POST /virtual/content-result

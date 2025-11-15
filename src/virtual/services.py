@@ -4,6 +4,8 @@ from bson import ObjectId
 from datetime import datetime, timedelta
 import logging
 
+from pymongo import UpdateOne
+
 from src.shared.database import get_db
 from src.shared.constants import STATUS, COLLECTIONS
 from src.shared.standardization import BaseService, VerificationBaseService
@@ -1535,11 +1537,120 @@ class FastVirtualModuleGenerator(VerificationBaseService):
             
         except Exception as e:
             logging.error(f"Error en _generate_topic_contents_for_sync: {str(e)}")
-    
 
-    
+    def apply_topic_personalization(
+        self,
+        virtual_topic_id: str,
+        selections: List[Dict],
+        ordered_content_ids: List[str]
+    ) -> Tuple[bool, Dict]:
+        """
+        Persiste la selección de variantes y el orden final enviado desde el frontend.
+        """
+        try:
+            try:
+                topic_oid = ObjectId(virtual_topic_id)
+            except Exception:
+                return False, {"error": "virtual_topic_id inválido"}
 
-    
+            contents = list(self.db.virtual_topic_contents.find({"virtual_topic_id": topic_oid}))
+            if not contents:
+                return False, {"error": "No se encontraron contenidos para el tema virtual"}
+
+            document_map = {str(doc["_id"]): doc for doc in contents}
+            variants_by_parent: Dict[str, List[Dict]] = defaultdict(list)
+            for doc in contents:
+                parent_id = doc.get("parent_content_id")
+                if parent_id:
+                    variants_by_parent[str(parent_id)].append(doc)
+
+            operations: List[UpdateOne] = []
+            now = datetime.now()
+
+            if ordered_content_ids:
+                order_lookup = {
+                    str(content_id): index + 1 for index, content_id in enumerate(ordered_content_ids)
+                }
+                for content_id, order_value in order_lookup.items():
+                    doc = document_map.get(content_id)
+                    if not doc:
+                        continue
+                    operations.append(
+                        UpdateOne(
+                            {"_id": doc["_id"]},
+                            {"$set": {"order": order_value, "updated_at": now}}
+                        )
+                    )
+            else:
+                order_lookup = {}
+
+            applied = 0
+            for selection in selections or []:
+                parent_id = str(selection.get("parent_content_id") or "")
+                variant_id = str(selection.get("variant_content_id") or "")
+                if not parent_id or not variant_id:
+                    continue
+
+                base_doc = document_map.get(parent_id)
+                variant_doc = document_map.get(variant_id)
+                if not base_doc or not variant_doc:
+                    continue
+
+                applied += 1
+                selection_payload = {
+                    "variant_content_id": variant_id,
+                    "variant_label": selection.get("variant_label"),
+                    "selection_reason": selection.get("reason"),
+                    "selection_confidence": selection.get("confidence"),
+                    "matched_modalities": selection.get("matched_modalities"),
+                    "source": selection.get("source"),
+                    "prediction_id": selection.get("prediction_id"),
+                    "rl_confidence": selection.get("rl_confidence"),
+                    "rl_recommendation_type": selection.get("rl_recommendation_type"),
+                    "rl_context_summary": selection.get("rl_context_summary"),
+                    "rl_boost_details": selection.get("rl_boost_details"),
+                    "vark_score": selection.get("vark_score"),
+                    "updated_at": now,
+                }
+
+                operations.append(
+                    UpdateOne(
+                        {"_id": base_doc["_id"]},
+                        {"$set": {"selected_dynamic_variant": selection_payload, "updated_at": now}}
+                    )
+                )
+
+                operations.append(
+                    UpdateOne(
+                        {"_id": variant_doc["_id"]},
+                        {"$set": {"dynamic_variant_state": "selected", "updated_at": now}}
+                    )
+                )
+
+                siblings = variants_by_parent.get(parent_id, [])
+                for sibling in siblings:
+                    if str(sibling["_id"]) == variant_id:
+                        continue
+                    operations.append(
+                        UpdateOne(
+                            {"_id": sibling["_id"]},
+                            {"$set": {"dynamic_variant_state": "omitted", "updated_at": now}}
+                        )
+                    )
+
+            if not operations:
+                return False, {"error": "No se aplicaron cambios"}
+
+            self.db.virtual_topic_contents.bulk_write(operations)
+            return True, {
+                "applied_variants": applied,
+                "reordered_contents": len(order_lookup),
+            }
+        except Exception as exc:
+            logging.error(f"Error aplicando personalización del tema: {exc}")
+            return False, {"error": str(exc)}
+
+
     def _generate_contents_traditional(self, virtual_topic_id: str, student_id: str, 
                                      selected_contents: List[Dict], cognitive_profile: Dict):
         """
