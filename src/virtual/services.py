@@ -2110,7 +2110,7 @@ class FastVirtualModuleGenerator(VerificationBaseService):
 
             logging.info(
                 "Selección final para topic: slides=%s, interactivos=%s, evaluaciones=%s, recursos=%s, total=%s",
-                len(slides),
+                len(base_slides),
                 len(best_variants),
                 len(evaluations),
                 len(optional_resources) + len(orphan_interactives),
