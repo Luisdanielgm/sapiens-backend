@@ -1570,7 +1570,7 @@ class FastVirtualModuleGenerator(VerificationBaseService):
         try:
             # Generar adaptaciones específicas para este contenido
             personalization_data = self._generate_content_personalization(content, cognitive_profile)
-            
+
             # Obtener datos del estudiante para personalización de markers
             student = self.db.users.find_one({"_id": ObjectId(student_id)})
             
@@ -1707,7 +1707,7 @@ class FastVirtualModuleGenerator(VerificationBaseService):
         }
         
         return priority_map.get(content_type, 5)
-    
+
 
     def _select_personalized_contents(
         self,
