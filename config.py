@@ -48,7 +48,15 @@ class Config:
     
     # CORS
     # Formato de CORS_ORIGINS: "http://ejemplo1.com,http://ejemplo2.com"
-    CORS_ORIGINS = os.getenv('CORS_ORIGINS', 'https://www.sapiensia.es, http://localhost:3000').split(',')
+    _raw_cors_origins = os.getenv(
+        'CORS_ORIGINS',
+        'https://www.sapiensia.es, http://localhost:3000'
+    )
+    CORS_ORIGINS = [
+        origin.strip()
+        for origin in _raw_cors_origins.split(',')
+        if origin.strip()
+    ]
     
     # Logging
     # Valores posibles: 'none', 'basic', 'detailed'
