@@ -2005,7 +2005,7 @@ class FastVirtualModuleGenerator(VerificationBaseService):
 
             student_vak = extract_vak_vector(cognitive_profile or {})
 
-            slides: List[Dict] = []
+            base_slides: List[Dict] = []
             evaluations: List[Dict] = []
             optional_resources: List[Dict] = []
             orphan_interactives: List[Dict] = []
@@ -2021,7 +2021,12 @@ class FastVirtualModuleGenerator(VerificationBaseService):
                     continue
 
                 if ctype == 'slide':
-                    slides.append(content)
+                    content_id = normalize_id(content.get('_id') or content.get('id'))
+                    parent_id = normalize_id(content.get("parent_content_id"))
+                    if parent_id and parent_id != content_id:
+                        interactive_by_parent[parent_id].append(content)
+                    else:
+                        base_slides.append(content)
                     continue
 
                 if ctype in self.EVALUATION_CONTENT_TYPES:
@@ -2039,13 +2044,13 @@ class FastVirtualModuleGenerator(VerificationBaseService):
 
                 optional_resources.append(content)
 
-            slides.sort(key=sort_key)
+            base_slides.sort(key=sort_key)
             evaluations.sort(key=sort_key)
             optional_resources.sort(key=sort_key)
             orphan_interactives.sort(key=sort_key)
 
             best_variants: Dict[str, Dict] = {}
-            for slide in slides:
+            for slide in base_slides:
                 slide_id = normalize_id(slide.get('_id') or slide.get('id'))
                 if not slide_id:
                     continue
@@ -2075,7 +2080,7 @@ class FastVirtualModuleGenerator(VerificationBaseService):
                 next_order += 1
                 normalized_sequence.append(content)
 
-            for slide in slides:
+            for slide in base_slides:
                 slide_id = normalize_id(slide.get('_id') or slide.get('id'))
                 push_content(slide)
                 if slide_id and slide_id in best_variants:
