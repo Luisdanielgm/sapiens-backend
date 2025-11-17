@@ -1610,6 +1610,7 @@ class FastVirtualModuleGenerator(VerificationBaseService):
                     "rl_context_summary": selection.get("rl_context_summary"),
                     "rl_boost_details": selection.get("rl_boost_details"),
                     "vark_score": selection.get("vark_score"),
+                    "final_score": selection.get("final_score"),
                     "updated_at": now,
                 }
 
