@@ -134,8 +134,11 @@ def get_module_topics(module_id):
 @APIRoute.standard(auth_required_flag=True)
 def get_virtual_topic_contents(virtual_topic_id):
     """Obtiene todos los contenidos de un tema virtual específico."""
-    contents = virtual_topic_service.get_topic_contents(virtual_topic_id)
-    return APIRoute.success(data={"contents": contents})
+    payload_param = (request.args.get('payload') or request.args.get('view') or request.args.get('mode') or '').strip().lower()
+    light_flag = request.args.get('light', '').strip().lower()
+    light_mode = payload_param == 'light' or light_flag in ('1', 'true', 'yes')
+    contents = virtual_topic_service.get_topic_contents(virtual_topic_id, light_mode=light_mode)
+    return APIRoute.success(data={"contents": contents, "payload_profile": 'light' if light_mode else 'full'})
 
 @virtual_bp.route('/topic/<virtual_topic_id>/personalization', methods=['POST'])
 @APIRoute.standard(auth_required_flag=True, roles=[ROLES.get("STUDENT", "STUDENT")])

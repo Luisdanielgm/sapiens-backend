@@ -18,6 +18,71 @@ from .models import (
 )
 # Quiz y QuizResult eliminados - ahora se usan TopicContent y ContentResult
 
+HEAVY_CONTENT_KEYS = {
+    'content_html',
+    'rendered_html',
+    'raw_html',
+    'converted_html',
+    'html',
+    'markdown',
+    'raw_markdown',
+    'delta',
+    'delta_ops',
+    'quill_delta',
+    'rich_text',
+    'blocks',
+    'paragraphs',
+    'body',
+    'body_html',
+    'sections',
+    'transcript',
+    'document',
+    'document_html',
+    'iframe_html',
+    'story_html',
+    'slides_html',
+    'html_content',
+}
+
+
+def _strip_heavy_fields(node: Any) -> Any:
+    """
+    Remueve campos de HTML pesado o blobs innecesarios de un nodo arbitrario.
+    Preserva la estructura general para que el frontend pueda seguir leyendo metadatos.
+    """
+    if isinstance(node, dict):
+        sanitized: Dict[str, Any] = {}
+        for key, value in node.items():
+            key_lower = key.lower() if isinstance(key, str) else key
+            if key_lower in HEAVY_CONTENT_KEYS:
+                continue
+            if isinstance(value, (dict, list)):
+                sanitized[key] = _strip_heavy_fields(value)
+            else:
+                sanitized[key] = value
+        return sanitized
+    if isinstance(node, list):
+        return [_strip_heavy_fields(item) for item in node]
+    return node
+
+
+def _build_original_content_payload(raw_value: Any, light_mode: bool) -> Any:
+    if not light_mode:
+        return raw_value
+    if isinstance(raw_value, dict):
+        return _strip_heavy_fields(raw_value)
+    # Para strings enormes de HTML u otros tipos, devolvemos None en light mode
+    return None
+
+
+def _build_interactive_data_payload(raw_value: Any, light_mode: bool) -> Any:
+    if not light_mode:
+        return raw_value
+    if isinstance(raw_value, dict):
+        return _strip_heavy_fields(raw_value)
+    return None
+
+
 class VirtualModuleService(VerificationBaseService):
     """
     Servicio para gestionar módulos virtuales.
@@ -408,7 +473,7 @@ class VirtualTopicService(VerificationBaseService):
             print(f"Error al obtener temas del módulo: {str(e)}")
             return []
 
-    def get_topic_contents(self, virtual_topic_id: str) -> List[Dict]:
+    def get_topic_contents(self, virtual_topic_id: str, light_mode: bool = False) -> List[Dict]:
         """
         Obtiene todos los contenidos de un tema virtual específico.
         """
@@ -453,11 +518,21 @@ class VirtualTopicService(VerificationBaseService):
                     content["original_personalization_markers"] = original_content.get("personalization_markers", {})
                     content["original_slide_template"] = original_content.get("slide_template", "")
                     content["original_content_type"] = original_content.get("content_type", "unknown")
-                    content["original_content"] = original_content.get("content", "")
-                    content["original_interactive_data"] = original_content.get("interactive_data", {})
+                    content["original_content"] = _build_original_content_payload(
+                        original_content.get("content", {}),
+                        light_mode
+                    )
+                    content["original_interactive_data"] = _build_interactive_data_payload(
+                        original_content.get("interactive_data", {}),
+                        light_mode
+                    )
+                    if light_mode:
+                        content["payload_profile"] = "light"
                 
                 # Añadir un campo para distinguir el tipo de contenido en el frontend
                 content["source_type"] = "virtual_content"
+                if light_mode:
+                    content["payload_profile"] = "light"
                 all_content.append(content)
 
             # Formatear y añadir recursos legacy
