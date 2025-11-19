@@ -1602,35 +1602,51 @@ class FastVirtualModuleGenerator(VerificationBaseService):
         ordered_original_content_ids: Optional[List[str]] = None,
     ) -> Tuple[bool, Dict]:
         """
-        Persiste la selecci?n de variantes y el orden final enviado desde el frontend.
-        Si faltan virtuales para alg?n ID original, los crea antes de aplicar el orden.
+        Persiste la selección de variantes y el orden final enviado desde el frontend.
+        Si faltan virtuales para algún ID original, los crea antes de aplicar el orden.
         """
         try:
+            logging.info(f"[apply_topic_personalization] Iniciando para virtual_topic_id={virtual_topic_id}")
+            logging.info(f"[apply_topic_personalization] Recibiendo {len(selections or [])} selecciones, {len(ordered_content_ids or [])} ordered_content_ids, {len(ordered_original_content_ids or [])} ordered_original_content_ids")
+            
             try:
                 topic_oid = ObjectId(virtual_topic_id)
-            except Exception:
-                return False, {"error": "virtual_topic_id inv?lido"}
+                logging.info(f"[apply_topic_personalization] ObjectId creado exitosamente: {topic_oid}")
+            except Exception as e:
+                logging.error(f"[apply_topic_personalization] Error convirtiendo virtual_topic_id a ObjectId: {e}")
+                return False, {"error": "virtual_topic_id inválido"}
 
             virtual_topic = self.db.virtual_topics.find_one({"_id": topic_oid})
             if not virtual_topic:
+                logging.error(f"[apply_topic_personalization] Tema virtual no encontrado: {topic_oid}")
                 return False, {"error": "Tema virtual no encontrado"}
 
             student_id = virtual_topic.get("student_id")
             original_topic_id = virtual_topic.get("topic_id")
+            logging.info(f"[apply_topic_personalization] student_id={student_id}, original_topic_id={original_topic_id}")
+            
             if not original_topic_id:
+                logging.error(f"[apply_topic_personalization] El tema virtual no tiene topic_id referenciado")
                 return False, {"error": "El tema virtual no tiene topic_id referenciado"}
 
             topic_filter = {"topic_id": original_topic_id}
             try:
                 if not isinstance(original_topic_id, ObjectId):
                     topic_filter = {"topic_id": ObjectId(str(original_topic_id))}
-            except Exception:
+                    logging.info(f"[apply_topic_personalization] Convertido topic_id a ObjectId para filtro")
+            except Exception as e:
+                logging.warning(f"[apply_topic_personalization] No se pudo convertir topic_id a ObjectId, usando original: {e}")
                 topic_filter = {"topic_id": original_topic_id}
 
+            logging.info(f"[apply_topic_personalization] Buscando topic_contents con filtro: {topic_filter}")
             original_contents = list(self.db.topic_contents.find(topic_filter))
+            logging.info(f"[apply_topic_personalization] Encontrados {len(original_contents)} topic_contents originales")
             original_lookup = {str(doc["_id"]): doc for doc in original_contents}
 
+            logging.info(f"[apply_topic_personalization] Buscando virtual_topic_contents existentes")
             contents = list(self.db.virtual_topic_contents.find({"virtual_topic_id": topic_oid}))
+            logging.info(f"[apply_topic_personalization] Encontrados {len(contents)} virtual_topic_contents existentes")
+            
             document_map = {str(doc["_id"]): doc for doc in contents}
             virtual_by_original: Dict[str, Dict] = {
                 str(doc.get("content_id")): doc for doc in contents if doc.get("content_id")
@@ -1641,6 +1657,7 @@ class FastVirtualModuleGenerator(VerificationBaseService):
                 parent_id = doc.get("parent_content_id")
                 if parent_id:
                     variants_by_parent[str(parent_id)].append(doc)
+
 
             now = datetime.now()
             operations: List[UpdateOne] = []
@@ -1710,6 +1727,7 @@ class FastVirtualModuleGenerator(VerificationBaseService):
                         exc_create,
                     )
                     return None
+
 
             ordered_original_ids = ordered_original_content_ids or []
             original_ids_from_selections: List[str] = []
