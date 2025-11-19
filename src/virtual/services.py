@@ -473,7 +473,7 @@ class VirtualTopicService(VerificationBaseService):
             print(f"Error al obtener temas del módulo: {str(e)}")
             return []
 
-    def get_topic_contents(self, virtual_topic_id: str, light_mode: bool = False) -> List[Dict]:
+    def get_topic_contents(self, virtual_topic_id: str, light_mode: bool = False, include_all_variants: bool = False) -> List[Dict]:
         """
         Obtiene todos los contenidos de un tema virtual específico.
         """
@@ -489,18 +489,20 @@ class VirtualTopicService(VerificationBaseService):
             original_topic_id = virtual_topic.get("topic_id")
 
             # 2. Obtener los contenidos virtuales (el nuevo sistema)
-            virtual_contents = list(
-                self.db.virtual_topic_contents
-                .find({"virtual_topic_id": ObjectId(virtual_topic_id)})
-                .sort([("order", 1), ("created_at", 1)])
-            )
+            virtual_contents: List[Dict] = []
+            if not include_all_variants:
+                virtual_contents = list(
+                    self.db.virtual_topic_contents
+                    .find({"virtual_topic_id": ObjectId(virtual_topic_id)})
+                    .sort([("order", 1), ("created_at", 1)])
+                )
 
-            # Fallback: si no hay virtuales o no tienen personalización aplicada, devolver los contenidos originales
+            # Fallback: si no hay virtuales, no tienen personalización aplicada, o se pidieron todas las variantes
             has_personalization = any(
                 vc.get("selected_dynamic_variant") or vc.get("dynamic_variant_state")
                 for vc in virtual_contents
             )
-            if not virtual_contents or not has_personalization:
+            if include_all_variants or not virtual_contents or not has_personalization:
                 topic_filter = {"topic_id": original_topic_id}
                 try:
                     topic_filter = {"topic_id": ObjectId(original_topic_id)}
@@ -4560,4 +4562,5 @@ class AdaptiveUIOptimizationService:
                 "keyboard_navigation_enhanced": False
             }
         }
+
 

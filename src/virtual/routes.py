@@ -1,4 +1,4 @@
-from flask import request
+﻿from flask import request
 from flask_jwt_extended import get_jwt, get_jwt_identity
 from src.shared.standardization import APIBlueprint, APIRoute, ErrorCodes
 from src.shared.constants import ROLES
@@ -137,7 +137,8 @@ def get_virtual_topic_contents(virtual_topic_id):
     payload_param = (request.args.get('payload') or request.args.get('view') or request.args.get('mode') or '').strip().lower()
     light_flag = request.args.get('light', '').strip().lower()
     light_mode = payload_param == 'light' or light_flag in ('1', 'true', 'yes')
-    contents = virtual_topic_service.get_topic_contents(virtual_topic_id, light_mode=light_mode)
+    include_all_variants = (request.args.get('include_all_variants') or '').strip().lower() in ('1', 'true', 'yes')
+    contents = virtual_topic_service.get_topic_contents(virtual_topic_id, light_mode=light_mode, include_all_variants=include_all_variants)
     return APIRoute.success(data={"contents": contents, "payload_profile": 'light' if light_mode else 'full'})
 
 @virtual_bp.route('/topic/<virtual_topic_id>/personalization', methods=['POST'])
@@ -3473,3 +3474,4 @@ def get_module_progress(virtual_module_id):
             "Error interno del servidor",
             status_code=500
         )
+
