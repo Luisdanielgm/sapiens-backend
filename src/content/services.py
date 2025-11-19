@@ -3572,6 +3572,9 @@ class ContentResultService:
 
             if content_type:
                 query["content_type"] = content_type
+            else:
+                # Exclude slide_template by default when fetching all content
+                query["content_type"] = {"$ne": "slide_template"}
 
             if virtual_content_id:
                 vc_oid = self._safe_object_id(virtual_content_id)
