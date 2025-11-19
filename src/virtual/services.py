@@ -1,4 +1,4 @@
-from typing import Tuple, List, Dict, Optional, Any
+﻿from typing import Tuple, List, Dict, Optional, Any
 from collections import defaultdict
 from bson import ObjectId
 from datetime import datetime, timedelta
@@ -497,12 +497,20 @@ class VirtualTopicService(VerificationBaseService):
 
             # Fallback: si aún no se generaron contenidos virtuales (flujo diferido), devolver los originales
             if not virtual_contents:
+                topic_filter = {"topic_id": original_topic_id}
+                try:
+                    topic_filter = {"topic_id": ObjectId(original_topic_id)}
+                except Exception:
+                    topic_filter = {"topic_id": original_topic_id}
+
                 original_contents = list(
-                    self.db.topic_contents.find({"topic_id": ObjectId(original_topic_id)})
-                    .sort([("order", 1), ("created_at", 1)])
+                    self.db.topic_contents.find(topic_filter).sort([("order", 1), ("created_at", 1)])
                 )
                 fallback_contents = []
                 for content in original_contents:
+                    ctype = (content.get("content_type") or "").lower()
+                    if ctype == "slide_template":
+                        continue
                     content_id_str = str(content["_id"])
                     fallback_contents.append({
                         "_id": content_id_str,
@@ -1644,6 +1652,13 @@ class FastVirtualModuleGenerator(VerificationBaseService):
                         "apply_topic_personalization: ID original %s no encontrado en topic %s",
                         original_id,
                         original_topic_id,
+                    )
+                    return None
+                content_type = (original_doc.get("content_type") or "").lower()
+                if content_type == "slide_template":
+                    logging.info(
+                        "Se omite crear virtual para slide_template original_id=%s",
+                        original_id
                     )
                     return None
                 try:
@@ -4541,3 +4556,4 @@ class AdaptiveUIOptimizationService:
                 "keyboard_navigation_enhanced": False
             }
         }
+
