@@ -1930,6 +1930,9 @@ class ContentService(VerificationBaseService):
 
             if content_type:
                 query["content_type"] = content_type
+            else:
+                # Exclude slide_template by default when fetching all content
+                query["content_type"] = {"$ne": "slide_template"}
 
             # Proyección: por defecto (include_metadata=True) devuelve documentos completos para compatibilidad hacia atrás
             # Solo usar proyección mínima si include_metadata es explícito False
