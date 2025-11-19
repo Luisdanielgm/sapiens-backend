@@ -1821,14 +1821,6 @@ class FastVirtualModuleGenerator(VerificationBaseService):
         El orden definitivo será aplicado cuando el frontend envíe la secuencia del worker,
         por lo que aquí solo asignamos números enteros incrementales.
         """
-        override_order = content.get("_virtual_normalized_order") or content.get("virtual_normalized_order")
-        if isinstance(override_order, (int, float)):
-            return float(override_order)
-
-        base_order = content.get("order")
-        if isinstance(base_order, (int, float)):
-            return float(int(base_order))
-
         next_order = int(base_order_state.get("next_order", 1))
         base_order_state["next_order"] = next_order + 1
         return float(next_order)
