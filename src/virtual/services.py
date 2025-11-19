@@ -3,6 +3,7 @@ from collections import defaultdict
 from bson import ObjectId
 from datetime import datetime, timedelta
 import logging
+import traceback
 
 from pymongo import UpdateOne
 
@@ -1623,6 +1624,9 @@ class FastVirtualModuleGenerator(VerificationBaseService):
         Persiste la selección de variantes y el orden final enviado desde el frontend.
         """
         try:
+            logging.info(f"Applying personalization for topic {virtual_topic_id}")
+            logging.info(f"Selections: {len(selections) if selections else 0}, Ordered IDs: {len(ordered_content_ids) if ordered_content_ids else 0}")
+            
             try:
                 topic_oid = ObjectId(virtual_topic_id)
             except Exception:
@@ -1632,17 +1636,48 @@ class FastVirtualModuleGenerator(VerificationBaseService):
             if not contents:
                 return False, {"error": "No se encontraron contenidos para el tema virtual"}
 
+            # Map Virtual ID -> Virtual Document
             document_map = {str(doc["_id"]): doc for doc in contents}
+            
+            # Map Original ID -> Virtual Document (for looking up by content_id sent from frontend)
+            original_to_virtual_map = {}
+            original_content_ids = []
+            
+            for doc in contents:
+                if doc.get("content_id"):
+                    orig_id = str(doc["content_id"])
+                    original_to_virtual_map[orig_id] = doc
+                    original_content_ids.append(doc["content_id"])
+
+            # Fetch original contents to get parent_content_id (since VirtualTopicContent might miss it)
+            original_contents = list(self.db.topic_contents.find(
+                {"_id": {"$in": original_content_ids}},
+                {"parent_content_id": 1}
+            ))
+            
+            # Map Original Content ID -> Parent Content ID
+            content_parent_map = {
+                str(c["_id"]): str(c.get("parent_content_id") or "") 
+                for c in original_contents
+            }
+
+            # Group Virtual Documents by Parent ID (using the fetched parent info)
             variants_by_parent: Dict[str, List[Dict]] = defaultdict(list)
             for doc in contents:
-                parent_id = doc.get("parent_content_id")
+                if not doc.get("content_id"):
+                    continue
+                
+                orig_id = str(doc["content_id"])
+                parent_id = content_parent_map.get(orig_id)
+                
                 if parent_id:
-                    variants_by_parent[str(parent_id)].append(doc)
+                    variants_by_parent[parent_id].append(doc)
 
             operations: List[UpdateOne] = []
             now = datetime.now()
 
             if ordered_content_ids:
+                # ordered_content_ids are Virtual IDs (from atoms)
                 order_lookup = {
                     str(content_id): index + 1 for index, content_id in enumerate(ordered_content_ids)
                 }
@@ -1661,19 +1696,25 @@ class FastVirtualModuleGenerator(VerificationBaseService):
 
             applied = 0
             for selection in selections or []:
-                parent_id = str(selection.get("parent_content_id") or "")
-                variant_id = str(selection.get("variant_content_id") or "")
-                if not parent_id or not variant_id:
+                # IDs from frontend are Original IDs
+                parent_id_orig = str(selection.get("parent_content_id") or "")
+                variant_id_orig = str(selection.get("variant_content_id") or "")
+                
+                if not parent_id_orig or not variant_id_orig:
                     continue
 
-                base_doc = document_map.get(parent_id)
-                variant_doc = document_map.get(variant_id)
+                # Resolve to Virtual Documents
+                base_doc = original_to_virtual_map.get(parent_id_orig)
+                variant_doc = original_to_virtual_map.get(variant_id_orig)
+                
                 if not base_doc or not variant_doc:
+                    logging.warning(f"Could not resolve virtual docs for parent {parent_id_orig} or variant {variant_id_orig}")
                     continue
 
                 applied += 1
                 selection_payload = {
-                    "variant_content_id": variant_id,
+                    "variant_content_id": variant_id_orig, # Store original ID reference
+                    "virtual_variant_content_id": str(variant_doc["_id"]), # Store virtual ID reference too
                     "variant_label": selection.get("variant_label"),
                     "selection_reason": selection.get("reason"),
                     "selection_confidence": selection.get("confidence"),
@@ -1703,9 +1744,10 @@ class FastVirtualModuleGenerator(VerificationBaseService):
                     )
                 )
 
-                siblings = variants_by_parent.get(parent_id, [])
+                # Handle siblings using the map we built
+                siblings = variants_by_parent.get(parent_id_orig, [])
                 for sibling in siblings:
-                    if str(sibling["_id"]) == variant_id:
+                    if str(sibling["_id"]) == str(variant_doc["_id"]):
                         continue
                     operations.append(
                         UpdateOne(
@@ -1715,15 +1757,19 @@ class FastVirtualModuleGenerator(VerificationBaseService):
                     )
 
             if not operations:
+                logging.warning("No operations generated for personalization")
                 return False, {"error": "No se aplicaron cambios"}
 
+            logging.info(f"Executing {len(operations)} bulk operations")
             self.db.virtual_topic_contents.bulk_write(operations)
+            
             return True, {
                 "applied_variants": applied,
                 "reordered_contents": len(order_lookup),
             }
         except Exception as exc:
             logging.error(f"Error aplicando personalización del tema: {exc}")
+            logging.error(traceback.format_exc())
             return False, {"error": str(exc)}
 
 
