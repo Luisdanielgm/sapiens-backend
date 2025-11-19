@@ -495,8 +495,12 @@ class VirtualTopicService(VerificationBaseService):
                 .sort([("order", 1), ("created_at", 1)])
             )
 
-            # Fallback: si aún no se generaron contenidos virtuales (flujo diferido), devolver los originales
-            if not virtual_contents:
+            # Fallback: si no hay virtuales o no tienen personalización aplicada, devolver los contenidos originales
+            has_personalization = any(
+                vc.get("selected_dynamic_variant") or vc.get("dynamic_variant_state")
+                for vc in virtual_contents
+            )
+            if not virtual_contents or not has_personalization:
                 topic_filter = {"topic_id": original_topic_id}
                 try:
                     topic_filter = {"topic_id": ObjectId(original_topic_id)}
