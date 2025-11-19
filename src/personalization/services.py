@@ -182,9 +182,9 @@ class AdaptivePersonalizationService:
         )
         check_url = os.getenv("RL_HEALTH_CHECK_URL", info_url)
         try:
-            timeout = int(os.getenv("RL_HEALTH_CHECK_TIMEOUT", "3"))
+            timeout = int(os.getenv("RL_HEALTH_CHECK_TIMEOUT", "10"))
         except (ValueError, TypeError):
-            timeout = 3
+            timeout = 10
 
         try:
             info_resp = requests.get(info_url, timeout=timeout)
