@@ -1921,7 +1921,10 @@ class ContentService(VerificationBaseService):
         try:
             # Construir filtro de status por defecto según content_type si no se especifica
             if status_filter is None:
-                status_filter = DEFAULT_STATUS_BY_TYPE.get(content_type, DEFAULT_STATUS_BY_TYPE["default"])
+                # If no content_type is specified, use the broadest filter (slide) to ensure we get all variants
+                # regardless of their specific sub-status (like narrative_ready)
+                default_key = content_type if content_type else "slide"
+                status_filter = DEFAULT_STATUS_BY_TYPE.get(default_key, DEFAULT_STATUS_BY_TYPE["default"])
 
             query = {
                 "topic_id": ObjectId(topic_id),
