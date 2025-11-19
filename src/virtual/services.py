@@ -1300,13 +1300,10 @@ class FastVirtualModuleGenerator(VerificationBaseService):
                     result = self.db.virtual_topics.insert_one(virtual_topic.to_dict())
                     virtual_topic_id = str(result.inserted_id)
                     
-                    # Generar contenido personalizado para el tema
-                    self._generate_topic_contents_for_sync(
-                        topic_id=topic_id,
-                        virtual_topic_id=virtual_topic_id,
-                        cognitive_profile=cognitive_profile,
-                        student_id=student_id,
-                        preferences=preferences
+                    # Diferir la creación de virtual_topic_contents
+                    logging.info(
+                        "Tema virtual %s creado sin contenidos; se generarán tras la personalización.",
+                        virtual_topic_id
                     )
                 except Exception as e_topic:
                     logging.error(f"Error generando tema virtual para {topic['_id']}: {e_topic}")
@@ -1370,15 +1367,7 @@ class FastVirtualModuleGenerator(VerificationBaseService):
                     result = self.db.virtual_topics.insert_one(virtual_topic_data)
                     virtual_topic_id = str(result.inserted_id)
                     
-                    # Generar contenido personalizado para el tema nuevo
-                    self._generate_topic_contents_for_sync(
-                        topic_id=str(topic["_id"]),
-                        virtual_topic_id=virtual_topic_id,
-                        cognitive_profile=cognitive_profile,
-                        student_id=str(student_id),
-                        preferences={}
-                    )
-                    
+                    # Diferir la creación de virtual_topic_contents: se generarán tras personalización
                     report["added"].append({"type": "topic", "id": str(topic["_id"]), "virtual_topic_id": virtual_topic_id})
                 except Exception as e:
                     report["errors"].append({"type": "topic_add", "id": str(topic["_id"]), "error": str(e)})
@@ -1394,74 +1383,11 @@ class FastVirtualModuleGenerator(VerificationBaseService):
 
             # 2. Comparar Contenidos para cada tema existente
             for vt in virtual_topics:
-                original_topic_id = vt["topic_id"]
-                
-                original_contents = list(self.db.topic_contents.find({"topic_id": original_topic_id}))
-                virtual_contents = list(self.db.virtual_topic_contents.find({"virtual_topic_id": vt["_id"]}))
-
-                original_content_ids = {str(c["_id"]) for c in original_contents}
-                virtual_content_ids = {str(vc["content_id"]) for vc in virtual_contents}
-
-                # Contenido a añadir
-                contents_to_add = [c for c in original_contents if str(c["_id"]) not in virtual_content_ids]
-                for content in contents_to_add:
-                    try:
-                        logging.info(f"Sincronización: añadiendo nuevo contenido {content['_id']} a virtual_topic {vt['_id']}")
-                        
-                        # Crear VirtualTopicContent personalizado para el estudiante
-                        virtual_content_data = {
-                            "virtual_topic_id": vt["_id"],
-                            "content_id": content["_id"],
-                            "student_id": student_id,
-                            "personalization_data": {
-                                "adapted_for_profile": cognitive_profile,
-                                "sync_generated": True,
-                                "sync_date": datetime.now()
-                            },
-                            "adapted_content": None,  # Usar contenido original sin adaptación por ahora
-                            "interaction_tracking": {
-                                "access_count": 0,
-                                "total_time_spent": 0,
-                                "last_accessed": None,
-                                "completion_status": "not_started",
-                                "completion_percentage": 0.0,
-                                "sessions": 0,
-                                "best_score": None,
-                                "avg_score": None,
-                                "interactions": []
-                            },
-                            "access_permissions": {},
-                            "status": "active",
-                            "created_at": datetime.now(),
-                            "updated_at": datetime.now()
-                        }
-                        
-                        # Propagar render_engine e instance_id si el contenido original es una plantilla HTML
-                        if content.get("render_engine") == "html_template":
-                            virtual_content_data["render_engine"] = "html_template"
-                            if content.get("instance_id"):
-                                virtual_content_data["instance_id"] = content["instance_id"]
-
-                        # Insertar contenido virtual
-                        result = self.db.virtual_topic_contents.insert_one(virtual_content_data)
-                        virtual_content_id = str(result.inserted_id)
-                        
-                        report["added"].append({"type": "content", "id": str(content["_id"]), "virtual_content_id": virtual_content_id})
-                    except Exception as e:
-                        report["errors"].append({"type": "content_add", "id": str(content["_id"]), "error": str(e)})
-
-                # Contenido a eliminar
-                contents_to_remove_ids = [vc["_id"] for vc in virtual_contents if str(vc["content_id"]) not in original_content_ids]
-                if contents_to_remove_ids:
-                    self.db.virtual_topic_contents.update_many(
-                        {"_id": {"$in": contents_to_remove_ids}},
-                        {"$set": {"status": "archived", "updated_at": datetime.now()}}
-                    )
-                    report["removed"].extend([{"type": "content", "id": str(cid)} for cid in contents_to_remove_ids])
-                
-                # Contenido a actualizar (simplificado: por ahora no se detectan cambios internos)
-                # En una versión avanzada, se compararía un hash o `updated_at` de `TopicContent` vs `VirtualTopicContent`
-                
+                # Contenidos: se generarán al aplicar personalización; no crear/actualizar aquí.
+                logging.info(
+                    "Sincronización: contenidos de virtual_topic=%s se generarán tras personalización; se omite sync inmediata.",
+                    vt.get("_id"),
+                )
             # Registrar la actualización en el módulo virtual
             self.db.virtual_modules.update_one(
                 {"_id": ObjectId(virtual_module_id)},
@@ -1519,6 +1445,12 @@ class FastVirtualModuleGenerator(VerificationBaseService):
             cognitive_profile: Perfil cognitivo del estudiante
             student_id: ID del estudiante
         """
+        logging.info(
+            "Creación diferida de contenidos para virtual_topic_id=%s (topic=%s); se generarán al aplicar personalización.",
+            virtual_topic_id,
+            topic_id,
+        )
+        return
         try:
             # Obtener contenidos originales del tema
             original_contents = list(self.db.topic_contents.find({
@@ -3632,14 +3564,8 @@ class OptimizedQueueService(VerificationBaseService):
             result = self.db.virtual_topics.insert_one(virtual_topic_data)
             virtual_topic_id = str(result.inserted_id)
             
-            # Generar contenidos personalizados
-            self.fast_generator._generate_topic_contents_for_sync(
-                topic_id=str(original_topic["_id"]),
-                virtual_topic_id=virtual_topic_id,
-                cognitive_profile=cognitive_profile,
-                student_id=student_id,
-                preferences=preferences
-            )
+            # Diferir creación de contenidos (se generan tras personalización/worker)
+            logging.info("Tema virtual %s creado sin contenidos; se generarán tras personalización.", virtual_topic_id)
             
             logging.info(f"Tema virtual generado: {virtual_topic_id} ({'bloqueado' if is_locked else 'activo'})")
             return True, virtual_topic_id, topic_order
