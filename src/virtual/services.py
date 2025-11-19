@@ -1677,18 +1677,15 @@ class FastVirtualModuleGenerator(VerificationBaseService):
             now = datetime.now()
 
             if ordered_content_ids:
-                # ordered_content_ids are likely Original IDs (from atoms)
+                # ordered_content_ids are Original IDs (from atoms)
                 order_lookup = {
                     str(content_id): index + 1 for index, content_id in enumerate(ordered_content_ids)
                 }
                 for content_id, order_value in order_lookup.items():
-                    # Try to find by Virtual ID first, then by Original ID
-                    doc = document_map.get(content_id) or original_to_virtual_map.get(content_id)
-                    
+                    # Look up using the map of Original ID -> Virtual Doc
+                    doc = original_to_virtual_map.get(content_id)
                     if not doc:
-                        logging.warning(f"Could not resolve ordered content ID: {content_id}")
                         continue
-                        
                     operations.append(
                         UpdateOne(
                             {"_id": doc["_id"]},
