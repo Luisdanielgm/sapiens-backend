@@ -130,6 +130,45 @@ def get_module_topics(module_id):
     topics = virtual_topic_service.get_module_topics(module_id)
     return APIRoute.success(data={"topics": topics})
 
+@virtual_bp.route('/topic/<virtual_topic_id>', methods=['GET'])
+@APIRoute.standard(auth_required_flag=True)
+def get_virtual_topic(virtual_topic_id):
+    """Obtiene los detalles de un tema virtual específico, incluyendo el topic_id original"""
+    try:
+        virtual_topic = get_db().virtual_topics.find_one({"_id": ObjectId(virtual_topic_id)})
+        
+        if not virtual_topic:
+            return APIRoute.error(
+                ErrorCodes.NOT_FOUND,
+                "Tema virtual no encontrado",
+                status_code=404
+            )
+        
+        # Serializar ObjectIds a strings
+        result = {
+            "_id": str(virtual_topic["_id"]),
+            "virtual_module_id": str(virtual_topic.get("virtual_module_id")),
+            "topic_id": str(virtual_topic.get("topic_id")),
+            "student_id": str(virtual_topic.get("student_id")),
+            "order": virtual_topic.get("order", 0),
+            "status": virtual_topic.get("status", "locked"),
+            "locked": virtual_topic.get("locked", True),
+            "progress": virtual_topic.get("progress", 0.0),
+            "completion_status": virtual_topic.get("completion_status", "not_started"),
+            "adaptations": virtual_topic.get("adaptations", {}),
+            "created_at": virtual_topic.get("created_at")
+        }
+        
+        return APIRoute.success(data=result)
+    except Exception as e:
+        logging.error(f"Error obteniendo tema virtual {virtual_topic_id}: {str(e)}")
+        return APIRoute.error(
+            ErrorCodes.SERVER_ERROR,
+            str(e),
+            status_code=500
+        )
+
+
 @virtual_bp.route('/topic/<virtual_topic_id>/contents', methods=['GET'])
 @APIRoute.standard(auth_required_flag=True)
 def get_virtual_topic_contents(virtual_topic_id):
@@ -968,8 +1007,16 @@ def generate_virtual_topics(module_id: str, student_id: str, virtual_module_id: 
 
                 virtual_topic_id = result.inserted_id
                 
-            # Generar contenido personalizado para el tema
-            generate_personalized_content(topic_id, str(virtual_topic_id), cognitive_profile, student_id, preferences)
+            # NUEVO FLUJO: Los virtual_topic_contents se crean DESPUÉS de que el frontend
+            # ejecute los workers de selección y ordenamiento y envíe el resultado final
+            # al endpoint /personalization. Esto permite que el frontend trabaje con los
+            # topic_contents originales y asegura que el orden final sea correcto.
+            # La línea siguiente está comentada intencionalmente:
+            # generate_personalized_content(topic_id, str(virtual_topic_id), cognitive_profile, student_id, preferences)
+            logging.info(
+                f"Virtual topic {virtual_topic_id} creado sin contenidos. "
+                f"Los contenidos se generarán tras aplicar personalización desde el frontend."
+            )
             
         return True
     except Exception as e:
