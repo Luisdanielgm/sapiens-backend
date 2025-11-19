@@ -150,11 +150,13 @@ def apply_topic_personalization_route(virtual_topic_id):
         payload = request.get_json() or {}
         selections = payload.get('selections') or []
         ordered_ids = payload.get('ordered_content_ids') or []
+        ordered_original_ids = payload.get('ordered_original_content_ids') or []
 
         success, result = virtual_module_service.apply_topic_personalization(
             virtual_topic_id,
             selections,
             ordered_ids,
+            ordered_original_ids,
         )
 
         if not success:

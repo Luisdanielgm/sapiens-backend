@@ -1617,63 +1617,165 @@ class FastVirtualModuleGenerator(VerificationBaseService):
         self,
         virtual_topic_id: str,
         selections: List[Dict],
-        ordered_content_ids: List[str]
+        ordered_content_ids: List[str],
+        ordered_original_content_ids: Optional[List[str]] = None,
     ) -> Tuple[bool, Dict]:
         """
-        Persiste la selección de variantes y el orden final enviado desde el frontend.
+        Persiste la selecci?n de variantes y el orden final enviado desde el frontend.
+        Si faltan virtuales para alg?n ID original, los crea antes de aplicar el orden.
         """
         try:
             try:
                 topic_oid = ObjectId(virtual_topic_id)
             except Exception:
-                return False, {"error": "virtual_topic_id inválido"}
+                return False, {"error": "virtual_topic_id inv?lido"}
+
+            virtual_topic = self.db.virtual_topics.find_one({"_id": topic_oid})
+            if not virtual_topic:
+                return False, {"error": "Tema virtual no encontrado"}
+
+            student_id = virtual_topic.get("student_id")
+            original_topic_id = virtual_topic.get("topic_id")
+            if not original_topic_id:
+                return False, {"error": "El tema virtual no tiene topic_id referenciado"}
+
+            topic_filter = {"topic_id": original_topic_id}
+            try:
+                if not isinstance(original_topic_id, ObjectId):
+                    topic_filter = {"topic_id": ObjectId(str(original_topic_id))}
+            except Exception:
+                topic_filter = {"topic_id": original_topic_id}
+
+            original_contents = list(self.db.topic_contents.find(topic_filter))
+            original_lookup = {str(doc["_id"]): doc for doc in original_contents}
 
             contents = list(self.db.virtual_topic_contents.find({"virtual_topic_id": topic_oid}))
-            if not contents:
-                return False, {"error": "No se encontraron contenidos para el tema virtual"}
-
             document_map = {str(doc["_id"]): doc for doc in contents}
+            virtual_by_original: Dict[str, Dict] = {
+                str(doc.get("content_id")): doc for doc in contents if doc.get("content_id")
+            }
+
             variants_by_parent: Dict[str, List[Dict]] = defaultdict(list)
             for doc in contents:
                 parent_id = doc.get("parent_content_id")
                 if parent_id:
                     variants_by_parent[str(parent_id)].append(doc)
 
-            operations: List[UpdateOne] = []
             now = datetime.now()
+            operations: List[UpdateOne] = []
+            created_virtuals = 0
 
-            if ordered_content_ids:
-                order_lookup = {
-                    str(content_id): index + 1 for index, content_id in enumerate(ordered_content_ids)
-                }
-                for content_id, order_value in order_lookup.items():
+            def ensure_virtual_from_original(original_id: str) -> Optional[Dict]:
+                nonlocal created_virtuals
+                if not original_id:
+                    return None
+                if original_id in virtual_by_original:
+                    return virtual_by_original[original_id]
+                original_doc = original_lookup.get(original_id)
+                if not original_doc:
+                    logging.warning(
+                        "apply_topic_personalization: ID original %s no encontrado en topic %s",
+                        original_id,
+                        original_topic_id,
+                    )
+                    return None
+                try:
+                    payload = {
+                        "virtual_topic_id": topic_oid,
+                        "content_id": original_doc["_id"],
+                        "student_id": student_id,
+                        "content_type": original_doc.get("content_type", "unknown"),
+                        "parent_content_id": original_doc.get("parent_content_id"),
+                        "render_engine": original_doc.get("render_engine"),
+                        "instance_id": original_doc.get("instance_id"),
+                        "content": original_doc.get("content"),
+                        "personalization_data": original_doc.get("personalization_data") or {},
+                        "interaction_tracking": {
+                            "access_count": 0,
+                            "total_time_spent": 0,
+                            "last_accessed": None,
+                            "completion_status": "not_started",
+                            "completion_percentage": 0.0,
+                            "sessions": 0,
+                            "best_score": None,
+                            "avg_score": None,
+                            "interactions": []
+                        },
+                        "status": "active",
+                        "order": None,
+                        "created_at": now,
+                        "updated_at": now,
+                    }
+                    result = self.db.virtual_topic_contents.insert_one(payload)
+                    payload["_id"] = result.inserted_id
+                    virtual_by_original[original_id] = payload
+                    document_map[str(result.inserted_id)] = payload
+                    created_virtuals += 1
+                    parent_key = original_doc.get("parent_content_id")
+                    if parent_key:
+                        variants_by_parent[str(parent_key)].append(payload)
+                    return payload
+                except Exception as exc_create:
+                    logging.error(
+                        "Error creando virtual_topic_content para original %s: %s",
+                        original_id,
+                        exc_create,
+                    )
+                    return None
+
+            ordered_original_ids = ordered_original_content_ids or []
+            original_ids_from_selections: List[str] = []
+            for selection in selections or []:
+                if selection.get("parent_content_id"):
+                    original_ids_from_selections.append(str(selection["parent_content_id"]))
+                if selection.get("variant_content_id"):
+                    original_ids_from_selections.append(str(selection["variant_content_id"]))
+
+            required_original_ids = set(ordered_original_ids) | set(original_ids_from_selections)
+            for orig_id in required_original_ids:
+                ensure_virtual_from_original(orig_id)
+
+            contents = list(self.db.virtual_topic_contents.find({"virtual_topic_id": topic_oid}))
+            document_map = {str(doc["_id"]): doc for doc in contents}
+            virtual_by_original = {
+                str(doc.get("content_id")): doc for doc in contents if doc.get("content_id")
+            }
+
+            if ordered_original_ids:
+                for index, original_id in enumerate(ordered_original_ids):
+                    vdoc = virtual_by_original.get(original_id) or ensure_virtual_from_original(original_id)
+                    if not vdoc:
+                        continue
+                    operations.append(
+                        UpdateOne(
+                            {"_id": vdoc["_id"]},
+                            {"$set": {"order": index + 1, "updated_at": now}}
+                        )
+                    )
+            elif ordered_content_ids:
+                for index, content_id in enumerate(ordered_content_ids):
                     doc = document_map.get(content_id)
                     if not doc:
                         continue
                     operations.append(
                         UpdateOne(
                             {"_id": doc["_id"]},
-                            {"$set": {"order": order_value, "updated_at": now}}
+                            {"$set": {"order": index + 1, "updated_at": now}}
                         )
                     )
-            else:
-                order_lookup = {}
 
             applied = 0
             for selection in selections or []:
-                parent_id = str(selection.get("parent_content_id") or "")
-                variant_id = str(selection.get("variant_content_id") or "")
-                if not parent_id or not variant_id:
-                    continue
-
-                base_doc = document_map.get(parent_id)
-                variant_doc = document_map.get(variant_id)
-                if not base_doc or not variant_doc:
+                parent_key = str(selection.get("parent_content_id") or "")
+                variant_key = str(selection.get("variant_content_id") or "")
+                parent_doc = virtual_by_original.get(parent_key) or document_map.get(parent_key)
+                variant_doc = virtual_by_original.get(variant_key) or document_map.get(variant_key)
+                if not parent_doc or not variant_doc:
                     continue
 
                 applied += 1
                 selection_payload = {
-                    "variant_content_id": variant_id,
+                    "variant_content_id": str(variant_doc["_id"]),
                     "variant_label": selection.get("variant_label"),
                     "selection_reason": selection.get("reason"),
                     "selection_confidence": selection.get("confidence"),
@@ -1691,7 +1793,7 @@ class FastVirtualModuleGenerator(VerificationBaseService):
 
                 operations.append(
                     UpdateOne(
-                        {"_id": base_doc["_id"]},
+                        {"_id": parent_doc["_id"]},
                         {"$set": {"selected_dynamic_variant": selection_payload, "updated_at": now}}
                     )
                 )
@@ -1703,9 +1805,9 @@ class FastVirtualModuleGenerator(VerificationBaseService):
                     )
                 )
 
-                siblings = variants_by_parent.get(parent_id, [])
+                siblings = variants_by_parent.get(str(parent_doc.get("content_id")) or str(parent_doc.get("_id")), [])
                 for sibling in siblings:
-                    if str(sibling["_id"]) == variant_id:
+                    if str(sibling.get("_id")) == str(variant_doc["_id"]):
                         continue
                     operations.append(
                         UpdateOne(
@@ -1714,16 +1816,18 @@ class FastVirtualModuleGenerator(VerificationBaseService):
                         )
                     )
 
-            if not operations:
+            if not operations and created_virtuals == 0:
                 return False, {"error": "No se aplicaron cambios"}
 
-            self.db.virtual_topic_contents.bulk_write(operations)
+            if operations:
+                self.db.virtual_topic_contents.bulk_write(operations)
             return True, {
                 "applied_variants": applied,
-                "reordered_contents": len(order_lookup),
+                "reordered_contents": len(ordered_original_ids) if ordered_original_ids else len(ordered_content_ids),
+                "created_contents": created_virtuals,
             }
         except Exception as exc:
-            logging.error(f"Error aplicando personalización del tema: {exc}")
+            logging.error(f"Error aplicando personalizaci?n del tema: {exc}")
             return False, {"error": str(exc)}
 
 
