@@ -495,6 +495,41 @@ class VirtualTopicService(VerificationBaseService):
                 .sort([("order", 1), ("created_at", 1)])
             )
 
+            # Fallback: si aún no se generaron contenidos virtuales (flujo diferido), devolver los originales
+            if not virtual_contents:
+                original_contents = list(
+                    self.db.topic_contents.find({"topic_id": ObjectId(original_topic_id)})
+                    .sort([("order", 1), ("created_at", 1)])
+                )
+                fallback_contents = []
+                for content in original_contents:
+                    content_id_str = str(content["_id"])
+                    fallback_contents.append({
+                        "_id": content_id_str,
+                        "id": content_id_str,
+                        "virtual_topic_id": virtual_topic_id,
+                        "content_id": content_id_str,
+                        "student_id": str(virtual_topic.get("student_id")),
+                        "content_type": content.get("content_type", "unknown"),
+                        "personalization_data": content.get("personalization_data") or {},
+                        "interaction_tracking": {"completion_status": "not_started"},
+                        "status": "pending_personalization",
+                        "original_personalization_markers": content.get("personalization_markers", {}),
+                        "original_slide_template": content.get("slide_template", ""),
+                        "original_content_type": content.get("content_type", "unknown"),
+                        "original_content": _build_original_content_payload(
+                            content.get("content", {}),
+                            light_mode
+                        ),
+                        "original_interactive_data": _build_interactive_data_payload(
+                            content.get("interactive_data", {}),
+                            light_mode
+                        ),
+                        "source_type": "original_content_preview",
+                    })
+                # Si no hay virtuales, regresamos el preview original para que el frontend pueda correr workers
+                return fallback_contents
+
             # 3. Obtener los recursos del tema original (sistema legacy para compatibilidad)
             # Esto evita que el frontend entre en un bucle si todavía depende de 'topic_resources'
             topic_resources = list(self.db.topic_resources.find(
