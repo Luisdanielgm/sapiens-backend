@@ -1128,14 +1128,19 @@ def update_module_progress(module_id):
         progress = data.get('progress')  # Porcentaje de progreso (0-100)
         completion_status = data.get('completion_status', None)  # Estado opcional
         activity_data = data.get('activity_data', {})  # Datos de actividad
+
+        # Compatibilidad: permitir payload con topics_progress en la raíz
+        if not activity_data and 'topics_progress' in data:
+            activity_data = {'topics_progress': data.get('topics_progress', [])}
         
-        # Validar datos
-        if not isinstance(progress, (int, float)) or progress < 0 or progress > 100:
-            return APIRoute.error(
-                ErrorCodes.BAD_REQUEST,
-                "El progreso debe ser un número entre 0 y 100",
-                status_code=400
-            )
+        # Validar progreso solo si se envía explícitamente
+        if progress is not None:
+            if not isinstance(progress, (int, float)) or progress < 0 or progress > 100:
+                return APIRoute.error(
+                    ErrorCodes.BAD_REQUEST,
+                    "El progreso debe ser un número entre 0 y 100",
+                    status_code=400
+                )
         
         # Obtener información de workspace
         jwt_claims = get_jwt()
@@ -1162,6 +1167,14 @@ def update_module_progress(module_id):
                 "Módulo virtual no encontrado o sin acceso",
                 status_code=404
             )
+
+        if progress is None:
+            stored_progress = virtual_module.get("progress", 0) or 0
+            try:
+                progress = float(stored_progress)
+            except (TypeError, ValueError):
+                progress = 0.0
+            progress = max(0.0, min(100.0, progress))
             
         # Verificar que el usuario es el propietario o un profesor
         student_id = virtual_module.get("student_id")
