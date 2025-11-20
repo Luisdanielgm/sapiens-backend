@@ -192,7 +192,8 @@ def apply_topic_personalization_route(virtual_topic_id):
         ordered_ids = payload.get('ordered_content_ids') or []
         ordered_original_ids = payload.get('ordered_original_content_ids') or []
 
-        success, result = virtual_module_service.apply_topic_personalization(
+        # El método está en FastVirtualModuleGenerator, no en VirtualModuleService
+        success, result = fast_generator.apply_topic_personalization(
             virtual_topic_id,
             selections,
             ordered_ids,
