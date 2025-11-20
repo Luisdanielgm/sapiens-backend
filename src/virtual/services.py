@@ -541,10 +541,13 @@ class VirtualTopicService(VerificationBaseService):
                 return fallback_contents
 
             # 3. Obtener los recursos del tema original (sistema legacy para compatibilidad)
-            # Esto evita que el frontend entre en un bucle si todavía depende de 'topic_resources'
-            topic_resources = list(self.db.topic_resources.find(
-                {"topic_id": ObjectId(original_topic_id)}
-            ).sort("created_at", 1))
+            # Solo si no hay virtuales (o se pidieron todas las variantes). Si ya hay virtuales,
+            # no mezclamos recursos legacy para evitar contaminar la lista.
+            topic_resources = []
+            if include_all_variants or not virtual_contents:
+                topic_resources = list(self.db.topic_resources.find(
+                    {"topic_id": ObjectId(original_topic_id)}
+                ).sort("created_at", 1))
             
             # 4. Unificar los resultados en una sola lista
             all_content = []
