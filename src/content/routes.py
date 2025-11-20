@@ -457,29 +457,6 @@ def create_bulk_slides():
 
 @content_bp.route('/topic/<topic_id>', methods=['GET'])
 @APIRoute.standard(auth_required_flag=True)
-def get_topic_content(topic_id):
-    """
-    Obtiene todo el contenido de un tema.
-    Query params: content_type (para filtrar por tipo específico)
-    """
-    try:
-        content_type = request.args.get('content_type')
-        
-        contents = content_service.get_topic_content(topic_id, content_type)
-
-        return APIRoute.success(data={"contents": contents})
-        
-    except Exception as e:
-        logging.error(f"Error obteniendo contenido del tema: {str(e)}")
-        return APIRoute.error(
-            ErrorCodes.SERVER_ERROR,
-            "Error interno del servidor",
-            status_code=500,
-        )
-
-
-@content_bp.route('/topic/<topic_id>/type/<content_type>', methods=['GET'])
-@APIRoute.standard(auth_required_flag=True)
 def get_topic_content_by_type(topic_id, content_type):
     """Obtiene el contenido de un tema filtrado por tipo"""
     try:
