@@ -497,12 +497,8 @@ class VirtualTopicService(VerificationBaseService):
                     .sort([("order", 1), ("created_at", 1)])
                 )
 
-            # Fallback: si no hay virtuales, no tienen personalización aplicada, o se pidieron todas las variantes
-            has_personalization = any(
-                vc.get("selected_dynamic_variant") or vc.get("dynamic_variant_state")
-                for vc in virtual_contents
-            )
-            if include_all_variants or not virtual_contents or not has_personalization:
+            # Fallback: solo si no hay virtuales o se pidieron todas las variantes
+            if include_all_variants or not virtual_contents:
                 topic_filter = {"topic_id": original_topic_id}
                 try:
                     topic_filter = {"topic_id": ObjectId(original_topic_id)}
@@ -555,6 +551,9 @@ class VirtualTopicService(VerificationBaseService):
 
             # Formatear contenidos virtuales
             for content in virtual_contents:
+                ctype = (content.get("content_type") or "").lower()
+                if ctype == "slide_template":
+                    continue
                 content["_id"] = str(content["_id"])
                 content["virtual_topic_id"] = str(content["virtual_topic_id"])
                 content["content_id"] = str(content["content_id"])
