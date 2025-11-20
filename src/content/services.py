@@ -1,6 +1,6 @@
 from typing import Tuple, List, Dict, Optional, Any
 from bson import ObjectId
-from datetime import datetime, timedelta, date
+from datetime import datetime, timedelta
 import json
 import logging
 import threading
@@ -1987,19 +1987,10 @@ class ContentService(VerificationBaseService):
                         content["parent_content_id"] = str(content["parent_content_id"])
                     except Exception:
                         content["parent_content_id"] = content.get("parent_content_id")
-                
-                # Explicitly convert datetimes to avoid serialization issues
-                if isinstance(content.get("created_at"), (datetime, date)):
-                    content["created_at"] = content["created_at"].isoformat()
-                if isinstance(content.get("updated_at"), (datetime, date)):
-                    content["updated_at"] = content["updated_at"].isoformat()
-
             return contents
 
         except Exception as e:
-            import traceback
             logging.error(f"Error obteniendo contenido del tema: {str(e)}")
-            logging.error(traceback.format_exc())
             return []
     
     def get_structured_topic_content(self, topic_id: str, student_id: str = None) -> List[Dict]:
