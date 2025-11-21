@@ -45,7 +45,7 @@ class AdminDashboardService(BaseService):
             # Total de estudiantes activos (miembros de al menos una clase)
             active_students = len(list(self.db.class_members.distinct("user_id", {"role": "STUDENT"})))
             
-            # Institutos con m�s clases
+            # Institutos con más clases
             top_institutes = list(self.db.classes.aggregate([
                 {"$group": {"_id": "$institute_id", "count": {"$sum": 1}}},
                 {"$sort": {"count": -1}},
@@ -64,17 +64,17 @@ class AdminDashboardService(BaseService):
                 }}
             ]))
             
-            # Si por alguna raz�n hay menos de 5 institutos con clases, completar informaci�n
+            # Si por alguna razón hay menos de 5 institutos con clases, completar información
             if len(top_institutes) > 0:
                 # Verificar que todos los institutos tengan nombre
                 for institute in top_institutes:
                     if "name" not in institute or not institute["name"]:
-                        # Buscar el nombre del instituto en la colecci�n
+                        # Buscar el nombre del instituto en la colección
                         institute_info = self.db.institutes.find_one({"_id": institute["institute_id"]})
                         if institute_info:
                             institute["name"] = institute_info.get("name", "Sin nombre")
             
-            # M�tricas de rendimiento promedio por instituto
+            # Métricas de rendimiento promedio por instituto
             institutes_performance = list(self.db.institutes.aggregate([
                 {"$lookup": {
                     "from": "classes",
@@ -89,7 +89,7 @@ class AdminDashboardService(BaseService):
                 }}
             ]))
             
-            # Estad�sticas del sistema
+            # Estadísticas del sistema
             system_stats = {
                 "total_institutes": institutes_count,
                 "total_users": total_users,
@@ -98,7 +98,7 @@ class AdminDashboardService(BaseService):
                 "active_students": active_students
             }
             
-            # Datos recientes (�ltimos 30 d�as)
+            # Datos recientes (últimos 30 días)
             thirty_days_ago = datetime.now() - timedelta(days=30)
             
             new_users = self.db.users.count_documents({
@@ -140,17 +140,17 @@ class TeacherDashboardService(BaseService):
         self.class_analytics_service = ClassAnalyticsService()
         
     def generate_teacher_dashboard(self, teacher_id: str) -> Dict:
-        """Genera un dashboard para un profesor con m�tricas relevantes"""
+        """Genera un dashboard para un profesor con métricas relevantes"""
         try:
             logger = logging.getLogger(__name__)
             
-            # Obtener clases del profesor a trav�s de class_members
+            # Obtener clases del profesor a través de class_members
             memberships = list(self.db.class_members.find({
                 "user_id": ObjectId(teacher_id),
                 "role": "TEACHER"
             }))
             
-            logger.info(f"Encontradas {len(memberships)} membres�as para el profesor")
+            logger.info(f"Encontradas {len(memberships)} membresías para el profesor")
             
             if not memberships:
                 return TeacherDashboard(
@@ -167,7 +167,7 @@ class TeacherDashboardService(BaseService):
             # Extraer IDs de clases donde el profesor es miembro
             class_ids = [m["class_id"] for m in memberships]
             
-            # Obtener informaci�n de las clases
+            # Obtener información de las clases
             classes = list(self.db.classes.find({
                 "_id": {"$in": class_ids}
             }))
@@ -175,10 +175,10 @@ class TeacherDashboardService(BaseService):
             logger.info(f"Encontradas {len(classes)} clases para el profesor")
             logger.info(f"IDs de las clases encontradas: {[str(cls['_id']) for cls in classes]}")
                 
-            # M�tricas por clase
+            # Métricas por clase
             class_metrics = []
             
-            # Conjunto para almacenar IDs �nicos de estudiantes en todas las clases
+            # Conjunto para almacenar IDs únicos de estudiantes en todas las clases
             unique_student_ids = set()
             
             # Procesar cada clase
@@ -187,7 +187,7 @@ class TeacherDashboardService(BaseService):
                 class_name = cls.get("name", "Sin nombre")
                 logger.info(f"Procesando clase con ID: {class_id}, nombre: {class_name}")
                 
-                # Siempre a�adir la clase al dashboard con informaci�n b�sica
+                # Siempre añadir la clase al dashboard con información básica
                 class_data = {
                     "class_id": class_id,
                     "class_name": class_name,
@@ -198,20 +198,20 @@ class TeacherDashboardService(BaseService):
                     }
                 }
                 
-                # Intentar obtener estad�sticas m�s detalladas
+                # Intentar obtener estadísticas más detalladas
                 try:
                     stats = self.class_analytics_service.get_class_analytics(class_id)
                     if stats and isinstance(stats, dict):
-                        logger.info(f"Estad�sticas obtenidas para la clase {class_id}")
+                        logger.info(f"Estadísticas obtenidas para la clase {class_id}")
                         class_data["metrics"] = stats
                     else:
-                        logger.warning(f"No se pudieron obtener estad�sticas completas para la clase {class_id}")
+                        logger.warning(f"No se pudieron obtener estadísticas completas para la clase {class_id}")
                 except Exception as e:
-                    logger.error(f"Error obteniendo estad�sticas para la clase {class_id}: {str(e)}")
+                    logger.error(f"Error obteniendo estadísticas para la clase {class_id}: {str(e)}")
                 
-                # A�adir la clase al dashboard
+                # Añadir la clase al dashboard
                 class_metrics.append(class_data)
-                logger.info(f"A�adida clase al dashboard: {class_name}")
+                logger.info(f"Añadida clase al dashboard: {class_name}")
                 
                 # Recopilar IDs de estudiantes en esta clase para conteo preciso
                 try:
@@ -226,9 +226,9 @@ class TeacherDashboardService(BaseService):
                     logger.error(f"Error obteniendo estudiantes para clase {class_id}: {str(e)}")
             
             logger.info(f"Total de clases procesadas para el dashboard: {len(class_metrics)}")
-            logger.info(f"Total de estudiantes �nicos encontrados: {len(unique_student_ids)}")
+            logger.info(f"Total de estudiantes únicos encontrados: {len(unique_student_ids)}")
             
-            # M�tricas generales
+            # Métricas generales
             average_attendance = 0
             average_score = 0
             
@@ -258,16 +258,16 @@ class TeacherDashboardService(BaseService):
                     if score_values:
                         average_score = round(sum(score_values) / len(score_values), 2)
                 except Exception as e:
-                    logger.error(f"Error calculando m�tricas generales: {str(e)}")
+                    logger.error(f"Error calculando métricas generales: {str(e)}")
             
             overall_metrics = {
                 "total_classes": len(classes),
-                "total_students": len(unique_student_ids),  # Ahora usamos el conteo de estudiantes �nicos
+                "total_students": len(unique_student_ids),  # Ahora usamos el conteo de estudiantes únicos
                 "average_attendance": average_attendance,
                 "average_evaluation_score": average_score
             }
             
-            logger.info(f"M�tricas generales calculadas: {overall_metrics}")
+            logger.info(f"Métricas generales calculadas: {overall_metrics}")
                 
             dashboard = TeacherDashboard(
                 teacher_id=teacher_id,
@@ -278,10 +278,10 @@ class TeacherDashboardService(BaseService):
             # Guardar dashboard para historial/referencia
             dashboard_dict = dashboard.to_dict()
             
-            # Verificaci�n final para asegurar que las clases est�n incluidas
+            # Verificación final para asegurar que las clases están incluidas
             if len(dashboard_dict.get("classes", [])) != len(class_metrics):
-                logger.warning(f"Discrepancia en el n�mero de clases. Esperadas: {len(class_metrics)}, Obtenidas: {len(dashboard_dict.get('classes', []))}")
-                # Forzar la inclusi�n si hay discrepancia
+                logger.warning(f"Discrepancia en el número de clases. Esperadas: {len(class_metrics)}, Obtenidas: {len(dashboard_dict.get('classes', []))}")
+                # Forzar la inclusión si hay discrepancia
                 dashboard_dict["classes"] = class_metrics
             
             self.collection.insert_one(dashboard_dict)
@@ -292,7 +292,7 @@ class TeacherDashboardService(BaseService):
         except Exception as e:
             logger = logging.getLogger(__name__)
             logger.error(f"Error generando dashboard de profesor: {str(e)}", exc_info=True)
-            # Devolver un dashboard m�nimo para evitar errores
+            # Devolver un dashboard mínimo para evitar errores
             return {
                 "teacher_id": str(teacher_id),
                 "classes": [],
@@ -307,8 +307,8 @@ class TeacherDashboardService(BaseService):
 
     def generate_individual_teacher_dashboard(self, teacher_id: str, workspace_info: Dict) -> Dict:
         """Genera un dashboard individual para un profesor en workspace individual"""
-        # Para workspaces individuales, simplemente llamar al m�todo principal
-        # ya que la l�gica es la misma, solo cambia el contexto de workspace
+        # Para workspaces individuales, simplemente llamar al método principal
+        # ya que la lógica es la misma, solo cambia el contexto de workspace
         return self.generate_teacher_dashboard(teacher_id)
 
 
@@ -322,7 +322,7 @@ class StudentDashboardService(BaseService):
         self.student_subjects_analytics_service = StudentSubjectsAnalyticsService()
         
     def generate_student_dashboard(self, student_id: str, period_id: Optional[str] = None) -> Dict:
-        """Genera un dashboard para un estudiante con su progreso acad�mico"""
+        """Genera un dashboard para un estudiante con su progreso académico"""
         try:
             # Obtener clases del estudiante
             memberships = list(self.db.class_members.find({
@@ -347,7 +347,7 @@ class StudentDashboardService(BaseService):
             for class_id in class_ids:
                 cls_info = self.db.classes.find_one({"_id": ObjectId(class_id)})
                 if cls_info:
-                    # Crear estructura b�sica para la clase que siempre se a�adir�
+                    # Crear estructura básica para la clase que siempre se añadirá
                     class_data = {
                         "class_id": class_id,
                         "class_name": cls_info.get("name", "Sin nombre"),
@@ -369,14 +369,14 @@ class StudentDashboardService(BaseService):
                         student_id, class_id, period_id
                     )
                     
-                    # Si hay datos de rendimiento, actualizar la estructura b�sica
+                    # Si hay datos de rendimiento, actualizar la estructura básica
                     if performance:
                         class_data["performance"] = performance
                         
-                    # A�adir la clase al array, con o sin datos de rendimiento
+                    # Añadir la clase al array, con o sin datos de rendimiento
                     class_performances.append(class_data)
                 
-            # Obtener an�lisis por materias
+            # Obtener análisis por materias
             subjects_analytics = self.student_subjects_analytics_service.get_student_subjects_analytics(
                 student_id, period_id
             )
@@ -459,8 +459,8 @@ class StudentDashboardService(BaseService):
         }
     def generate_individual_student_dashboard(self, student_id: str, workspace_info: Dict, period_id: Optional[str] = None) -> Dict:
         """Genera un dashboard individual para un estudiante en workspace individual"""
-        # Para workspaces individuales, simplemente llamar al m�todo principal
-        # ya que la l�gica es la misma, solo cambia el contexto de workspace
+        # Para workspaces individuales, simplemente llamar al método principal
+        # ya que la lógica es la misma, solo cambia el contexto de workspace
         return self.generate_student_dashboard(student_id, period_id)
 
 
@@ -475,11 +475,11 @@ class InstituteDashboardService(BaseService):
         """Genera un dashboard completo para un instituto educativo"""
         logger = logging.getLogger(__name__)
         try:
-            # Validar que el ID sea v�lido
+            # Validar que el ID sea válido
             try:
                 ObjectId(institute_id)
             except Exception as e:
-                logger.error(f"ID de instituto inv�lido: {institute_id}, error: {str(e)}")
+                logger.error(f"ID de instituto inválido: {institute_id}, error: {str(e)}")
                 return None
             
             # Verificar si el instituto existe
@@ -490,31 +490,31 @@ class InstituteDashboardService(BaseService):
 
             logger.info(f"Generando dashboard para instituto: {institute_id}")
 
-            # Obtener m�tricas generales
+            # Obtener métricas generales
             overview_metrics = self._get_overview_metrics(institute_id)
             
-            # Estad�sticas por programa educativo
+            # Estadísticas por programa educativo
             programs_stats = self._get_programs_stats(institute_id)
             
-            # Estad�sticas por nivel educativo
+            # Estadísticas por nivel educativo
             levels_stats = self._get_levels_stats(institute_id)
             
-            # Estad�sticas por secci�n
+            # Estadísticas por sección
             sections_stats = self._get_sections_stats(institute_id)
             
-            # Estad�sticas por materia
+            # Estadísticas por materia
             subjects_stats = self._get_subjects_stats(institute_id)
             
-            # Estad�sticas por per�odo acad�mico
+            # Estadísticas por período académico
             periods_stats = self._get_periods_stats(institute_id)
             
-            # Estad�sticas de clases
+            # Estadísticas de clases
             classes_stats = self._get_classes_stats(institute_id)
             
-            # Estad�sticas de profesores
+            # Estadísticas de profesores
             teachers_stats = self._get_teachers_stats(institute_id)
             
-            # Estad�sticas de estudiantes
+            # Estadísticas de estudiantes
             students_stats = self._get_students_stats(institute_id)
             
             # Crear objeto dashboard
@@ -547,7 +547,7 @@ class InstituteDashboardService(BaseService):
             return None
     
     def _get_overview_metrics(self, institute_id: str) -> Dict[str, int]:
-        """Obtiene m�tricas generales del instituto"""
+        """Obtiene métricas generales del instituto"""
         try:
             # Contar programas educativos
             total_programs = self.db.educational_programs.count_documents({
@@ -575,7 +575,7 @@ class InstituteDashboardService(BaseService):
                 "level_id": {"$in": level_ids}
             })
             
-            # Contar per�odos acad�micos
+            # Contar períodos académicos
             total_periods = self.db.academic_periods.count_documents({
                 "level_id": {"$in": level_ids}
             })
@@ -601,11 +601,11 @@ class InstituteDashboardService(BaseService):
                 "role": "STUDENT"
             }))
             
-            # Obtener IDs �nicos de estudiantes
+            # Obtener IDs únicos de estudiantes
             student_ids = set(str(m["user_id"]) for m in class_members)
             total_students = len(student_ids)
             
-            # Obtener m�tricas de actividad
+            # Obtener métricas de actividad
             active_classes = self.db.classes.count_documents({
                 "level_id": {"$in": level_ids},
                 "status": "active"
@@ -625,11 +625,11 @@ class InstituteDashboardService(BaseService):
             }
             
         except Exception as e:
-            logging.getLogger(__name__).error(f"Error al obtener m�tricas generales: {str(e)}")
+            logging.getLogger(__name__).error(f"Error al obtener métricas generales: {str(e)}")
             return {}
     
     def _get_programs_stats(self, institute_id: str) -> List[Dict]:
-        """Obtiene estad�sticas por programa educativo"""
+        """Obtiene estadísticas por programa educativo"""
         try:
             programs = list(self.db.educational_programs.find({
                 "institute_id": ObjectId(institute_id)
@@ -644,7 +644,7 @@ class InstituteDashboardService(BaseService):
                     "program_id": program_id
                 })
                 
-                # Contar estudiantes por programa (a trav�s de niveles y clases)
+                # Contar estudiantes por programa (a través de niveles y clases)
                 levels = list(self.db.levels.find({"program_id": program_id}))
                 level_ids = [l["_id"] for l in levels]
                 
@@ -671,11 +671,11 @@ class InstituteDashboardService(BaseService):
             return result
             
         except Exception as e:
-            logging.getLogger(__name__).error(f"Error al obtener estad�sticas de programas: {str(e)}")
+            logging.getLogger(__name__).error(f"Error al obtener estadísticas de programas: {str(e)}")
             return []
     
     def _get_levels_stats(self, institute_id: str) -> List[Dict]:
-        """Obtiene estad�sticas por nivel educativo"""
+        """Obtiene estadísticas por nivel educativo"""
         try:
             # Obtener todos los programas del instituto
             programs = list(self.db.educational_programs.find({
@@ -693,7 +693,7 @@ class InstituteDashboardService(BaseService):
             for level in levels:
                 level_id = level["_id"]
                 
-                # Obtener conteo de secciones, materias y per�odos
+                # Obtener conteo de secciones, materias y períodos
                 sections_count = self.db.sections.count_documents({
                     "level_id": level_id
                 })
@@ -739,11 +739,11 @@ class InstituteDashboardService(BaseService):
             return result
             
         except Exception as e:
-            logging.getLogger(__name__).error(f"Error al obtener estad�sticas de niveles: {str(e)}")
+            logging.getLogger(__name__).error(f"Error al obtener estadísticas de niveles: {str(e)}")
             return []
     
     def _get_sections_stats(self, institute_id: str) -> Dict[str, any]:
-        """Obtiene estad�sticas de secciones"""
+        """Obtiene estadísticas de secciones"""
         try:
             # Obtener todos los programas y niveles del instituto
             programs = list(self.db.educational_programs.find({
@@ -763,7 +763,7 @@ class InstituteDashboardService(BaseService):
                 "level_id": {"$in": level_ids}
             }))
             
-            # Estad�sticas generales
+            # Estadísticas generales
             total_sections = len(sections)
             
             # Calcular capacidad promedio
@@ -777,7 +777,7 @@ class InstituteDashboardService(BaseService):
                 level_id = str(level["_id"])
                 sections_by_level[level_id] = sum(1 for s in sections if str(s.get("level_id")) == level_id)
             
-            # Calcular clases por secci�n
+            # Calcular clases por sección
             section_ids = [s["_id"] for s in sections]
             
             classes_by_section = {}
@@ -795,11 +795,11 @@ class InstituteDashboardService(BaseService):
             }
             
         except Exception as e:
-            logging.getLogger(__name__).error(f"Error al obtener estad�sticas de secciones: {str(e)}")
+            logging.getLogger(__name__).error(f"Error al obtener estadísticas de secciones: {str(e)}")
             return {}
     
     def _get_subjects_stats(self, institute_id: str) -> Dict[str, any]:
-        """Obtiene estad�sticas de materias"""
+        """Obtiene estadísticas de materias"""
         try:
             # Obtener todos los programas y niveles del instituto
             programs = list(self.db.educational_programs.find({
@@ -819,7 +819,7 @@ class InstituteDashboardService(BaseService):
                 "level_id": {"$in": level_ids}
             }))
             
-            # Estad�sticas generales
+            # Estadísticas generales
             total_subjects = len(subjects)
             
             # Materias por nivel
@@ -828,7 +828,7 @@ class InstituteDashboardService(BaseService):
                 level_id = str(level["_id"])
                 subjects_by_level[level_id] = sum(1 for s in subjects if str(s.get("level_id")) == level_id)
             
-            # Promedio de cr�ditos por materia
+            # Promedio de créditos por materia
             avg_credits = 0
             if total_subjects > 0:
                 avg_credits = sum(s.get("credits", 0) for s in subjects) / total_subjects
@@ -857,11 +857,11 @@ class InstituteDashboardService(BaseService):
             }
             
         except Exception as e:
-            logging.getLogger(__name__).error(f"Error al obtener estad�sticas de materias: {str(e)}")
+            logging.getLogger(__name__).error(f"Error al obtener estadísticas de materias: {str(e)}")
             return {}
     
     def _get_periods_stats(self, institute_id: str) -> Dict[str, any]:
-        """Obtiene estad�sticas de per�odos acad�micos"""
+        """Obtiene estadísticas de períodos académicos"""
         try:
             # Obtener todos los programas y niveles del instituto
             programs = list(self.db.educational_programs.find({
@@ -876,31 +876,31 @@ class InstituteDashboardService(BaseService):
             
             level_ids = [l["_id"] for l in levels]
             
-            # Obtener todos los per�odos
+            # Obtener todos los períodos
             periods = list(self.db.academic_periods.find({
                 "level_id": {"$in": level_ids}
             }))
             
-            # Estad�sticas generales
+            # Estadísticas generales
             total_periods = len(periods)
             
-            # Per�odos por nivel
+            # Períodos por nivel
             periods_by_level = {}
             for level in levels:
                 level_id = str(level["_id"])
                 periods_by_level[level_id] = sum(1 for p in periods if str(p.get("level_id")) == level_id)
             
-            # Per�odos por tipo
+            # Períodos por tipo
             periods_by_type = {}
             for period in periods:
                 period_type = period.get("type", "unknown")
                 periods_by_type[period_type] = periods_by_type.get(period_type, 0) + 1
             
-            # Per�odos activos vs inactivos
+            # Períodos activos vs inactivos
             now = datetime.now()
             active_periods = sum(1 for p in periods if p.get("start_date") <= now <= p.get("end_date", now))
             
-            # Calcular clases por per�odo
+            # Calcular clases por período
             period_ids = [p["_id"] for p in periods]
             
             classes_by_period = {}
@@ -919,11 +919,11 @@ class InstituteDashboardService(BaseService):
             }
             
         except Exception as e:
-            logging.getLogger(__name__).error(f"Error al obtener estad�sticas de per�odos: {str(e)}")
+            logging.getLogger(__name__).error(f"Error al obtener estadísticas de períodos: {str(e)}")
             return {}
     
     def _get_classes_stats(self, institute_id: str) -> Dict[str, any]:
-        """Obtiene estad�sticas de clases"""
+        """Obtiene estadísticas de clases"""
         try:
             # Obtener todos los programas y niveles del instituto
             programs = list(self.db.educational_programs.find({
@@ -943,7 +943,7 @@ class InstituteDashboardService(BaseService):
                 "level_id": {"$in": level_ids}
             }))
             
-            # Estad�sticas generales
+            # Estadísticas generales
             total_classes = len(classes)
             
             # Clases por nivel
@@ -975,7 +975,7 @@ class InstituteDashboardService(BaseService):
             if total_classes > 0:
                 avg_students_per_class = sum(students_by_class.values()) / total_classes
             
-            # Clases con m�s y menos estudiantes
+            # Clases con más y menos estudiantes
             most_students_class = max(students_by_class.items(), key=lambda x: x[1]) if students_by_class else ("", 0)
             least_students_class = min(students_by_class.items(), key=lambda x: x[1]) if students_by_class else ("", 0)
             
@@ -995,11 +995,11 @@ class InstituteDashboardService(BaseService):
             }
             
         except Exception as e:
-            logging.getLogger(__name__).error(f"Error al obtener estad�sticas de clases: {str(e)}")
+            logging.getLogger(__name__).error(f"Error al obtener estadísticas de clases: {str(e)}")
             return {}
     
     def _get_teachers_stats(self, institute_id: str) -> Dict[str, any]:
-        """Obtiene estad�sticas de profesores"""
+        """Obtiene estadísticas de profesores"""
         try:
             # Obtener todos los miembros del instituto con rol de profesor
             teacher_members = list(self.db.institute_members.find({
@@ -1047,7 +1047,7 @@ class InstituteDashboardService(BaseService):
                 total_teacher_classes = sum(classes_by_teacher.values())
                 avg_classes_per_teacher = total_teacher_classes / total_teachers
             
-            # Identificar profesores con m�s y menos clases
+            # Identificar profesores con más y menos clases
             teachers_by_classes = sorted(classes_by_teacher.items(), key=lambda x: x[1], reverse=True)
             top_teachers = teachers_by_classes[:5] if teachers_by_classes else []
             
@@ -1062,11 +1062,11 @@ class InstituteDashboardService(BaseService):
             }
             
         except Exception as e:
-            logging.getLogger(__name__).error(f"Error al obtener estad�sticas de profesores: {str(e)}")
+            logging.getLogger(__name__).error(f"Error al obtener estadísticas de profesores: {str(e)}")
             return {}
     
     def _get_students_stats(self, institute_id: str) -> Dict[str, any]:
-        """Obtiene estad�sticas de estudiantes"""
+        """Obtiene estadísticas de estudiantes"""
         try:
             # Obtener todos los programas y niveles del instituto
             programs = list(self.db.educational_programs.find({
@@ -1094,7 +1094,7 @@ class InstituteDashboardService(BaseService):
                 "role": "STUDENT"
             }))
             
-            # Identificar estudiantes �nicos
+            # Identificar estudiantes únicos
             unique_student_ids = set(str(m.get("user_id")) for m in student_class_members)
             total_students = len(unique_student_ids)
             
@@ -1126,7 +1126,7 @@ class InstituteDashboardService(BaseService):
                 
                 students_by_program[str(program_id)] = len(program_students)
             
-            # Calcular n�mero de clases por estudiante
+            # Calcular número de clases por estudiante
             classes_by_student = {}
             for member in student_class_members:
                 student_id = str(member.get("user_id"))
@@ -1145,7 +1145,7 @@ class InstituteDashboardService(BaseService):
             }
             
         except Exception as e:
-            logging.getLogger(__name__).error(f"Error al obtener estad�sticas de estudiantes: {str(e)}")
+            logging.getLogger(__name__).error(f"Error al obtener estadísticas de estudiantes: {str(e)}")
             return {} 
 
 

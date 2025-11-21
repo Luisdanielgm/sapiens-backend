@@ -30,6 +30,12 @@ FORBIDDEN_KEYS_ERROR_MSG = "Los campos 'provider' y 'model' no están permitidos
 FORBIDDEN_KEYS_ERROR_MSG_SHORT = "Los campos 'provider' y 'model' no están permitidos en payloads de contenido."
 SLIDE_PLAN_TYPE_ERROR_MSG = "El campo 'slide_plan' debe ser una cadena de texto (Markdown/texto plano), no un objeto JSON o array."
 
+# Allowlist de scripts externos seguros (framework visual de slides)
+SLIDE_SCRIPT_WHITELIST = [
+    "https://cdn.jsdelivr.net/gh/Luisdanielgm/framework_slide@c126feeade8624922fe87119bddaac4828061cd9/sapiens.js",
+    "https://cdn.jsdelivr.net/gh/Luisdanielgm/framework_slide@main/sapiens.js"
+]
+
 class ContentTypeService(VerificationBaseService):
     """
     Servicio para gestionar tipos de contenido unificados.
@@ -219,7 +225,7 @@ class ContentService(VerificationBaseService):
             low = raw.lower()
 
             # Prohibir tags peligrosos explícitos
-            base_dangerous = ["script", "object", "embed"]
+            base_dangerous = ["object", "embed"]
             if not allow_iframe:
                 base_dangerous.append("iframe")
 
@@ -228,6 +234,27 @@ class ContentService(VerificationBaseService):
                 if f"<{tag}" in low or f"</{tag}" in low:
                     logging.warning(f"validate_slide_html_content: encontrado tag prohibido <{tag}>")
                     return False, f"HTML contiene etiqueta <{tag}> prohibida"
+
+            # Permitir solo scripts externos expresamente autorizados
+            if "<script" in low:
+                script_tags = re.findall(r"<script[^>]*>", raw, flags=re.IGNORECASE)
+                if not script_tags:
+                    logging.warning("validate_slide_html_content: <script> sin tag de apertura reconocido")
+                    return False, "HTML contiene etiqueta <script> prohibida"
+                for tag in script_tags:
+                    src_match = re.search(r'src\s*=\s*"([^"]+)"|src\s*=\s*\'([^\']+)\'', tag, flags=re.IGNORECASE)
+                    src_value = None
+                    if src_match:
+                        src_value = src_match.group(1) or src_match.group(2)
+                    if not src_value:
+                        logging.warning("validate_slide_html_content: <script> sin atributo src")
+                        return False, "HTML contiene etiqueta <script> sin src (prohibido)"
+
+                    normalized_src = src_value.strip()
+                    normalized_src_base = normalized_src.split("?")[0].lower()
+                    if not any(normalized_src_base.startswith(allowed.lower()) for allowed in SLIDE_SCRIPT_WHITELIST):
+                        logging.warning(f"validate_slide_html_content: script src no permitido {normalized_src}")
+                        return False, "HTML contiene etiqueta <script> con src no autorizado"
 
             # Prohibir eventos inline (on*) salvo cuando se permite documento completo
             if not allow_full_document:
@@ -286,22 +313,39 @@ class ContentService(VerificationBaseService):
             if not html or not isinstance(html, str):
                 return ""
 
+            # Pre filtrar scripts permitidos y eliminar el resto
+            def _sanitize_script_tag(match):
+                attrs = match.group(1) or ""
+                src_match = re.search(r'src\s*=\s*"([^"]+)"|src\s*=\s*\'([^\']+)\'', attrs, flags=re.IGNORECASE)
+                if not src_match:
+                    return ""  # eliminar scripts sin src
+                src_value = (src_match.group(1) or src_match.group(2) or "").strip()
+                normalized_src_base = src_value.split("?")[0].lower()
+                if any(normalized_src_base.startswith(allowed.lower()) for allowed in SLIDE_SCRIPT_WHITELIST):
+                    # Forzamos script limpio y sin contenido inline
+                    return f'<script src="{src_value}"></script>'
+                return ""
+
+            filtered_html = re.sub(r'<script([^>]*)>(.*?)</script>', _sanitize_script_tag, html, flags=re.IGNORECASE | re.DOTALL)
+            filtered_html = re.sub(r'<script([^>]*)/>', _sanitize_script_tag, filtered_html, flags=re.IGNORECASE)
+
             allowed_tags = [
                 'div', 'p', 'span', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6',
                 'ul', 'ol', 'li', 'a', 'img', 'strong', 'em', 'i', 'b',
                 'br', 'hr', 'blockquote', 'code', 'pre', 'table', 'tr', 'td',
-                'th', 'thead', 'tbody', 'caption'
+                'th', 'thead', 'tbody', 'caption', 'script'
             ]
             allowed_attrs = {
                 '*': ['class', 'style'],
                 'a': ['href', 'title'],
                 'img': ['src', 'alt', 'title'],
                 'table': ['border', 'cellpadding', 'cellspacing'],
+                'script': ['src'],
             }
             allowed_protocols = ['http', 'https', 'mailto']
 
             cleaned = bleach.clean(
-                html,
+                filtered_html,
                 tags=allowed_tags,
                 attributes=allowed_attrs,
                 protocols=allowed_protocols,
