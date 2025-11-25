@@ -32,7 +32,8 @@ SLIDE_PLAN_TYPE_ERROR_MSG = "El campo 'slide_plan' debe ser una cadena de texto 
 
 # Allowlist de scripts externos seguros (framework visual de slides)
 SLIDE_SCRIPT_WHITELIST = [
-    "https://cdn.jsdelivr.net/gh/Luisdanielgm/framework_slide@5bb682cb20625aaa50d09ee97592656bd5257c07/sapiens.js",
+    # Permitir cualquier version del framework de slides publicada en jsDelivr
+    "https://cdn.jsdelivr.net/gh/Luisdanielgm/framework_slide",
 ]
 
 class ContentTypeService(VerificationBaseService):
