@@ -31,8 +31,26 @@ class AdaptivePersonalizationService:
     def __init__(self):
         self.db = get_db()
         self.rl_api_url = os.getenv("RL_TUTOR_TOOL_URL", "http://149.50.139.104:8000/api/tools/msp/execute")
-        self.rl_request_timeout = int(os.getenv("RL_TUTOR_TOOL_TIMEOUT", "12"))
-        self.rl_request_retries = int(os.getenv("RL_TUTOR_TOOL_RETRIES", "2"))
+        try:
+            configured_timeout = int(os.getenv("RL_TUTOR_TOOL_TIMEOUT", "12"))
+        except (ValueError, TypeError):
+            configured_timeout = 12
+        # Mantener timeout por debajo del limite de Vercel incluso con reintentos
+        self.rl_request_timeout = max(1, min(configured_timeout, 4))
+
+        try:
+            configured_retries = int(os.getenv("RL_TUTOR_TOOL_RETRIES", "2"))
+        except (ValueError, TypeError):
+            configured_retries = 2
+        self.rl_request_retries = max(1, min(configured_retries, 3))
+
+        try:
+            configured_budget = int(os.getenv("RL_TOTAL_TIMEOUT", "8"))
+        except (ValueError, TypeError):
+            configured_budget = 8
+        # Presupuesto total para todas las llamadas al RL (incluye reintentos)
+        self.rl_total_timeout = max(2, min(configured_budget, 9))
+
         self.rl_circuit_breaker_threshold = int(os.getenv("RL_CIRCUIT_BREAKER_THRESHOLD", "3"))
         self.rl_circuit_reset_seconds = int(os.getenv("RL_CIRCUIT_BREAKER_RESET_SECONDS", "60"))
         self._rl_failure_count = 0
@@ -182,9 +200,13 @@ class AdaptivePersonalizationService:
         )
         check_url = os.getenv("RL_HEALTH_CHECK_URL", info_url)
         try:
-            timeout = int(os.getenv("RL_HEALTH_CHECK_TIMEOUT", "10"))
+            configured_timeout = int(os.getenv("RL_HEALTH_CHECK_TIMEOUT", "10"))
         except (ValueError, TypeError):
-            timeout = 10
+            configured_timeout = 10
+
+        # Vercel serverless corta a los 10s; limitamos para evitar 504
+        timeout = max(1, min(configured_timeout, 4))
+        start_time = time.perf_counter()
 
         try:
             info_resp = requests.get(info_url, timeout=timeout)
@@ -199,10 +221,10 @@ class AdaptivePersonalizationService:
                 status["rl_service"]["message"] = f"Respuesta inesperada: {response.status_code}"
                 status["fallback_mode"] = True
         except requests.RequestException as exc:
-            status["rl_service"]["message"] = str(exc)
+            status["rl_service"]["message"] = f"health check failed: {exc}"
             status["fallback_mode"] = True
         except Exception as exc:
-            status["rl_service"]["message"] = str(exc)
+            status["rl_service"]["message"] = f"health check error: {exc}"
             status["fallback_mode"] = True
         circuit_open = self._is_circuit_open()
         status["circuit_breaker"] = {
@@ -210,6 +232,7 @@ class AdaptivePersonalizationService:
             "opens_at": self._rl_circuit_open_until.isoformat() if self._rl_circuit_open_until else None,
         }
         status["fallback_mode"] = status["fallback_mode"] or circuit_open
+        status["latency_ms"] = int((time.perf_counter() - start_time) * 1000)
         return status
 
     def _generate_fallback_recommendations(self, student_id: str, topic_id: str, rl_context: Dict) -> Dict:
@@ -822,16 +845,23 @@ class AdaptivePersonalizationService:
         """
         payload = rl_request.to_rl_payload()
         last_error = None
+        started_at = time.perf_counter()
 
         if self._is_circuit_open():
             return RLModelResponse(success=False, error_message="Circuit breaker abierto por errores repetidos en el servicio RL")
 
         for attempt in range(max(1, self.rl_request_retries)):
+            elapsed = time.perf_counter() - started_at
+            remaining_budget = self.rl_total_timeout - elapsed
+            if remaining_budget <= 0:
+                last_error = last_error or "Tiempo total excedido al llamar al modelo RL"
+                break
+
             try:
                 response = requests.post(
                     self.rl_api_url,
                     json=payload,
-                    timeout=self.rl_request_timeout
+                    timeout=min(self.rl_request_timeout, max(1, remaining_budget))
                 )
 
                 if response.status_code == 200:
@@ -857,8 +887,8 @@ class AdaptivePersonalizationService:
             except Exception as e:
                 last_error = f"Error interno en llamada RL: {str(e)}"
 
-            if attempt < self.rl_request_retries - 1:
-                time.sleep(1)
+            if attempt < self.rl_request_retries - 1 and (time.perf_counter() - started_at) < self.rl_total_timeout:
+                time.sleep(0.5)
 
         self._record_rl_failure()
         return RLModelResponse(success=False, error_message=last_error or "Error desconocido al llamar al modelo RL")
