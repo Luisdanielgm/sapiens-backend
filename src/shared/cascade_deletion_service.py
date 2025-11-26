@@ -54,7 +54,8 @@ class CascadeDeletionService:
             # TopicContent dependencies
             'topic_contents': {
                 'virtual_topic_contents': 'original_content_id',
-                'content_results': 'content_id'
+                'content_results': 'content_id',
+                'template_usage': 'content_id'
             },
             
             # Evaluation dependencies

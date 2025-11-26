@@ -25,6 +25,7 @@ from src.content.models import ContentTypes, LearningMethodologyTypes
 from src.study_plans.services import TopicService
 from src.content.services import ContentResultService
 from src.evaluations.services import evaluation_service
+from src.shared.cascade_deletion_service import CascadeDeletionService
 
 virtual_bp = APIBlueprint('virtual', __name__)
 # quiz_bp eliminado - ahora los quizzes se manejan como TopicContent
@@ -37,6 +38,7 @@ queue_service = ServerlessQueueService()
 fast_generator = FastVirtualModuleGenerator()
 change_detector = ContentChangeDetector()
 content_result_service = ContentResultService()
+cascade_service = CascadeDeletionService()
 
 
 def _regrade_evaluations_async(student_id: str, topic_id: str, module_id: Optional[str]) -> None:
@@ -2200,6 +2202,52 @@ def get_student_content_results(student_id):
         )
 
 # ===== ENDPOINTS PARA CONTENTRESULT AUTOMÁTICO =====
+
+@virtual_bp.route('/cleanup/topic/<topic_id>', methods=['DELETE'])
+@auth_required
+def cleanup_virtual_by_topic(topic_id):
+    """
+    Elimina en cascada todos los virtual_topics (y dependencias) asociados a un topic dado,
+    y los virtual_modules que los contienen. No elimina el topic ni sus topic_contents.
+    """
+    try:
+        topic_oid = ObjectId(topic_id)
+    except Exception:
+        return APIRoute.error(ErrorCodes.BAD_REQUEST, "topic_id inválido")
+
+    db = get_db()
+    try:
+        virtual_topics = list(db.virtual_topics.find({"topic_id": topic_oid}, {"_id": 1, "virtual_module_id": 1}))
+        if not virtual_topics:
+            return APIRoute.success(
+                data={"virtual_topics_deleted": [], "virtual_modules_deleted": []},
+                message="No hay virtual_topics asociados a este topic"
+            )
+
+        vt_ids = [str(vt["_id"]) for vt in virtual_topics]
+        vm_ids = list({str(vt["virtual_module_id"]) for vt in virtual_topics if vt.get("virtual_module_id")})
+
+        vt_deleted = []
+        for vt_id in vt_ids:
+            res = cascade_service.delete_with_cascade("virtual_topics", vt_id, dry_run=False)
+            vt_deleted.append(res)
+
+        vm_deleted = []
+        for vm_id in vm_ids:
+            res = cascade_service.delete_with_cascade("virtual_modules", vm_id, dry_run=False)
+            vm_deleted.append(res)
+
+        return APIRoute.success(
+            data={
+                "virtual_topics_deleted": vt_ids,
+                "virtual_modules_deleted": vm_ids,
+                "details": {"virtual_topics": vt_deleted, "virtual_modules": vm_deleted}
+            },
+            message="Contenido virtual asociado al topic eliminado"
+        )
+    except Exception as e:
+        logging.error(f"Error eliminando contenido virtual por topic {topic_id}: {str(e)}")
+        return APIRoute.error(ErrorCodes.SERVER_ERROR, "Error eliminando contenido virtual")
 
 @virtual_bp.route('/content/<virtual_content_id>/complete-auto', methods=['POST'])
 @virtual_bp.route('/contents/<virtual_content_id>/auto-complete', methods=['POST'])
