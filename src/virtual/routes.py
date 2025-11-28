@@ -1677,6 +1677,30 @@ def trigger_next_generation():
                 status_code=500
             )
         
+        # Intentar procesar inmediatamente para entornos sin worker persistente
+        try:
+            # Marcar como procesando
+            if queue_service.mark_task_processing(task_id):
+                process_success, result = fast_generator.generate_single_module(
+                    student_id=student_id,
+                    module_id=next_module_id,
+                    timeout=50 # Dar tiempo suficiente
+                )
+                
+                if process_success:
+                    queue_service.complete_task(
+                        task_id, 
+                        {"virtual_module_id": result, "generated_immediately": True}
+                    )
+                    logging.info(f"Generación inmediata exitosa para tarea {task_id}")
+                else:
+                    # Si falla, dejamos que el manejo de errores decida si reintentar o fallar
+                    queue_service.fail_task(task_id, result)
+                    logging.warning(f"Generación inmediata falló para tarea {task_id}: {result}")
+        except Exception as process_err:
+            logging.error(f"Error en procesamiento inmediato: {process_err}")
+            # No fallamos el request completo, la tarea queda en la cola (o en estado processing/failed)
+        
         # 8. Obtener estado actualizado de la cola
         queue_status = queue_service.get_student_queue_status(student_id)
         
