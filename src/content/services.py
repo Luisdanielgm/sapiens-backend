@@ -3937,6 +3937,14 @@ class ContentResultService:
         if metadata.get("content_id") and not metadata.get("template_usage_id"):
             metadata["template_usage_id"] = metadata["content_id"]
         metadata["content_type"] = virtual_content.get("content_type")
+        metadata["render_engine"] = virtual_content.get("render_engine")
+        # Extraer content del virtual content para detectar attachment.type
+        vc_content = virtual_content.get("content") or {}
+        if vc_content.get("attachment", {}).get("type") == "interactive_template":
+            metadata["original_content"] = vc_content
+        if vc_content.get("interaction_mode"):
+            metadata["personalization_data"] = metadata.get("personalization_data") or {}
+            metadata["personalization_data"]["interaction_mode"] = vc_content.get("interaction_mode")
         metadata["virtual_topic_id"] = self._stringify_object_id(virtual_content.get("virtual_topic_id"))
         metadata["student_id"] = self._stringify_object_id(virtual_content.get("student_id"))
         metadata["personalization_data"] = personalization_data
