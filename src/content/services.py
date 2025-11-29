@@ -4171,6 +4171,72 @@ class ContentResultService:
         """
         return ContentResult.MINIMUM_SCORES.get(normalization_type, 0.0)
 
+    def calculate_weighted_topic_score(self, topic_id: str, student_id: str) -> Dict[str, Any]:
+        """
+        Calcula score ponderado del tema basado en todos los contenidos.
+        Usa CONTENT_WEIGHTS para ponderar por tipo de contenido.
+        
+        Returns:
+            Dict con weighted_score, breakdown por tipo, y total_contents
+        """
+        try:
+            results = self.get_student_results(student_id, topic_id=topic_id)
+            
+            if not results:
+                return {
+                    "weighted_score": 0.0,
+                    "total_contents": 0,
+                    "breakdown": {},
+                    "raw_average": 0.0,
+                }
+            
+            # Agrupar por tipo de normalizacion
+            by_type: Dict[str, List[float]] = {}
+            for result in results:
+                norm_type = result.get("normalization_type", ContentResult.NORMALIZATION_DEFAULT)
+                score = result.get("score", 0.0)
+                if norm_type not in by_type:
+                    by_type[norm_type] = []
+                by_type[norm_type].append(score)
+            
+            # Calcular score ponderado
+            weighted_sum = 0.0
+            weight_sum = 0.0
+            breakdown = {}
+            
+            for norm_type, scores in by_type.items():
+                avg_score = sum(scores) / len(scores) if scores else 0.0
+                weight = ContentResult.CONTENT_WEIGHTS.get(norm_type, 0.1)
+                weighted_contribution = avg_score * weight
+                weighted_sum += weighted_contribution
+                weight_sum += weight
+                breakdown[norm_type] = {
+                    "count": len(scores),
+                    "avg_score": round(avg_score, 4),
+                    "weight": weight,
+                    "weighted_contribution": round(weighted_contribution, 4),
+                }
+            
+            # Normalizar si hay pesos
+            final_score = weighted_sum / weight_sum if weight_sum > 0 else 0.0
+            raw_avg = sum(r.get("score", 0.0) for r in results) / len(results) if results else 0.0
+            
+            return {
+                "weighted_score": round(final_score, 4),
+                "total_contents": len(results),
+                "breakdown": breakdown,
+                "raw_average": round(raw_avg, 4),
+            }
+        except Exception as exc:
+            logging.error(f"Error calculando score ponderado para topic {topic_id}: {exc}")
+            return {
+                "weighted_score": 0.0,
+                "total_contents": 0,
+                "breakdown": {},
+                "raw_average": 0.0,
+                "error": str(exc),
+            }
+
     def _serialize_result(self, document: Dict) -> Dict:
         result = dict(document)
         result["_id"] = str(result["_id"])

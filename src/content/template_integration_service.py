@@ -8,6 +8,7 @@ from .services import ContentService
 from .template_services import TemplateService, TemplateInstanceService
 from .template_models import Template
 from .models import TopicContent
+from .template_validator import template_validator
 
 class TemplateIntegrationService:
     """
@@ -140,6 +141,18 @@ class TemplateIntegrationService:
 
             if not isinstance(content_payload, dict):
                 return False, "El contenido debe ser un objeto"
+
+            # Validar capacidad de reporte si hay content_html
+            content_html = content_payload.get("content_html")
+            if content_html:
+                validation_result = template_validator.validate_interactive_template(content_html)
+                if not validation_result["has_reporting"]:
+                    logging.warning(
+                        f"Template HTML sin capacidad de reporte para topic {topic_id}: "
+                        f"{validation_result.get('errors', [])}"
+                    )
+                if validation_result.get("warnings"):
+                    logging.warning(f"Advertencias en template HTML: {validation_result['warnings']}")
 
             normalized_metadata = self._prepare_template_metadata(
                 template_metadata or (template.defaults if isinstance(getattr(template, "defaults", None), dict) else None)

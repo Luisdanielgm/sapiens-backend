@@ -284,6 +284,14 @@ class ContentResult:
         "default": 0.0,
     }
 
+    # Pesos para calculo de score ponderado del tema
+    CONTENT_WEIGHTS = {
+        "quiz": 0.6,              # 60% del peso total
+        "interactive": 0.3,       # 30% del peso total
+        "slide_view": 0.1,        # 10% del peso total
+        "default": 0.1,
+    }
+
     def __init__(
         self,
         student_id: str,
