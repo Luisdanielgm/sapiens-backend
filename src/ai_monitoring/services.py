@@ -421,32 +421,20 @@ class AIMonitoringService(VerificationBaseService):
     
     def _get_model_prices(self, model_name: str = None, provider: Optional[str] = None) -> Optional[Dict]:
         """
-        Obtiene los precios de un modelo específico o de todos.
-        Prioriza la base de datos (AIModelService), luego fallback a hardcoded.
+        Obtiene los precios de un modelo específico o de todos únicamente desde la base de datos.
+        Sin fallback estático: si no hay datos en BD, devuelve {} o None.
         """
         db_prices = self._get_db_model_prices(active_only=True)
 
-        if db_prices:
-            if model_name:
-                if provider and provider in db_prices and model_name in db_prices[provider]:
-                    return db_prices[provider][model_name]
-                for db_provider, models in db_prices.items():
-                    if model_name in models:
-                        return models[model_name]
-            else:
-                return db_prices
-
-        legacy_prices = self._get_legacy_model_prices()
-
         if model_name:
-            if provider and provider in legacy_prices and model_name in legacy_prices[provider]:
-                return legacy_prices[provider][model_name]
-            for legacy_provider, models in legacy_prices.items():
+            if provider and provider in db_prices and model_name in db_prices[provider]:
+                return db_prices[provider][model_name]
+            for db_provider, models in db_prices.items():
                 if model_name in models:
                     return models[model_name]
             return None
 
-        return legacy_prices
+        return db_prices
 
     def _get_db_model_prices(self, active_only: bool = True) -> Dict:
         """Obtiene precios desde la colección ai_models."""
@@ -465,12 +453,6 @@ class AIMonitoringService(VerificationBaseService):
             }
 
         return prices
-
-    def _get_legacy_model_prices(self) -> Dict:
-        """Precios hardcodeados y configurables (fallback)."""
-        base_prices = self._get_base_model_prices()
-        custom_prices = self._get_custom_model_prices()
-        return self._merge_model_prices(base_prices, custom_prices)
     
     def _get_base_model_prices(self) -> Dict:
         """
@@ -570,36 +552,6 @@ class AIMonitoringService(VerificationBaseService):
                 "claude-instant-1.2": {"input": 0.00163, "output": 0.00551},
             }
         }
-    
-    def _get_custom_model_prices(self) -> Dict:
-        """
-        Obtiene precios personalizados desde la configuración de MongoDB.
-        Permite sobrescribir precios base o agregar nuevos modelos.
-        """
-        try:
-            config = self.config_collection.find_one()
-            if config and "custom_model_prices" in config:
-                return config["custom_model_prices"]
-        except Exception as e:
-            logging.warning(f"No se pudieron cargar precios personalizados: {str(e)}")
-        
-        return {}
-    
-    def _merge_model_prices(self, base_prices: Dict, custom_prices: Dict) -> Dict:
-        """
-        Combina precios base con precios personalizados.
-        Los precios personalizados tienen prioridad.
-        """
-        merged_prices = base_prices.copy()
-        
-        for provider, models in custom_prices.items():
-            if provider not in merged_prices:
-                merged_prices[provider] = {}
-            
-            for model_name, pricing in models.items():
-                merged_prices[provider][model_name] = pricing
-                
-        return merged_prices
     
     def add_custom_model_pricing(self, provider: str, model_name: str, input_price: float, output_price: float) -> Tuple[bool, str]:
         """

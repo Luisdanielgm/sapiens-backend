@@ -548,22 +548,6 @@ def list_ai_models():
         active_only = request.args.get('active_only', 'false').lower() == 'true'
         models = ai_monitoring_service.model_service.get_all_models(active_only=active_only)
 
-        if not models:
-            legacy_prices = ai_monitoring_service._get_legacy_model_prices()
-            for provider, provider_models in legacy_prices.items():
-                for model_key, pricing in provider_models.items():
-                    models.append({
-                        "id": model_key,
-                        "name": model_key,
-                        "provider": provider,
-                        "api_model_name": model_key,
-                        "input_price": pricing.get("input", 0.0),
-                        "output_price": pricing.get("output", 0.0),
-                        "is_active": True,
-                        "capabilities": ["chat"],
-                        "source": "legacy"
-                    })
-
         return APIRoute.success(
             data={"models": models},
             message=f"Se encontraron {len(models)} modelos"
@@ -694,10 +678,7 @@ def check_model_support():
         provider = data.get('provider')
         model_name = data.get('model_name')
 
-        db_pricing = ai_monitoring_service.model_service.get_model_pricing(provider, model_name)
-        legacy_pricing = ai_monitoring_service._get_legacy_model_prices().get(provider, {}).get(model_name)
-
-        pricing = db_pricing or legacy_pricing
+        pricing = ai_monitoring_service.model_service.get_model_pricing(provider, model_name)
         is_supported = pricing is not None
         
         response_data = {
