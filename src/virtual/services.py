@@ -3540,7 +3540,8 @@ class OptimizedQueueService(VerificationBaseService):
                     "locked_ahead": current_locked,
                     "completed_topics": len(completed_topics),
                     "total_generated": len(existing_virtual_topics),
-                    "remaining_original": len(available_topics)
+                    "remaining_original": len(available_topics),
+                    "details": []
                 }
             
             # Generar temas faltantes si hay disponibles
@@ -3550,7 +3551,8 @@ class OptimizedQueueService(VerificationBaseService):
                     "message": "Todos los temas originales ya fueron generados",
                     "total_generated": len(existing_virtual_topics),
                     "active_topics": current_active,
-                    "locked_ahead": current_locked
+                    "locked_ahead": current_locked,
+                    "details": []
                 }
             
             # Generar temas necesarios
