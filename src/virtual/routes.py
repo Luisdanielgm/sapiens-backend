@@ -1490,7 +1490,7 @@ def initialize_progressive_generation():
         pending_modules = [m for m in enabled_modules if m["_id"] not in generated_module_ids]
         
         # 5. Encolar los primeros 2-3 módulos para generación
-        batch_size = min(3, len(pending_modules))
+        batch_size = min(2, len(pending_modules))
         enqueued_tasks = []
         errors = []
         
