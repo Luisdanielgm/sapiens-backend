@@ -3497,11 +3497,11 @@ class OptimizedQueueService(VerificationBaseService):
                 "virtual_module_id": ObjectId(virtual_module_id)
             }).sort("order", 1))
             
-            # Obtener temas originales publicados ordenados
+            # Obtener temas originales publicados ordenados (primero por 'order', luego por creación)
             original_topics = list(self.db.topics.find({
                 "module_id": original_module_id,
                 "published": True
-            }).sort("created_at", 1))
+            }).sort([("order", 1), ("created_at", 1)]))
             
             if not original_topics:
                 return {"error": "No hay temas publicados en el módulo original"}
