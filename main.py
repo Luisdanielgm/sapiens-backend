@@ -135,7 +135,20 @@ def create_app(config_object=active_config):
             
         logger.info(f"API RESPONSE: {method} {path} - Status: {status}")
         if response_data and (is_special or api_logging == 'detailed'):
-            logger.info(f"Response Data: {response_data}")
+            # Evitar loguear cuerpos gigantes (contenidos/HTML/base64) en endpoints de contenidos virtuales
+            if path.startswith("/api/virtual/topic/") and "contents" in path:
+                try:
+                    # Loguear solo metadatos seguros
+                    contents = response_data.get("data", {}).get("contents") or response_data.get("contents")
+                    summary = {
+                        "count": len(contents) if isinstance(contents, list) else 0,
+                        "payload_profile": response_data.get("payload_profile") or response_data.get("data", {}).get("payload_profile"),
+                    }
+                    logger.info(f"Response Data (truncated): {summary}")
+                except Exception:
+                    logger.info("Response Data (truncated): <omitted large payload>")
+            else:
+                logger.info(f"Response Data: {response_data}")
             
         return response
 
