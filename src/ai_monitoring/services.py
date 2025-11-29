@@ -6,7 +6,175 @@ import logging
 from src.shared.database import get_db
 from src.shared.standardization import VerificationBaseService, ErrorCodes
 from src.shared.exceptions import AppException
-from .models import AICall, AIMonitoringConfig, AIMonitoringAlert, AIApiCall
+from .models import AICall, AIMonitoringConfig, AIMonitoringAlert, AIApiCall, AIModel
+
+class AIModelService(VerificationBaseService):
+    """
+    Servicio para la gestión de modelos de IA.
+    Permite crear, leer, actualizar y eliminar modelos de la base de datos.
+    """
+    
+    def __init__(self):
+        super().__init__(collection_name="ai_models")
+        self.db = get_db()
+        self._pricing_cache: Dict[str, Dict[str, Any]] = {}
+        self._cache_timestamp: Optional[datetime] = None
+        self._cache_ttl = timedelta(minutes=10)
+
+    def _invalidate_cache(self):
+        """Reset cache when models change."""
+        self._pricing_cache.clear()
+        self._cache_timestamp = None
+        
+    def create_model(self, model_data: Dict) -> Tuple[bool, Any]:
+        """Crea un nuevo modelo de IA."""
+        try:
+            # Verificar si ya existe
+            existing_model = self.collection.find_one({"id": model_data["id"]})
+            if existing_model:
+                return False, f"El modelo con ID '{model_data['id']}' ya existe"
+            
+            # Validar y crear
+            from .models import AIModel
+            model = AIModel(**model_data)
+            
+            # Insertar
+            result = self.collection.insert_one(model.model_dump())
+            
+            logging.info(f"Modelo creado: {model.id}")
+            self._invalidate_cache()
+            return True, model.model_dump()
+            
+        except Exception as e:
+            logging.error(f"Error al crear modelo: {str(e)}")
+            return False, str(e)
+            
+    def update_model(self, model_id: str, update_data: Dict) -> Tuple[bool, Any]:
+        """Actualiza un modelo existente."""
+        try:
+            existing_model = self.collection.find_one({"id": model_id})
+            if not existing_model:
+                return False, "Modelo no encontrado"
+            
+            update_data["updated_at"] = datetime.now()
+            
+            result = self.collection.update_one(
+                {"id": model_id},
+                {"$set": update_data}
+            )
+            
+            if result.modified_count > 0:
+                updated_model = self.collection.find_one({"id": model_id})
+                if updated_model:
+                    updated_model["_id"] = str(updated_model["_id"])
+                self._invalidate_cache()
+                return True, updated_model
+            else:
+                return True, existing_model
+                
+        except Exception as e:
+            logging.error(f"Error al actualizar modelo: {str(e)}")
+            return False, str(e)
+            
+    def delete_model(self, model_id: str) -> Tuple[bool, str]:
+        """Elimina un modelo."""
+        try:
+            result = self.collection.delete_one({"id": model_id})
+            
+            if result.deleted_count > 0:
+                logging.info(f"Modelo eliminado: {model_id}")
+                self._invalidate_cache()
+                return True, "Modelo eliminado exitosamente"
+            else:
+                return False, "Modelo no encontrado"
+                
+        except Exception as e:
+            logging.error(f"Error al eliminar modelo: {str(e)}")
+            return False, str(e)
+            
+    def get_all_models(self, active_only: bool = False) -> List[Dict]:
+        """Obtiene todos los modelos."""
+        try:
+            query = {}
+            if active_only:
+                query["is_active"] = True
+                
+            models = list(self.collection.find(query))
+            
+            for model in models:
+                model["_id"] = str(model["_id"])
+                
+            return models
+            
+        except Exception as e:
+            logging.error(f"Error al obtener modelos: {str(e)}")
+            return []
+            
+    def get_model(self, model_id: str, include_inactive: bool = True) -> Optional[Dict]:
+        """Obtiene un modelo por su ID lógico o api_model_name."""
+        try:
+            query: Dict[str, Any] = {
+                "$or": [
+                    {"id": model_id},
+                    {"api_model_name": model_id}
+                ]
+            }
+            if not include_inactive:
+                query["is_active"] = True
+            model = self.collection.find_one(query)
+            if model:
+                model["_id"] = str(model["_id"])
+            return model
+        except Exception as e:
+            logging.error(f"Error al obtener modelo {model_id}: {str(e)}")
+            return None
+
+    def get_models_by_provider(self, active_only: bool = True) -> Dict[str, List[Dict]]:
+        """Obtiene modelos agrupados por proveedor."""
+        grouped: Dict[str, List[Dict]] = {}
+        for model in self.get_all_models(active_only=active_only):
+            provider = model.get("provider")
+            grouped.setdefault(provider, []).append(model)
+        return grouped
+
+    def get_model_pricing(self, provider: str, model_name: str, include_inactive: bool = False) -> Optional[Dict[str, Any]]:
+        """Obtiene precios de un modelo desde BD con caché básico."""
+        try:
+            cache_key = f"{provider}:{model_name}"
+            now = datetime.utcnow()
+
+            cached = self._pricing_cache.get(cache_key)
+            if cached and self._cache_timestamp and (now - self._cache_timestamp) < self._cache_ttl:
+                return cached
+
+            query: Dict[str, Any] = {
+                "provider": provider,
+                "$or": [
+                    {"api_model_name": model_name},
+                    {"id": model_name}
+                ]
+            }
+            if not include_inactive:
+                query["is_active"] = True
+
+            model = self.collection.find_one(query)
+            if not model:
+                return None
+
+            pricing = {
+                "input": float(model.get("input_price", 0.0)),
+                "output": float(model.get("output_price", 0.0)),
+                "api_model_name": model.get("api_model_name"),
+                "id": model.get("id")
+            }
+
+            self._pricing_cache[cache_key] = pricing
+            self._cache_timestamp = now
+            return pricing
+        except Exception as e:
+            logging.error(f"Error al obtener precios de modelo {provider}/{model_name}: {str(e)}")
+            return None
+
 
 class AIMonitoringService(VerificationBaseService):
     """
@@ -19,6 +187,7 @@ class AIMonitoringService(VerificationBaseService):
         self.db = get_db()
         self.config_collection = self.db["ai_monitoring_config"]
         self.alerts_collection = self.db["ai_monitoring_alerts"]
+        self.model_service = AIModelService()
         
     def initialize_config(self) -> bool:
         """
@@ -206,19 +375,19 @@ class AIMonitoringService(VerificationBaseService):
                 provider = call.get("provider", "")
                 model_name = call.get("model_name", "")
                 
+                pricing = self.get_model_pricing(provider, model_name)
+                
                 # Calcular costos usando la función existente
                 total_estimated_cost = self._estimate_cost(provider, model_name, prompt_tokens)
                 
                 # Si tenemos completion_tokens, calcular costos más precisos
                 if completion_tokens > 0:
-                    # Obtener precios específicos del modelo
-                    prices = self._get_model_prices()
-                    provider_prices = prices.get(provider, {})
-                    model_prices = provider_prices.get(model_name, {"input": 0.001, "output": 0.002})
+                    input_price = pricing.get("input", 0.001)
+                    output_price = pricing.get("output", 0.002)
                     
                     # Calcular costos precisos
-                    input_cost = (prompt_tokens / 1000) * model_prices["input"]
-                    output_cost = (completion_tokens / 1000) * model_prices["output"]
+                    input_cost = (prompt_tokens / 1000) * input_price
+                    output_cost = (completion_tokens / 1000) * output_price
                     total_cost = input_cost + output_cost
                     
                     return {
@@ -239,21 +408,68 @@ class AIMonitoringService(VerificationBaseService):
             logging.error(f"Error al calcular costos del servidor: {str(e)}")
             return {}
     
-    def _get_model_prices(self) -> Dict:
+    def get_model_pricing(self, provider: str, model_name: str) -> Dict[str, float]:
+        """Obtiene precios para un modelo priorizando la BD."""
+        pricing = self._get_model_prices(model_name=model_name, provider=provider)
+        if pricing:
+            return {
+                "input": float(pricing.get("input", 0.0)),
+                "output": float(pricing.get("output", 0.0))
+            }
+        logging.warning(f"Usando precios por defecto para {provider}/{model_name}")
+        return {"input": 0.001, "output": 0.002}
+    
+    def _get_model_prices(self, model_name: str = None, provider: Optional[str] = None) -> Optional[Dict]:
         """
-        Obtiene los precios actualizados de los modelos.
-        En el futuro, esto podría venir de una base de datos o API externa.
-        
-        Returns:
-            Dict: Estructura de precios por proveedor y modelo
+        Obtiene los precios de un modelo específico o de todos.
+        Prioriza la base de datos (AIModelService), luego fallback a hardcoded.
         """
-        # Precios base desde configuración
+        db_prices = self._get_db_model_prices(active_only=True)
+
+        if db_prices:
+            if model_name:
+                if provider and provider in db_prices and model_name in db_prices[provider]:
+                    return db_prices[provider][model_name]
+                for db_provider, models in db_prices.items():
+                    if model_name in models:
+                        return models[model_name]
+            else:
+                return db_prices
+
+        legacy_prices = self._get_legacy_model_prices()
+
+        if model_name:
+            if provider and provider in legacy_prices and model_name in legacy_prices[provider]:
+                return legacy_prices[provider][model_name]
+            for legacy_provider, models in legacy_prices.items():
+                if model_name in models:
+                    return models[model_name]
+            return None
+
+        return legacy_prices
+
+    def _get_db_model_prices(self, active_only: bool = True) -> Dict:
+        """Obtiene precios desde la colección ai_models."""
+        prices: Dict[str, Dict[str, Dict[str, float]]] = {}
+        models = self.model_service.get_all_models(active_only=active_only)
+
+        for model in models:
+            provider = model.get("provider")
+            model_key = model.get("api_model_name") or model.get("id")
+            if not provider or not model_key:
+                continue
+            prices.setdefault(provider, {})[model_key] = {
+                "input": float(model.get("input_price", 0.0)),
+                "output": float(model.get("output_price", 0.0)),
+                "id": model.get("id")
+            }
+
+        return prices
+
+    def _get_legacy_model_prices(self) -> Dict:
+        """Precios hardcodeados y configurables (fallback)."""
         base_prices = self._get_base_model_prices()
-        
-        # Buscar precios personalizados en configuración (si existen)
         custom_prices = self._get_custom_model_prices()
-        
-        # Combinar precios base con personalizados
         return self._merge_model_prices(base_prices, custom_prices)
     
     def _get_base_model_prices(self) -> Dict:
@@ -878,20 +1094,15 @@ class AIMonitoringService(VerificationBaseService):
         Returns:
             float: Costo estimado
         """
-        # Obtenemos los precios desde la fuente única de verdad
-        prices = self._get_model_prices()
-        
-        provider_prices = prices.get(provider, {})
-        model_prices = provider_prices.get(model_name)
-
-        if not model_prices:
-            logging.warning(f"No se encontraron precios para el modelo '{model_name}' del proveedor '{provider}'. Usando precios por defecto.")
-            model_prices = {"input": 0.001, "output": 0.002}
+        prompt_tokens = prompt_tokens or 0
+        pricing = self.get_model_pricing(provider, model_name)
+        input_price = pricing.get("input", 0.001)
+        output_price = pricing.get("output", 0.002)
         
         # Estimar costo de entrada + salida estimada (asumimos 1.5x los tokens de entrada)
-        input_cost = (prompt_tokens / 1000) * model_prices["input"]
+        input_cost = (prompt_tokens / 1000) * input_price
         estimated_output_tokens = prompt_tokens * 1.5
-        output_cost = (estimated_output_tokens / 1000) * model_prices["output"]
+        output_cost = (estimated_output_tokens / 1000) * output_price
         
         return input_cost + output_cost
     

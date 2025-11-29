@@ -1523,7 +1523,7 @@ def initialize_progressive_generation():
                     "error": task_id
                 })
         
-        # 6. Procesar inmediatamente la primera tarea si hay tiempo
+        # 6. Procesar inmediatamente la primera tarea si hay tiempo (sin marcar completada hasta que haya contenidos)
         immediate_result = None
         if enqueued_tasks:
             first_task = enqueued_tasks[0]
@@ -1534,11 +1534,8 @@ def initialize_progressive_generation():
             )
             
             if success:
-                # Marcar tarea como completada
-                queue_service.complete_task(
-                    first_task["task_id"],
-                    {"virtual_module_id": result, "generated_immediately": True}
-                )
+                # Mantener la tarea como pending/processing hasta que se generen contenidos
+                queue_service.mark_task_processing(first_task["task_id"])
                 
                 immediate_result = {
                     "virtual_module_id": result,

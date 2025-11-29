@@ -357,3 +357,18 @@ class AIConfig(BaseModel):
             }
         }
     )
+
+class AIModel(BaseModel):
+    id: str = Field(..., description="ID lógico")
+    name: str = Field(..., description="Nombre mostrar")
+    provider: str
+    api_model_name: str
+    input_price: float
+    output_price: float
+    description: Optional[str] = None
+    context_window: Optional[int] = None
+    is_active: bool = True
+    capabilities: List[str] = Field(default_factory=lambda: ["chat"])
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+    updated_at: datetime = Field(default_factory=datetime.utcnow)
+    model_config = ConfigDict(protected_namespaces=())

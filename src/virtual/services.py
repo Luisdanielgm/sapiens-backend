@@ -1279,10 +1279,10 @@ class FastVirtualModuleGenerator(VerificationBaseService):
                 {"_id": ObjectId(virtual_module_id)},
                 {
                     "$set": {
-                        "generation_status": "completed",
-                        "generation_progress": 100,
-                        "completed_at": datetime.now()
-                    }
+                        "generation_status": "generating",
+                        "generation_progress": 50
+                    },
+                    "$unset": {"completed_at": ""}
                 }
             )
             
