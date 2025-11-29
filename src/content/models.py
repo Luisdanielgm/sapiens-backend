@@ -270,6 +270,20 @@ class VirtualTopicContent:
 class ContentResult:
     """Stores the outcome of a student's interaction with content."""
 
+    # Tipos de normalizacion para tracking
+    NORMALIZATION_SLIDE_VIEW = "slide_view"           # Slide normal: binario (visto/no visto)
+    NORMALIZATION_INTERACTIVE = "interactive"         # Slide interactiva: score del artefacto
+    NORMALIZATION_QUIZ = "quiz"                       # Quiz: score de respuestas correctas
+    NORMALIZATION_DEFAULT = "default"                 # Fallback generico
+
+    # Score minimo requerido para desbloquear avance por tipo
+    MINIMUM_SCORES = {
+        "quiz": 0.6,              # 60% para quizzes
+        "interactive": 0.0,       # Solo completar para interactivos
+        "slide_view": 0.0,        # Sin minimo para slides normales
+        "default": 0.0,
+    }
+
     def __init__(
         self,
         student_id: str,
@@ -290,6 +304,9 @@ class ContentResult:
         rl_context: Optional[Dict] = None,
         session_data: Optional[Dict] = None,
         learning_metrics: Optional[Dict] = None,
+        normalization_type: Optional[str] = None,
+        is_interactive: Optional[bool] = None,
+        minimum_score_required: Optional[float] = None,
         _id: Optional[ObjectId] = None,
         recorded_at: Optional[datetime] = None,
     ):
@@ -315,6 +332,9 @@ class ContentResult:
         self.rl_context = rl_context or {}
         self.session_data = session_data or {}
         self.learning_metrics = learning_metrics or {}
+        self.normalization_type = normalization_type or self.NORMALIZATION_DEFAULT
+        self.is_interactive = is_interactive
+        self.minimum_score_required = minimum_score_required
         self.recorded_at = recorded_at or datetime.now()
 
     def to_dict(self) -> dict:
@@ -349,6 +369,12 @@ class ContentResult:
             data["template_usage_id"] = self.template_usage_id
         if self.prediction_id:
             data["prediction_id"] = self.prediction_id
+        if self.normalization_type:
+            data["normalization_type"] = self.normalization_type
+        if self.is_interactive is not None:
+            data["is_interactive"] = self.is_interactive
+        if self.minimum_score_required is not None:
+            data["minimum_score_required"] = self.minimum_score_required
         return data
 
 

@@ -3862,11 +3862,20 @@ class ContentResultService:
         if personalization_data.get("selection_strategy") and "selection_strategy" not in metrics:
             metrics["selection_strategy"] = personalization_data.get("selection_strategy")
 
-        score = self._normalize_score(
+        # Detectar si es contenido interactivo
+        is_interactive = self._detect_content_interactivity(content_type, metadata)
+        
+        # Usar normalizacion por tipo para mejor precision
+        score, normalization_type = self._normalize_score_by_type(
             payload.get("score"),
             session_data,
             completion_percentage,
+            content_type,
+            is_interactive,
         )
+        
+        # Obtener score minimo requerido para este tipo
+        minimum_score_required = self.get_minimum_score_for_type(normalization_type)
 
         recorded_at = payload.get("recorded_at")
         if isinstance(recorded_at, str):
@@ -3903,6 +3912,9 @@ class ContentResultService:
             "rl_context": self._convert_objectids(rl_context),
             "session_data": self._convert_objectids(session_data),
             "learning_metrics": self._convert_objectids(learning_metrics),
+            "normalization_type": normalization_type,
+            "is_interactive": is_interactive,
+            "minimum_score_required": minimum_score_required,
             "recorded_at": recorded_at,
         }
         return normalized
@@ -4014,6 +4026,150 @@ class ContentResultService:
     ) -> float:
         """Exposes normalized score logic for reuse in routes."""
         return self._normalize_score(raw_score, session_data or {}, completion_percentage)
+
+    def _detect_content_interactivity(self, content_type: str, metadata: Dict) -> bool:
+        """
+        Detecta si un contenido es interactivo basandose en su tipo y metadata.
+        
+        Returns:
+            bool: True si es contenido interactivo (juego, simulacion, slide con template)
+        """
+        interactive_types = [
+            'game', 'simulation', 'interactive', 'interactive_exercise',
+            'virtual_lab', 'mini_game', 'challenge', 'gemini_live'
+        ]
+        
+        if content_type and content_type.lower() in interactive_types:
+            return True
+        
+        # Detectar slide interactiva por metadata
+        if content_type and content_type.lower() == 'slide':
+            personalization_data = metadata.get('personalization_data', {})
+            # Tiene attachment de template interactivo
+            if personalization_data.get('interaction_mode'):
+                return True
+            # Tiene template_instance_id (renderiza como html_template)
+            if metadata.get('template_instance_id'):
+                return True
+            # Tiene learning_objectives especificos de interactivo
+            if personalization_data.get('learning_objectives'):
+                return True
+        
+        return False
+
+    def _get_normalization_type(self, content_type: str, is_interactive: bool) -> str:
+        """
+        Determina el tipo de normalizacion a aplicar segun el contenido.
+        
+        Returns:
+            str: Tipo de normalizacion (slide_view, interactive, quiz, default)
+        """
+        if content_type and content_type.lower() == 'quiz':
+            return ContentResult.NORMALIZATION_QUIZ
+        
+        if is_interactive:
+            return ContentResult.NORMALIZATION_INTERACTIVE
+        
+        if content_type and content_type.lower() == 'slide':
+            return ContentResult.NORMALIZATION_SLIDE_VIEW
+        
+        return ContentResult.NORMALIZATION_DEFAULT
+
+    def _normalize_score_by_type(
+        self,
+        raw_score: Optional[Any],
+        session_data: Dict,
+        completion_percentage: Optional[Any],
+        content_type: str,
+        is_interactive: bool,
+    ) -> Tuple[float, str]:
+        """
+        Normaliza score segun el tipo de contenido.
+        
+        Returns:
+            Tuple[float, str]: (score_normalizado 0-1, tipo_normalizacion)
+        """
+        normalization_type = self._get_normalization_type(content_type, is_interactive)
+        
+        # Slide normal: binario basado en completion
+        if normalization_type == ContentResult.NORMALIZATION_SLIDE_VIEW:
+            completion_status = session_data.get('completion_status', '')
+            if completion_status == 'completed' or session_data.get('completed_at'):
+                return 1.0, normalization_type
+            # Si hay completion_percentage, usarlo
+            if completion_percentage is not None:
+                try:
+                    pct = float(completion_percentage)
+                    if pct > 1.0:
+                        pct = pct / 100.0
+                    return max(0.0, min(1.0, pct)), normalization_type
+                except (TypeError, ValueError):
+                    pass
+            return 1.0, normalization_type  # Default a completado si llego hasta aqui
+        
+        # Quiz: normalizar score de respuestas
+        if normalization_type == ContentResult.NORMALIZATION_QUIZ:
+            score = self._normalize_score(raw_score, session_data, completion_percentage)
+            return score, normalization_type
+        
+        # Contenido interactivo: normalizar score del artefacto
+        if normalization_type == ContentResult.NORMALIZATION_INTERACTIVE:
+            score = self._extract_interactive_score(raw_score, session_data, completion_percentage)
+            return score, normalization_type
+        
+        # Default
+        score = self._normalize_score(raw_score, session_data, completion_percentage)
+        return score, ContentResult.NORMALIZATION_DEFAULT
+
+    def _extract_interactive_score(
+        self,
+        raw_score: Optional[Any],
+        session_data: Dict,
+        completion_percentage: Optional[Any],
+    ) -> float:
+        """
+        Extrae y normaliza score de contenido interactivo.
+        Maneja diferentes escalas (0-100, 0-1000, puntos, etc.)
+        """
+        # Intentar obtener score de multiples fuentes
+        score = raw_score
+        if score is None:
+            score = session_data.get('score')
+        if score is None:
+            score = session_data.get('points')
+        if score is None:
+            score = session_data.get('final_score')
+        if score is None and completion_percentage is not None:
+            score = completion_percentage
+        if score is None:
+            # Si no hay score pero hay completion, asumir completado
+            if session_data.get('completed_at') or session_data.get('completion_status') == 'completed':
+                return 1.0
+            return 0.0
+        
+        try:
+            score = float(score)
+        except (TypeError, ValueError):
+            return 0.0
+        
+        # Detectar escala y normalizar
+        if score > 1000:
+            # Probablemente puntos de juego, cap a 1.0
+            score = 1.0
+        elif score > 100:
+            # Escala 0-1000
+            score = score / 1000.0
+        elif score > 1.0:
+            # Escala 0-100
+            score = score / 100.0
+        
+        return max(0.0, min(1.0, score))
+
+    def get_minimum_score_for_type(self, normalization_type: str) -> float:
+        """
+        Obtiene el score minimo requerido para un tipo de contenido.
+        """
+        return ContentResult.MINIMUM_SCORES.get(normalization_type, 0.0)
 
     def _serialize_result(self, document: Dict) -> Dict:
         result = dict(document)
