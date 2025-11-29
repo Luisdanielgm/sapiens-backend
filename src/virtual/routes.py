@@ -210,8 +210,8 @@ def apply_topic_personalization_route(virtual_topic_id):
                 status_code=400,
             )
 
-        # Después de aplicar la personalización, solo actualizar estados (sin generar más módulos)
-        # La generación de nuevos módulos se maneja via progressive-generation
+        # Después de aplicar la personalización, actualizar estados y procesar siguiente tarea si hay espacio
+        next_task_info = None
         try:
             virtual_topic = get_db().virtual_topics.find_one({"_id": ObjectId(virtual_topic_id)})
             if virtual_topic:
@@ -223,7 +223,7 @@ def apply_topic_personalization_route(virtual_topic_id):
                     module_id = str(virtual_module.get("module_id"))
                     
                     # Marcar la tarea de generación como completada
-                    get_db().virtual_generation_tasks.update_one(
+                    task_update = get_db().virtual_generation_tasks.update_one(
                         {
                             "student_id": ObjectId(student_id),
                             "module_id": ObjectId(module_id),
@@ -231,14 +231,57 @@ def apply_topic_personalization_route(virtual_topic_id):
                         },
                         {"$set": {"status": "completed", "completed_at": datetime.now()}}
                     )
+                    logging.info(f"[personalization] Tarea marcada como completada: matched={task_update.matched_count}, modified={task_update.modified_count}")
                     
                     # Actualizar el estado del módulo virtual
                     get_db().virtual_modules.update_one(
                         {"_id": virtual_module_id},
                         {"$set": {"generation_status": "completed", "generation_progress": 100, "updated_at": datetime.now()}}
                     )
+                    
+                    # Procesar siguiente tarea pendiente si existe
+                    logging.info(f"[personalization] Buscando siguiente tarea para student {student_id}")
+                    next_task = get_db().virtual_generation_tasks.find_one(
+                        {"student_id": ObjectId(student_id), "status": "pending"},
+                        sort=[("priority", 1), ("created_at", 1)]
+                    )
+                    logging.info(f"[personalization] Tarea encontrada: {next_task['_id'] if next_task else 'None'}")
+                    
+                    if next_task:
+                        next_module_id = str(next_task.get("module_id"))
+                        # Marcar como processing
+                        get_db().virtual_generation_tasks.update_one(
+                            {"_id": next_task["_id"]},
+                            {"$set": {"status": "processing", "processing_started_at": datetime.now()}}
+                        )
+                        
+                        # Generar el siguiente módulo
+                        gen_success, gen_result = fast_generator.generate_single_module(
+                            student_id=student_id,
+                            module_id=next_module_id,
+                            timeout=35
+                        )
+                        
+                        if gen_success:
+                            next_task_info = {
+                                "virtual_module_id": gen_result,
+                                "module_id": next_module_id
+                            }
+                            logging.info(f"[personalization] Siguiente módulo generado exitosamente: {gen_result}")
+                        else:
+                            logging.warning(f"[personalization] Error generando siguiente módulo: {gen_result}")
+                            # Revertir estado de la tarea si falla
+                            get_db().virtual_generation_tasks.update_one(
+                                {"_id": next_task["_id"]},
+                                {"$set": {"status": "pending"}}
+                            )
+                    else:
+                        logging.info(f"[personalization] No hay más tareas pendientes para student {student_id}")
+                        
         except Exception as post_process_err:
             logging.warning(f"Error en post-procesamiento de personalización: {post_process_err}")
+        
+        result["next_task"] = next_task_info
         
         return APIRoute.success(
             data=result,
