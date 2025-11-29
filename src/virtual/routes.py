@@ -1511,35 +1511,69 @@ def initialize_progressive_generation():
                 status_code=400
             )
 
-        # 4. Filtrar módulos que no han sido generados
+        # 4. Contar temas virtuales ya existentes (no completados por el estudiante)
+        existing_virtual_topics = get_db().virtual_topics.count_documents({
+            "student_id": ObjectId(student_id),
+            "completion_status": {"$in": ["not_started", "in_progress"]}
+        })
+        
+        # También contar temas de tareas pendientes/processing (aún no generados)
+        pending_tasks = list(get_db().virtual_generation_tasks.find({
+            "student_id": ObjectId(student_id),
+            "status": {"$in": ["pending", "processing"]}
+        }))
+        pending_task_module_ids = [t["module_id"] for t in pending_tasks]
+        
+        # Contar temas de tareas pendientes
+        pending_topics_count = 0
+        for task_mod_id in pending_task_module_ids:
+            pending_topics_count += get_db().topics.count_documents({
+                "module_id": task_mod_id,
+                "published": True
+            })
+        
+        total_topics_ahead = existing_virtual_topics + pending_topics_count
+        topics_needed = max(0, 3 - total_topics_ahead)
+        
+        logging.info(f"[progressive-generation] Temas existentes: {existing_virtual_topics}, en cola: {pending_topics_count}, total: {total_topics_ahead}, necesarios: {topics_needed}")
+        
+        if topics_needed == 0:
+            return APIRoute.success(
+                data={
+                    "message": "Ya hay suficientes temas por delante",
+                    "existing_topics": existing_virtual_topics,
+                    "pending_topics": pending_topics_count
+                },
+                message="Cola de generación ya está óptima"
+            )
+        
+        # 5. Filtrar módulos que no han sido generados ni tienen tarea pendiente
         already_generated = list(get_db().virtual_modules.find({
             "student_id": ObjectId(student_id),
             "module_id": {"$in": [m["_id"] for m in enabled_modules]}
         }))
-        
         generated_module_ids = [vm["module_id"] for vm in already_generated]
-        pending_modules = [m for m in enabled_modules if m["_id"] not in generated_module_ids]
         
-        # 5. Encolar módulos para generación: máximo 3 TEMAS (1 actual + 2 por delante)
-        # Calcular cuántos temas hay en los primeros módulos para no exceder 3
+        pending_modules = [
+            m for m in enabled_modules 
+            if m["_id"] not in generated_module_ids and m["_id"] not in pending_task_module_ids
+        ]
+        
+        # 6. Encolar módulos para generación: solo los necesarios
         topics_count = 0
         modules_to_enqueue = []
         for mod in pending_modules:
+            if topics_count >= topics_needed:
+                break
             mod_topics = get_db().topics.count_documents({
                 "module_id": mod["_id"],
                 "published": True
             })
-            if topics_count + mod_topics <= 3:
-                modules_to_enqueue.append(mod)
-                topics_count += mod_topics
-            else:
-                # Si agregar este módulo excede 3 temas, solo agregar si no hay ninguno aún
-                if not modules_to_enqueue:
-                    modules_to_enqueue.append(mod)
-                break
+            modules_to_enqueue.append(mod)
+            topics_count += mod_topics
         
         batch_size = len(modules_to_enqueue)
-        logging.info(f"[progressive-generation] Encolando {batch_size} módulos con {topics_count} temas totales")
+        logging.info(f"[progressive-generation] Encolando {batch_size} módulos con {topics_count} temas nuevos")
         enqueued_tasks = []
         errors = []
         
