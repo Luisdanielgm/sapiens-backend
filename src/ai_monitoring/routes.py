@@ -539,7 +539,7 @@ def export_data():
         )
 
 @ai_monitoring_bp.route('/models', methods=['GET'])
-@APIRoute.standard(auth_required_flag=True, roles=[ROLES["ADMIN"]])
+@APIRoute.standard(auth_required_flag=True)
 def list_ai_models():
     """
     Lista los modelos de IA desde la base de datos. Si la colección está vacía, devuelve los modelos legacy como fallback.
