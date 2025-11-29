@@ -210,16 +210,14 @@ def apply_topic_personalization_route(virtual_topic_id):
                 status_code=400,
             )
 
-        # Después de aplicar la personalización exitosamente, actualizar estados y procesar cola
-        next_task_info = None
+        # Después de aplicar la personalización, solo actualizar estados (sin generar más módulos)
+        # La generación de nuevos módulos se maneja via progressive-generation
         try:
-            # Obtener el virtual_topic para conseguir el virtual_module_id y student_id
             virtual_topic = get_db().virtual_topics.find_one({"_id": ObjectId(virtual_topic_id)})
             if virtual_topic:
                 virtual_module_id = virtual_topic.get("virtual_module_id")
                 student_id = str(virtual_topic.get("student_id"))
                 
-                # Obtener el virtual_module para conseguir el module_id original
                 virtual_module = get_db().virtual_modules.find_one({"_id": virtual_module_id})
                 if virtual_module:
                     module_id = str(virtual_module.get("module_id"))
@@ -231,106 +229,16 @@ def apply_topic_personalization_route(virtual_topic_id):
                             "module_id": ObjectId(module_id),
                             "status": {"$in": ["processing", "pending"]}
                         },
-                        {
-                            "$set": {
-                                "status": "completed",
-                                "completed_at": datetime.now()
-                            }
-                        }
+                        {"$set": {"status": "completed", "completed_at": datetime.now()}}
                     )
                     
                     # Actualizar el estado del módulo virtual
                     get_db().virtual_modules.update_one(
                         {"_id": virtual_module_id},
-                        {
-                            "$set": {
-                                "generation_status": "completed",
-                                "generation_progress": 100,
-                                "updated_at": datetime.now()
-                            }
-                        }
+                        {"$set": {"generation_status": "completed", "generation_progress": 100, "updated_at": datetime.now()}}
                     )
-                    
-                    # Verificar cuántos TEMAS virtuales ya están listos (con virtual_topic_contents)
-                    # pero aún no han sido completados por el estudiante
-                    # Excluimos el tema actual que se acaba de procesar
-                    current_topic_oid = ObjectId(virtual_topic_id)
-                    
-                    virtual_topics_with_contents = list(get_db().virtual_topic_contents.aggregate([
-                        {"$match": {"student_id": ObjectId(student_id)}},
-                        {"$group": {"_id": "$virtual_topic_id"}},
-                    ]))
-                    topics_with_contents_ids = [doc["_id"] for doc in virtual_topics_with_contents]
-                    
-                    # Contar temas listos pero no completados (excluyendo el actual)
-                    ready_not_completed = get_db().virtual_topics.count_documents({
-                        "student_id": ObjectId(student_id),
-                        "$and": [
-                            {"_id": {"$in": topics_with_contents_ids}},
-                            {"_id": {"$ne": current_topic_oid}}
-                        ],
-                        "completion_status": {"$in": ["not_started", "in_progress"]}
-                    })
-                    
-                    # También contar temas que existen pero aún no tienen contenidos (en proceso)
-                    generating_count = get_db().virtual_topics.count_documents({
-                        "student_id": ObjectId(student_id),
-                        "$and": [
-                            {"_id": {"$nin": topics_with_contents_ids}},
-                            {"_id": {"$ne": current_topic_oid}}
-                        ],
-                        "completion_status": {"$in": ["not_started", "in_progress"]}
-                    })
-                    
-                    total_ahead = ready_not_completed + generating_count
-                    
-                    # Solo procesar siguiente tarea si hay menos de 2 TEMAS por delante
-                    if total_ahead < 2:
-                        next_task = get_db().virtual_generation_tasks.find_one(
-                            {
-                                "student_id": ObjectId(student_id),
-                                "status": "pending"
-                            },
-                            sort=[("priority", 1), ("created_at", 1)]
-                        )
-                        
-                        if next_task:
-                            next_module_id = str(next_task.get("module_id"))
-                            # Marcar como processing
-                            get_db().virtual_generation_tasks.update_one(
-                                {"_id": next_task["_id"]},
-                                {
-                                    "$set": {
-                                        "status": "processing",
-                                        "processing_started_at": datetime.now()
-                                    }
-                                }
-                            )
-                            
-                            # Generar el siguiente módulo/tema
-                            gen_success, gen_result = fast_generator.generate_single_module(
-                                student_id=student_id,
-                                module_id=next_module_id,
-                                timeout=35
-                            )
-                            
-                            if gen_success:
-                                next_task_info = {
-                                    "virtual_module_id": gen_result,
-                                    "module_id": next_module_id,
-                                    "task_id": str(next_task["_id"])
-                                }
-                                logging.info(f"Siguiente módulo generado automáticamente: {gen_result}")
-                            else:
-                                logging.warning(f"No se pudo generar el siguiente módulo: {gen_result}")
-                    else:
-                        logging.info(f"Ya hay {total_ahead} temas virtuales por delante (listos={ready_not_completed}, en_proceso={generating_count}), no se genera más")
-                    
         except Exception as post_process_err:
             logging.warning(f"Error en post-procesamiento de personalización: {post_process_err}")
-
-        # Incluir información sobre la siguiente tarea en la respuesta
-        result["next_task"] = next_task_info
         
         return APIRoute.success(
             data=result,
@@ -1631,6 +1539,7 @@ def initialize_progressive_generation():
                 break
         
         batch_size = len(modules_to_enqueue)
+        logging.info(f"[progressive-generation] Encolando {batch_size} módulos con {topics_count} temas totales")
         enqueued_tasks = []
         errors = []
         
