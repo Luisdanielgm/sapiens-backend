@@ -3960,6 +3960,10 @@ class ContentResultService:
         if content_oid:
             topic_content = self.topic_contents.find_one({"_id": content_oid})
             if topic_content:
+                # Extraer render_engine del contenido original
+                metadata["render_engine"] = topic_content.get("render_engine")
+                # Extraer original_content para deteccion de interactividad
+                metadata["original_content"] = topic_content.get("content", {})
                 metadata["content_type"] = metadata.get("content_type") or topic_content.get("content_type")
                 metadata["topic_id"] = metadata.get("topic_id") or self._stringify_object_id(topic_content.get("topic_id"))
                 metadata["baseline_mix"] = (
@@ -4044,6 +4048,11 @@ class ContentResultService:
         
         # Detectar slide interactiva por metadata
         if content_type and content_type.lower() == 'slide':
+            # Verificar render_engine primero (mas confiable)
+            render_engine = metadata.get('render_engine', '')
+            if render_engine == 'html_template':
+                return True
+            
             personalization_data = metadata.get('personalization_data', {})
             # Tiene attachment de template interactivo
             if personalization_data.get('interaction_mode'):
@@ -4053,6 +4062,10 @@ class ContentResultService:
                 return True
             # Tiene learning_objectives especificos de interactivo
             if personalization_data.get('learning_objectives'):
+                return True
+            # Verificar en content original
+            original_content = metadata.get('original_content', {})
+            if original_content.get('attachment', {}).get('type') == 'interactive_template':
                 return True
         
         return False
@@ -4107,9 +4120,21 @@ class ContentResultService:
                     pass
             return 1.0, normalization_type  # Default a completado si llego hasta aqui
         
-        # Quiz: normalizar score de respuestas
+        # Quiz: normalizar score de respuestas - requiere score explicito
         if normalization_type == ContentResult.NORMALIZATION_QUIZ:
-            score = self._normalize_score(raw_score, session_data, completion_percentage)
+            # Para quizzes, el score debe venir del payload, no asumir 1.0 por default
+            quiz_score = raw_score
+            if quiz_score is None:
+                quiz_score = session_data.get('score')
+            if quiz_score is None:
+                quiz_score = session_data.get('quiz_score')
+            if quiz_score is None and completion_percentage is not None:
+                quiz_score = completion_percentage
+            # Si aun no hay score, usar 0 (no completado correctamente)
+            if quiz_score is None:
+                logging.warning("Quiz completado sin score explicito, usando 0.0")
+                return 0.0, normalization_type
+            score = self._normalize_score(quiz_score, session_data, completion_percentage)
             return score, normalization_type
         
         # Contenido interactivo: normalizar score del artefacto
