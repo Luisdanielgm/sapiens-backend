@@ -4189,11 +4189,11 @@ class ContentResultService:
         if score > 1000:
             # Probablemente puntos de juego, cap a 1.0
             score = 1.0
-        elif score > 100:
-            # Escala 0-1000
+        elif score > 110:
+            # Escala 0-1000 (asumimos que nadie saca >110% en escala 0-100)
             score = score / 1000.0
         elif score > 1.0:
-            # Escala 0-100
+            # Escala 0-100 (incluye posibles bonos hasta 110)
             score = score / 100.0
         
         return max(0.0, min(1.0, score))
