@@ -36,7 +36,7 @@ class CascadeDeletionService:
                 'topic_contents': 'topic_id',
                 'virtual_topics': 'topic_id',
                 'evaluations': 'topic_ids',  # Array field
-                'content_results': 'content_id'  # Indirect through content
+                'content_results': 'topic_id'  # Resultados ligados al tema (incluye virtual)
             },
             
             # VirtualModule dependencies
@@ -53,9 +53,14 @@ class CascadeDeletionService:
             
             # TopicContent dependencies
             'topic_contents': {
-                'virtual_topic_contents': 'original_content_id',
+                'virtual_topic_contents': 'content_id',
                 'content_results': 'content_id',
                 'template_usage': 'content_id'
+            },
+
+            # VirtualTopicContent dependencies
+            'virtual_topic_contents': {
+                'content_results': 'virtual_content_id'
             },
             
             # Evaluation dependencies
@@ -207,11 +212,16 @@ class CascadeDeletionService:
         Encuentra entidades dependientes en una colección.
         """
         try:
+            # Algunas colecciones pueden almacenar referencias como ObjectId o como string
+            search_values = [parent_id]
+            if isinstance(parent_id, ObjectId):
+                search_values.append(str(parent_id))
+
             if field_name.endswith('_ids'):  # Array field
-                query = {field_name: parent_id}
+                query = {field_name: {"$in": search_values}}
             else:
-                query = {field_name: parent_id}
-            
+                query = {field_name: {"$in": search_values}} if len(search_values) > 1 else {field_name: parent_id}
+
             cursor = self.db[collection].find(query, {'_id': 1})
             return [doc['_id'] for doc in cursor]
             
