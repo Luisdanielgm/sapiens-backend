@@ -36,6 +36,15 @@ SLIDE_SCRIPT_WHITELIST = [
     "https://cdn.jsdelivr.net/gh/Luisdanielgm/framework_slide",
 ]
 
+# Allowlist de CDNs permitidos para <link> (stylesheets, fonts, etc.)
+SLIDE_LINK_WHITELIST = [
+    "cdn.jsdelivr.net",
+    "fonts.googleapis.com",
+    "fonts.gstatic.com",
+    "cdnjs.cloudflare.com",
+    "unpkg.com",
+]
+
 class ContentTypeService(VerificationBaseService):
     """
     Servicio para gestionar tipos de contenido unificados.
@@ -198,8 +207,11 @@ class ContentService(VerificationBaseService):
         Valida que el HTML de una diapositiva sea seguro y tenga estructura básica.
         Reglas:
             - Debe ser str no vacío
-            - Tamaño máximo razonable (p.ej. 15000 caracteres para slides)
-            - No debe contener etiquetas peligrosas (<script>, <iframe>, <object>, <embed>, <link>, <meta>, <base>)
+            - Tamaño máximo razonable (150KB para slides, 2MB para documentos completos)
+            - No debe contener etiquetas peligrosas (<object>, <embed>, <meta>, <base>)
+            - <iframe> solo permitido si allow_iframe=True
+            - <script> solo permitido con src en SLIDE_SCRIPT_WHITELIST (framework de slides)
+            - <link> solo permitido con href en SLIDE_LINK_WHITELIST (CDNs de confianza)
             - No debe contener atributos de evento inline (onerror=, onclick=, etc.)
             - No debe usar esquemas 'javascript:' en href/src ni data: que pueda incrustar HTML/scripts
             - No debe contener expresiones CSS peligrosas (expression(), url(javascript:...))
@@ -229,11 +241,29 @@ class ContentService(VerificationBaseService):
             if not allow_iframe:
                 base_dangerous.append("iframe")
 
-            dangerous_tags = base_dangerous if allow_full_document else base_dangerous + ["link", "meta", "base"]
+            # link se valida por whitelist (igual que script), no se prohíbe categóricamente
+            dangerous_tags = base_dangerous if allow_full_document else base_dangerous + ["meta", "base"]
             for tag in dangerous_tags:
                 if f"<{tag}" in low or f"</{tag}" in low:
                     logging.warning(f"validate_slide_html_content: encontrado tag prohibido <{tag}>")
                     return False, f"HTML contiene etiqueta <{tag}> prohibida"
+
+            # Validar <link> con whitelist de CDNs permitidos
+            if "<link" in low:
+                link_tags = re.findall(r"<link[^>]*>", raw, flags=re.IGNORECASE)
+                for tag in link_tags:
+                    href_match = re.search(r'href\s*=\s*"([^"]+)"|href\s*=\s*\'([^\']+)\'', tag, flags=re.IGNORECASE)
+                    href_value = None
+                    if href_match:
+                        href_value = href_match.group(1) or href_match.group(2)
+                    if not href_value:
+                        # Links sin href (ej: <link rel="preconnect">) se permiten
+                        continue
+                    normalized_href = href_value.strip().lower()
+                    # Validar que el href esté en la whitelist de CDNs
+                    if not any(allowed in normalized_href for allowed in SLIDE_LINK_WHITELIST):
+                        logging.warning(f"validate_slide_html_content: link href no permitido {href_value}")
+                        return False, f"HTML contiene etiqueta <link> con href no autorizado: {href_value}"
 
             # Permitir solo scripts externos expresamente autorizados
             if "<script" in low:
