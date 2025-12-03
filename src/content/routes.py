@@ -1992,3 +1992,370 @@ def get_embedding_statistics(topic_id):
             "Error interno del servidor",
             status_code=500,
         )
+
+# ============================================
+# ENDPOINTS DE GESTIÓN MANUAL DE SLIDES
+# ============================================
+
+@content_bp.route('/slides', methods=['POST'])
+@APIRoute.standard(auth_required_flag=True, roles=[ROLES["TEACHER"], ROLES["ADMIN"]])
+def create_slide_manual():
+    """
+    Crea una slide manualmente (no desde skeleton).
+    
+    Body:
+    {
+        "topic_id": "ObjectId",
+        "title": "Título de la slide",
+        "content_html": "<!DOCTYPE html>...",
+        "order": 5,  // opcional, se calcula si no se proporciona
+        "parent_content_id": "ObjectId",  // opcional, para variantes
+        "content": {  // campos adicionales opcionales
+            "baseline_mix": {"V": 40, "A": 40, "K": 15, "R": 5},
+            "interactive_summary": "...",
+            "attachment": {...}
+        }
+    }
+    """
+    try:
+        data = request.json or {}
+        user_id = getattr(request, 'user_id', None) or get_jwt_identity()
+        
+        # Validar campos requeridos
+        if not data.get('topic_id'):
+            return APIRoute.error(ErrorCodes.VALIDATION_ERROR, "topic_id es requerido")
+        if not data.get('content_html'):
+            return APIRoute.error(ErrorCodes.VALIDATION_ERROR, "content_html es requerido")
+        
+        # Construir datos del contenido
+        content_data = {
+            'topic_id': data['topic_id'],
+            'content_type': 'slide',
+            'creator_id': user_id,
+            'content': {
+                'title': data.get('title', 'Nueva Slide'),
+                'content_html': data['content_html'],
+                **(data.get('content', {}))
+            }
+        }
+        
+        # Agregar order si se proporciona
+        if 'order' in data:
+            content_data['order'] = data['order']
+        
+        # Agregar parent_content_id si se proporciona
+        if data.get('parent_content_id'):
+            content_data['parent_content_id'] = data['parent_content_id']
+            content_data['content']['parent_content_id'] = data['parent_content_id']
+        
+        logging.info(f"[SlideManual] Creando slide manual para topic {data['topic_id']}")
+        
+        success, result = content_service.create_content(content_data)
+        
+        if success:
+            logging.info(f"[SlideManual] Slide creada con ID: {result}")
+            return APIRoute.success(
+                data={"id": result, "content_id": result},
+                message="Slide creada exitosamente",
+                status_code=201
+            )
+        else:
+            logging.error(f"[SlideManual] Error creando slide: {result}")
+            return APIRoute.error(ErrorCodes.CREATION_ERROR, result)
+            
+    except Exception as e:
+        logging.error(f"[SlideManual] Error: {str(e)}")
+        return APIRoute.error(
+            ErrorCodes.SERVER_ERROR,
+            "Error interno del servidor",
+            status_code=500
+        )
+
+@content_bp.route('/slides/<slide_id>', methods=['PATCH'])
+@APIRoute.standard(auth_required_flag=True, roles=[ROLES["TEACHER"], ROLES["ADMIN"]])
+def update_slide_manual(slide_id):
+    """
+    Actualiza una slide existente.
+    
+    Body:
+    {
+        "title": "Nuevo título",
+        "content_html": "<!DOCTYPE html>..."
+    }
+    """
+    try:
+        data = request.json or {}
+        user_id = getattr(request, 'user_id', None) or get_jwt_identity()
+        
+        if not ObjectId.is_valid(slide_id):
+            return APIRoute.error(ErrorCodes.VALIDATION_ERROR, "ID de slide inválido")
+        
+        # Verificar que existe
+        current = content_service.get_content(slide_id)
+        if not current:
+            return APIRoute.error(ErrorCodes.NOT_FOUND, "Slide no encontrada", status_code=404)
+        
+        if current.get('content_type') != 'slide':
+            return APIRoute.error(ErrorCodes.VALIDATION_ERROR, "El contenido no es una slide")
+        
+        # Construir update
+        update_data = {}
+        if 'title' in data:
+            update_data['content.title'] = data['title']
+        if 'content_html' in data:
+            update_data['content.content_html'] = data['content_html']
+        if 'order' in data:
+            update_data['order'] = data['order']
+        
+        update_data['updated_at'] = datetime.datetime.utcnow()
+        update_data['last_updated_by'] = user_id
+        
+        if not update_data:
+            return APIRoute.error(ErrorCodes.VALIDATION_ERROR, "No hay campos para actualizar")
+        
+        logging.info(f"[SlideManual] Actualizando slide {slide_id}")
+        
+        success, result = content_service.update_content(slide_id, update_data)
+        
+        if success:
+            return APIRoute.success(
+                data={"id": slide_id},
+                message="Slide actualizada exitosamente"
+            )
+        else:
+            return APIRoute.error(ErrorCodes.UPDATE_ERROR, result)
+            
+    except Exception as e:
+        logging.error(f"[SlideManual] Error actualizando slide: {str(e)}")
+        return APIRoute.error(
+            ErrorCodes.SERVER_ERROR,
+            "Error interno del servidor",
+            status_code=500
+        )
+
+@content_bp.route('/slides/<slide_id>', methods=['DELETE'])
+@APIRoute.standard(auth_required_flag=True, roles=[ROLES["TEACHER"], ROLES["ADMIN"]])
+def delete_slide_manual(slide_id):
+    """
+    Elimina una slide con opción de cascada.
+    
+    Query params:
+    - cascade: "true" para eliminar también las variantes hijas
+    
+    Si se elimina una slide padre con cascade=true, todas sus variantes se eliminan.
+    Después de eliminar, las demás slides se reordenan automáticamente.
+    """
+    try:
+        if not ObjectId.is_valid(slide_id):
+            return APIRoute.error(ErrorCodes.VALIDATION_ERROR, "ID de slide inválido")
+        
+        cascade = request.args.get('cascade', 'false').lower() in ('true', '1', 'yes')
+        
+        # Verificar que existe
+        current = content_service.get_content(slide_id)
+        if not current:
+            return APIRoute.error(ErrorCodes.NOT_FOUND, "Slide no encontrada", status_code=404)
+        
+        topic_id = current.get('topic_id')
+        
+        logging.info(f"[SlideManual] Eliminando slide {slide_id} cascade={cascade}")
+        
+        # Si cascade, eliminar variantes primero
+        deleted_count = 0
+        if cascade:
+            # Buscar variantes (hijos)
+            db = get_db()
+            variants = list(db.virtual_topic_contents.find({
+                'parent_content_id': ObjectId(slide_id)
+            }))
+            
+            for variant in variants:
+                variant_id = str(variant['_id'])
+                content_service.delete_content(variant_id, cascade=True)
+                deleted_count += 1
+                logging.info(f"[SlideManual] Variante eliminada: {variant_id}")
+        
+        # Eliminar la slide principal
+        success, result = content_service.delete_content(slide_id, cascade=True)
+        
+        if success:
+            deleted_count += 1
+            
+            # Reordenar slides restantes del topic (ajustar orden secuencial)
+            if topic_id:
+                try:
+                    # Obtener slides restantes ordenadas
+                    remaining_slides = list(db.virtual_topic_contents.find({
+                        'topic_id': ObjectId(topic_id),
+                        'content_type': 'slide',
+                        '$or': [
+                            {'parent_content_id': {'$exists': False}},
+                            {'parent_content_id': None}
+                        ]
+                    }).sort('order', 1))
+                    
+                    # Reasignar orden secuencial
+                    for idx, slide in enumerate(remaining_slides):
+                        if slide.get('order') != idx:
+                            db.virtual_topic_contents.update_one(
+                                {'_id': slide['_id']},
+                                {'$set': {'order': idx, 'updated_at': datetime.datetime.utcnow()}}
+                            )
+                    
+                    logging.info(f"[SlideManual] Slides reordenadas para topic {topic_id}")
+                except Exception as e:
+                    logging.warning(f"[SlideManual] No se pudo reordenar: {e}")
+            
+            return APIRoute.success(
+                data={"deleted_count": deleted_count, "reordered": True},
+                message=f"Slide eliminada ({deleted_count} elementos)"
+            )
+        else:
+            return APIRoute.error(ErrorCodes.NOT_FOUND, result, status_code=404)
+            
+    except Exception as e:
+        logging.error(f"[SlideManual] Error eliminando slide: {str(e)}")
+        return APIRoute.error(
+            ErrorCodes.SERVER_ERROR,
+            "Error interno del servidor",
+            status_code=500
+        )
+
+@content_bp.route('/topics/<topic_id>/slides/reorder', methods=['PUT'])
+@APIRoute.standard(auth_required_flag=True, roles=[ROLES["TEACHER"], ROLES["ADMIN"]])
+def reorder_topic_slides(topic_id):
+    """
+    Reordena las slides de un topic.
+    
+    Body:
+    {
+        "slides": [
+            {"id": "slide_id_1", "order": 0},
+            {"id": "slide_id_2", "order": 1},
+            ...
+        ]
+    }
+    """
+    try:
+        if not ObjectId.is_valid(topic_id):
+            return APIRoute.error(ErrorCodes.VALIDATION_ERROR, "ID de topic inválido")
+        
+        data = request.json or {}
+        slides = data.get('slides', [])
+        
+        if not slides:
+            return APIRoute.error(ErrorCodes.VALIDATION_ERROR, "Se requiere array 'slides' con elementos")
+        
+        logging.info(f"[SlideReorder] Reordenando {len(slides)} slides en topic {topic_id}")
+        
+        db = get_db()
+        updated_count = 0
+        
+        for slide_data in slides:
+            slide_id = slide_data.get('id')
+            new_order = slide_data.get('order')
+            
+            if not slide_id or new_order is None:
+                continue
+            
+            if not ObjectId.is_valid(slide_id):
+                continue
+            
+            result = db.virtual_topic_contents.update_one(
+                {'_id': ObjectId(slide_id), 'topic_id': ObjectId(topic_id)},
+                {'$set': {'order': new_order, 'updated_at': datetime.datetime.utcnow()}}
+            )
+            
+            if result.modified_count > 0:
+                updated_count += 1
+        
+        logging.info(f"[SlideReorder] {updated_count} slides actualizadas")
+        
+        return APIRoute.success(
+            data={"updated_count": updated_count},
+            message=f"{updated_count} slides reordenadas"
+        )
+        
+    except Exception as e:
+        logging.error(f"[SlideReorder] Error: {str(e)}")
+        return APIRoute.error(
+            ErrorCodes.SERVER_ERROR,
+            "Error interno del servidor",
+            status_code=500
+        )
+
+@content_bp.route('/topics/<topic_id>/slides', methods=['GET'])
+@APIRoute.standard(auth_required_flag=True)
+def get_topic_slides_list(topic_id):
+    """
+    Obtiene las slides de un topic.
+    
+    Query params:
+    - parents_only: "true" para obtener solo slides principales (sin variantes)
+    - count_only: "true" para obtener solo el conteo
+    """
+    try:
+        if not ObjectId.is_valid(topic_id):
+            return APIRoute.error(ErrorCodes.VALIDATION_ERROR, "ID de topic inválido")
+        
+        parents_only = request.args.get('parents_only', 'false').lower() in ('true', '1', 'yes')
+        count_only = request.args.get('count_only', 'false').lower() in ('true', '1', 'yes')
+        
+        db = get_db()
+        
+        # Construir filtro
+        query = {
+            'topic_id': ObjectId(topic_id),
+            'content_type': 'slide'
+        }
+        
+        if parents_only:
+            # Solo slides sin parent_content_id o con parent_content_id null
+            query['$or'] = [
+                {'parent_content_id': {'$exists': False}},
+                {'parent_content_id': None}
+            ]
+        
+        if count_only:
+            count = db.virtual_topic_contents.count_documents(query)
+            return APIRoute.success(data={"count": count})
+        
+        # Obtener slides
+        slides = list(db.virtual_topic_contents.find(query).sort('order', 1))
+        
+        # Serializar
+        result = []
+        for slide in slides:
+            result.append({
+                'id': str(slide['_id']),
+                'title': slide.get('content', {}).get('title', f"Slide {slide.get('order', 0) + 1}"),
+                'order': slide.get('order', 0),
+                'status': slide.get('status', 'unknown'),
+                'parent_content_id': str(slide['parent_content_id']) if slide.get('parent_content_id') else None,
+                'content_type': slide.get('content_type'),
+                'has_variants': False  # Se puede calcular si es necesario
+            })
+        
+        # Calcular cuáles tienen variantes
+        if parents_only:
+            parent_ids = [ObjectId(s['id']) for s in result]
+            if parent_ids:
+                variant_counts = db.virtual_topic_contents.aggregate([
+                    {'$match': {'parent_content_id': {'$in': parent_ids}}},
+                    {'$group': {'_id': '$parent_content_id', 'count': {'$sum': 1}}}
+                ])
+                variant_map = {str(v['_id']): v['count'] for v in variant_counts}
+                
+                for slide in result:
+                    slide['variant_count'] = variant_map.get(slide['id'], 0)
+                    slide['has_variants'] = slide['variant_count'] > 0
+        
+        return APIRoute.success(data=result)
+        
+    except Exception as e:
+        logging.error(f"[SlideList] Error: {str(e)}")
+        return APIRoute.error(
+            ErrorCodes.SERVER_ERROR,
+            "Error interno del servidor",
+            status_code=500
+        )

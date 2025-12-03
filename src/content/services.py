@@ -788,7 +788,8 @@ class ContentService(VerificationBaseService):
                 # y planificar la migración a la estructura content.{field}
 
                 if content_html is not None:
-                    valid, msg = self.validate_slide_html_content(content_html)
+                    # Permitir documentos HTML completos con meta, iframe, etc. para slides del framework
+                    valid, msg = self.validate_slide_html_content(content_html, allow_full_document=True, allow_iframe=True)
                     if not valid:
                         return False, f"content_html inválido: {msg}"
 
@@ -1455,7 +1456,7 @@ class ContentService(VerificationBaseService):
                                 raise ValueError(f"Contenido {i+1}, slide {j+1}: El campo 'order' debe ser un entero positivo")
                             # Validar campos de cada slide si están presentes
                             if "content_html" in slide and slide.get("content_html") is not None:
-                                valid, msg = self.validate_slide_html_content(slide.get("content_html"))
+                                valid, msg = self.validate_slide_html_content(slide.get("content_html"), allow_full_document=True, allow_iframe=True)
                                 if not valid:
                                     raise ValueError(f"Contenido {i+1}, slide {j+1}: content_html inválido: {msg}")
                             if "narrative_text" in slide and slide.get("narrative_text") is not None and not isinstance(slide.get("narrative_text"), str):
@@ -1478,7 +1479,7 @@ class ContentService(VerificationBaseService):
                         full_text = content_data.get("full_text")
 
                     if content_html is not None:
-                        valid, msg = self.validate_slide_html_content(content_html)
+                        valid, msg = self.validate_slide_html_content(content_html, allow_full_document=True, allow_iframe=True)
                         if not valid:
                             raise ValueError(f"Contenido {i+1}: content_html inválido: {msg}")
                     if narrative_text is not None and not isinstance(narrative_text, str):
@@ -2325,7 +2326,7 @@ class ContentService(VerificationBaseService):
 
             # Validar y sanitizar content_html antes de normalizar si viene a nivel raíz
             if 'content_html' in update_data and update_data.get('content_html') is not None:
-                valid, msg = self.validate_slide_html_content(update_data.get('content_html'))
+                valid, msg = self.validate_slide_html_content(update_data.get('content_html'), allow_full_document=True, allow_iframe=True)
                 if not valid:
                     return False, f"content_html inválido: {msg}"
                 # Sanitizar y reemplazar el valor
@@ -2370,7 +2371,7 @@ class ContentService(VerificationBaseService):
 
             # Aplicar validaciones en content_updates unificado
             if content_updates.get('content_html') is not None:
-                valid, msg = self.validate_slide_html_content(content_updates.get('content_html'))
+                valid, msg = self.validate_slide_html_content(content_updates.get('content_html'), allow_full_document=True, allow_iframe=True)
                 if not valid:
                     return False, f"content_html inválido: {msg}"
                 # Sanitizar el valor
