@@ -164,6 +164,9 @@ class TemplateValidator:
         ],
     }
 
+    # Prefijo de log para fácil identificación
+    LOG_PREFIX = "[TemplateValidator]"
+
     def __init__(self):
         self.logger = logging.getLogger(__name__)
 
@@ -346,8 +349,21 @@ class TemplateValidator:
             suggestions=suggestions,
         )
         
-        if not result.is_valid:
-            self.logger.warning(f"Template validation failed: {all_errors}")
+        # Logs detallados para fácil identificación
+        html_preview = html[:100] + "..." if len(html) > 100 else html
+        
+        if result.is_valid:
+            self.logger.info(f"{self.LOG_PREFIX} ✅ Template VÁLIDO - Método: {reporting_method}, Campos: {payload_fields}")
+        else:
+            self.logger.warning(f"{self.LOG_PREFIX} ❌ Template INVÁLIDO - Errores: {len(all_errors)}")
+            for i, error in enumerate(all_errors, 1):
+                self.logger.warning(f"{self.LOG_PREFIX}    ❌ Error {i}: {error}")
+        
+        if warnings:
+            self.logger.warning(f"{self.LOG_PREFIX} ⚠️ Advertencias: {warnings}")
+        
+        if missing_required:
+            self.logger.warning(f"{self.LOG_PREFIX} 📛 Campos requeridos faltantes: {missing_required}")
         
         return result.to_dict()
     

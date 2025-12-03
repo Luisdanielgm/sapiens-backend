@@ -78,6 +78,8 @@ def create_template():
             "message": "Error interno del servidor"
         }), 500
 
+LOG_PREFIX = "[TemplateValidation]"
+
 @template_bp.route('/validate', methods=['POST'])
 @auth_required
 @role_required([ROLES["TEACHER"], ROLES["ADMIN"]])
@@ -128,10 +130,14 @@ def validate_template():
         strict = data.get('strict', False)
         check_compliance = data.get('check_compliance', False)
         
+        logging.info(f"{LOG_PREFIX} 🔍 Iniciando validación - template_id: {template_id}, strict: {strict}, check_compliance: {check_compliance}")
+        
         # Obtener HTML desde template existente si se proporciona ID
         if template_id and not html:
+            logging.info(f"{LOG_PREFIX} 📄 Obteniendo HTML de template existente: {template_id}")
             template = template_service.get_template(template_id)
             if not template:
+                logging.warning(f"{LOG_PREFIX} ❌ Template no encontrado: {template_id}")
                 return jsonify({
                     "success": False,
                     "error": "NOT_FOUND",
@@ -140,19 +146,29 @@ def validate_template():
             html = template.get_latest_html()
         
         if not html:
+            logging.warning(f"{LOG_PREFIX} ❌ No se proporcionó HTML ni template_id")
             return jsonify({
                 "success": False,
                 "error": "VALIDATION_ERROR",
                 "message": "Se requiere 'html' o 'template_id'"
             }), 400
         
+        logging.info(f"{LOG_PREFIX} 📝 Validando HTML ({len(html)} caracteres)")
+        
         # Ejecutar validación
         validation_result = validate_template_html(html, strict=strict)
+        
+        # Log del resultado
+        if validation_result.get('is_valid'):
+            logging.info(f"{LOG_PREFIX} ✅ Validación exitosa - Método: {validation_result.get('reporting_method')}")
+        else:
+            logging.warning(f"{LOG_PREFIX} ❌ Validación fallida - Errores: {validation_result.get('errors')}")
         
         # Agregar información de compliance si se solicita
         if check_compliance:
             compliance_result = validate_template_reporting_compliance(html)
             validation_result['compliance'] = compliance_result
+            logging.info(f"{LOG_PREFIX} 📈 Score de cumplimiento: {compliance_result.get('compliance_score', 0) * 100:.0f}%")
         
         return jsonify({
             "success": True,
@@ -160,7 +176,7 @@ def validate_template():
         }), 200
         
     except Exception as e:
-        logging.error(f"Error validating template: {str(e)}")
+        logging.error(f"{LOG_PREFIX} ❌ ERROR INTERNO al validar template: {str(e)}")
         traceback.print_exc()
         return jsonify({
             "success": False,
@@ -182,18 +198,26 @@ def validate_existing_template(template_id):
     Response: Mismo formato que POST /validate
     """
     try:
+        logging.info(f"{LOG_PREFIX} 🔍 Validando template existente: {template_id}")
+        
         template = template_service.get_template(template_id)
         
         if not template:
+            logging.warning(f"{LOG_PREFIX} ❌ Template no encontrado: {template_id}")
             return jsonify({
                 "success": False,
                 "error": "NOT_FOUND",
                 "message": "Plantilla no encontrada"
             }), 404
         
+        template_name = getattr(template, 'name', 'Sin nombre')
+        logging.info(f"{LOG_PREFIX} 📄 Template encontrado: '{template_name}'")
+        
         html = template.get_latest_html()
         strict = request.args.get('strict', 'false').lower() == 'true'
         check_compliance = request.args.get('check_compliance', 'false').lower() == 'true'
+        
+        logging.info(f"{LOG_PREFIX} 📝 Validando HTML ({len(html) if html else 0} caracteres) - strict: {strict}")
         
         # Ejecutar validación
         validation_result = validate_template_html(html, strict=strict)
@@ -201,14 +225,21 @@ def validate_existing_template(template_id):
         # Agregar información del template
         validation_result['template_info'] = {
             'id': str(template._id) if hasattr(template, '_id') else template_id,
-            'name': getattr(template, 'name', 'Sin nombre'),
+            'name': template_name,
             'version': getattr(template, 'version', 1),
         }
+        
+        # Log del resultado
+        if validation_result.get('is_valid'):
+            logging.info(f"{LOG_PREFIX} ✅ Template '{template_name}' VÁLIDO")
+        else:
+            logging.warning(f"{LOG_PREFIX} ❌ Template '{template_name}' INVÁLIDO - Errores: {validation_result.get('errors')}")
         
         # Agregar información de compliance si se solicita
         if check_compliance:
             compliance_result = validate_template_reporting_compliance(html)
             validation_result['compliance'] = compliance_result
+            logging.info(f"{LOG_PREFIX} 📈 Cumplimiento de '{template_name}': {compliance_result.get('compliance_score', 0) * 100:.0f}%")
         
         return jsonify({
             "success": True,
@@ -216,7 +247,7 @@ def validate_existing_template(template_id):
         }), 200
         
     except Exception as e:
-        logging.error(f"Error validating template {template_id}: {str(e)}")
+        logging.error(f"{LOG_PREFIX} ❌ ERROR INTERNO validando template {template_id}: {str(e)}")
         traceback.print_exc()
         return jsonify({
             "success": False,
