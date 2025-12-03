@@ -7,6 +7,7 @@ import traceback
 
 from .template_services import TemplateService, TemplateMarkupExtractor
 from .template_integration_service import TemplateIntegrationService
+from .template_validator import validate_template_html, validate_template_reporting_compliance
 from .template_models import Template
 from .services import ContentService
 from .models import ContentTypes
@@ -76,6 +77,153 @@ def create_template():
             "error": "INTERNAL_ERROR",
             "message": "Error interno del servidor"
         }), 500
+
+@template_bp.route('/validate', methods=['POST'])
+@auth_required
+@role_required([ROLES["TEACHER"], ROLES["ADMIN"]])
+def validate_template():
+    """
+    Valida que un artefacto HTML cumpla con el sistema de reporte de Sapiens.
+    
+    Verifica:
+    - Estructura HTML básica (DOCTYPE, html, script tags)
+    - Capacidad de reporte (postMessage o sapiensReportResult)
+    - Campos del payload (contentId, score, timeSpent, etc.)
+    - Patrones de riesgo (eval, document.write, XSS)
+    
+    Body:
+    {
+        "html": "<html>...</html>",           // HTML a validar (requerido si no se pasa template_id)
+        "template_id": "...",                 // ID de template existente (alternativo a html)
+        "strict": false,                      // Si true, también verifica campos recomendados
+        "check_compliance": false             // Si true, retorna score de cumplimiento
+    }
+    
+    Response:
+    {
+        "success": true,
+        "data": {
+            "is_valid": true,
+            "has_reporting": true,
+            "has_valid_structure": true,
+            "reporting_method": "sapiensReportResult",
+            "payload_fields": ["contentId", "score", "timeSpent"],
+            "missing_required_fields": [],
+            "errors": [],
+            "warnings": ["Uso de eval() detectado"],
+            "suggestions": ["Considera agregar 'completionPercentage'..."],
+            "compliance": {                   // Solo si check_compliance es true
+                "compliant": true,
+                "compliance_score": 0.85,
+                ...
+            }
+        }
+    }
+    """
+    try:
+        data = request.get_json() or {}
+        
+        html = data.get('html')
+        template_id = data.get('template_id')
+        strict = data.get('strict', False)
+        check_compliance = data.get('check_compliance', False)
+        
+        # Obtener HTML desde template existente si se proporciona ID
+        if template_id and not html:
+            template = template_service.get_template(template_id)
+            if not template:
+                return jsonify({
+                    "success": False,
+                    "error": "NOT_FOUND",
+                    "message": "Plantilla no encontrada"
+                }), 404
+            html = template.get_latest_html()
+        
+        if not html:
+            return jsonify({
+                "success": False,
+                "error": "VALIDATION_ERROR",
+                "message": "Se requiere 'html' o 'template_id'"
+            }), 400
+        
+        # Ejecutar validación
+        validation_result = validate_template_html(html, strict=strict)
+        
+        # Agregar información de compliance si se solicita
+        if check_compliance:
+            compliance_result = validate_template_reporting_compliance(html)
+            validation_result['compliance'] = compliance_result
+        
+        return jsonify({
+            "success": True,
+            "data": validation_result
+        }), 200
+        
+    except Exception as e:
+        logging.error(f"Error validating template: {str(e)}")
+        traceback.print_exc()
+        return jsonify({
+            "success": False,
+            "error": "INTERNAL_ERROR",
+            "message": "Error interno del servidor"
+        }), 500
+
+
+@template_bp.route('/<template_id>/validate', methods=['GET'])
+@auth_required
+def validate_existing_template(template_id):
+    """
+    Valida un template existente por su ID.
+    
+    Query params:
+    - strict: Si "true", también verifica campos recomendados
+    - check_compliance: Si "true", retorna score de cumplimiento
+    
+    Response: Mismo formato que POST /validate
+    """
+    try:
+        template = template_service.get_template(template_id)
+        
+        if not template:
+            return jsonify({
+                "success": False,
+                "error": "NOT_FOUND",
+                "message": "Plantilla no encontrada"
+            }), 404
+        
+        html = template.get_latest_html()
+        strict = request.args.get('strict', 'false').lower() == 'true'
+        check_compliance = request.args.get('check_compliance', 'false').lower() == 'true'
+        
+        # Ejecutar validación
+        validation_result = validate_template_html(html, strict=strict)
+        
+        # Agregar información del template
+        validation_result['template_info'] = {
+            'id': str(template._id) if hasattr(template, '_id') else template_id,
+            'name': getattr(template, 'name', 'Sin nombre'),
+            'version': getattr(template, 'version', 1),
+        }
+        
+        # Agregar información de compliance si se solicita
+        if check_compliance:
+            compliance_result = validate_template_reporting_compliance(html)
+            validation_result['compliance'] = compliance_result
+        
+        return jsonify({
+            "success": True,
+            "data": validation_result
+        }), 200
+        
+    except Exception as e:
+        logging.error(f"Error validating template {template_id}: {str(e)}")
+        traceback.print_exc()
+        return jsonify({
+            "success": False,
+            "error": "INTERNAL_ERROR",
+            "message": "Error interno del servidor"
+        }), 500
+
 
 @template_bp.route('', methods=['GET'])
 @auth_required
