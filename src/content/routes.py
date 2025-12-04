@@ -2010,6 +2010,7 @@ def create_slide_manual():
         "content_html": "<!DOCTYPE html>...",
         "order": 5,  // opcional, se calcula si no se proporciona
         "parent_content_id": "ObjectId",  // opcional, para variantes
+        "status": "ready",  // opcional, default: 'ready'. Usar 'ready' para evitar polling de generación
         "content": {  // campos adicionales opcionales
             "baseline_mix": {"V": 40, "A": 40, "K": 15, "R": 5},
             "interactive_summary": "...",
@@ -2032,9 +2033,11 @@ def create_slide_manual():
             'topic_id': data['topic_id'],
             'content_type': 'slide',
             'creator_id': user_id,
+            'status': data.get('status', 'ready'),  # Status por defecto 'ready' para slides manuales
             'content': {
                 'title': data.get('title', 'Nueva Slide'),
                 'content_html': data['content_html'],
+                'status': data.get('status', 'ready'),  # También en content para consistencia
                 **(data.get('content', {}))
             }
         }
@@ -2042,6 +2045,7 @@ def create_slide_manual():
         # Agregar order si se proporciona
         if 'order' in data:
             content_data['order'] = data['order']
+            content_data['content']['order'] = data['order']  # También en content
         
         # Agregar parent_content_id si se proporciona
         if data.get('parent_content_id'):
