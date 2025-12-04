@@ -2034,6 +2034,7 @@ def create_slide_manual():
             'content_type': 'slide',
             'creator_id': user_id,
             'status': data.get('status', 'ready'),  # Status por defecto 'ready' para slides manuales
+            'render_engine': 'raw_html',  # Slides manuales siempre usan raw_html
             'content': {
                 'title': data.get('title', 'Nueva Slide'),
                 'content_html': data['content_html'],

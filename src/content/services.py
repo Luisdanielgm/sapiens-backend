@@ -123,9 +123,9 @@ class ContentTypeService(VerificationBaseService):
 
 # Default status mapping by content type
 DEFAULT_STATUS_BY_TYPE = {
-    "slide": ["draft", "active", "published", "skeleton", "html_ready", "narrative_ready"],
+    "slide": ["draft", "active", "published", "skeleton", "html_ready", "narrative_ready", "ready", "manual"],
     "slide_template": ["draft", "active", "template"],
-    "default": ["draft", "active", "published"]
+    "default": ["draft", "active", "published", "ready"]
 }
 
 
