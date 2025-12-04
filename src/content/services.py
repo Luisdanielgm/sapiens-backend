@@ -265,7 +265,7 @@ class ContentService(VerificationBaseService):
                         logging.warning(f"validate_slide_html_content: link href no permitido {href_value}")
                         return False, f"HTML contiene etiqueta <link> con href no autorizado: {href_value}"
 
-            # Permitir solo scripts externos expresamente autorizados
+            # Validar scripts: permitir inline si allow_full_document, o externos autorizados
             if "<script" in low:
                 script_tags = re.findall(r"<script[^>]*>", raw, flags=re.IGNORECASE)
                 if not script_tags:
@@ -276,10 +276,17 @@ class ContentService(VerificationBaseService):
                     src_value = None
                     if src_match:
                         src_value = src_match.group(1) or src_match.group(2)
+                    
                     if not src_value:
-                        logging.warning("validate_slide_html_content: <script> sin atributo src")
-                        return False, "HTML contiene etiqueta <script> sin src (prohibido)"
+                        # Script inline (sin src) - permitir solo si allow_full_document
+                        if not allow_full_document:
+                            logging.warning("validate_slide_html_content: <script> sin atributo src (no permitido sin allow_full_document)")
+                            return False, "HTML contiene etiqueta <script> sin src (prohibido)"
+                        # Scripts inline permitidos para documentos completos (ej: videos interactivos)
+                        logging.debug("validate_slide_html_content: script inline permitido (allow_full_document=True)")
+                        continue
 
+                    # Script con src - validar whitelist
                     normalized_src = src_value.strip()
                     normalized_src_base = normalized_src.split("?")[0].lower()
                     if not any(normalized_src_base.startswith(allowed.lower()) for allowed in SLIDE_SCRIPT_WHITELIST):

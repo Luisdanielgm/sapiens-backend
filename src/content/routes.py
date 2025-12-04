@@ -2189,7 +2189,7 @@ def delete_slide_manual(slide_id):
             # Reordenar slides restantes del topic (ajustar orden secuencial)
             if topic_id:
                 try:
-                    # Obtener slides principales restantes ordenadas (orden < 1000 o múltiplos de 1000)
+                    # Obtener slides principales restantes ordenadas (sin parent_content_id)
                     remaining_main_slides = list(db.virtual_topic_contents.find({
                         'topic_id': ObjectId(topic_id),
                         'content_type': 'slide',
@@ -2207,19 +2207,27 @@ def delete_slide_manual(slide_id):
                         new_order = idx + 1  # Empezar desde 1, no desde 0
                         old_order = slide.get('order', 0)
                         
-                        # Guardar mapeo para variantes
+                        # Calcular índice del padre (si order >= 1000, es múltiplo de 1000)
                         old_main_index = old_order if old_order < 1000 else old_order // 1000
                         old_to_new_order[old_main_index] = new_order
                         
                         if old_order != new_order:
-                            # Actualizar el orden en la raíz y en content.order
+                            # Actualizar el orden en la raíz
+                            update_op = {
+                                '$set': {
+                                    'order': new_order,
+                                    'updated_at': datetime.datetime.utcnow()
+                                }
+                            }
+                            
+                            # Actualizar content.order solo si content existe y es un objeto
+                            content_field = slide.get('content')
+                            if isinstance(content_field, dict):
+                                update_op['$set']['content.order'] = new_order
+                            
                             db.virtual_topic_contents.update_one(
                                 {'_id': slide['_id']},
-                                {'$set': {
-                                    'order': new_order,
-                                    'content.order': new_order,
-                                    'updated_at': datetime.datetime.utcnow()
-                                }}
+                                update_op
                             )
                     
                     # Reordenar variantes: actualizar el orden basándose en el nuevo orden del padre
@@ -2242,14 +2250,18 @@ def delete_slide_manual(slide_id):
                                 if new_variant_order != old_variant_order:
                                     update_fields = {
                                         'order': new_variant_order,
-                                        'content.order': new_variant_order,
                                         'updated_at': datetime.datetime.utcnow()
                                     }
                                     
-                                    # Actualizar parent_order en variant si existe
-                                    variant_meta = variant.get('content', {}).get('variant', {})
-                                    if variant_meta and 'parent_order' in variant_meta:
-                                        update_fields['content.variant.parent_order'] = new_parent_index
+                                    # Actualizar content.order solo si content existe y es un objeto
+                                    content_field = variant.get('content')
+                                    if isinstance(content_field, dict):
+                                        update_fields['content.order'] = new_variant_order
+                                        
+                                        # Actualizar parent_order en variant si existe
+                                        variant_meta = content_field.get('variant', {})
+                                        if isinstance(variant_meta, dict) and 'parent_order' in variant_meta:
+                                            update_fields['content.variant.parent_order'] = new_parent_index
                                     
                                     db.virtual_topic_contents.update_one(
                                         {'_id': variant['_id']},
