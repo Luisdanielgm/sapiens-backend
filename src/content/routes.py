@@ -2180,15 +2180,23 @@ def delete_slide_manual(slide_id):
                 deleted_count += 1
                 logging.info(f"[SlideManual] Variante eliminada: {variant_id}")
         
-        # Eliminar la slide principal
+        # Determinar si la slide eliminada era una slide principal o variante
+        deleted_parent_content_id = current.get('parent_content_id')
+        is_main_slide = not deleted_parent_content_id
+        deleted_order = current.get('order', 0)
+        
+        # Eliminar la slide
         success, result = content_service.delete_content(slide_id, cascade=True)
         
         if success:
             deleted_count += 1
             
-            # Reordenar slides restantes del topic (ajustar orden secuencial)
-            if topic_id:
+            # Solo reordenar si se eliminó una slide PRINCIPAL (no variante)
+            # Las variantes no afectan el orden de las slides principales
+            if topic_id and is_main_slide:
                 try:
+                    db = get_db()
+                    
                     # Obtener slides principales restantes ordenadas (sin parent_content_id)
                     remaining_main_slides = list(db.virtual_topic_contents.find({
                         'topic_id': ObjectId(topic_id),
@@ -2271,6 +2279,10 @@ def delete_slide_manual(slide_id):
                     logging.info(f"[SlideManual] Slides principales y variantes reordenadas para topic {topic_id}")
                 except Exception as e:
                     logging.warning(f"[SlideManual] No se pudo reordenar: {e}")
+            elif topic_id and not is_main_slide:
+                # Si se eliminó una variante, no reordenar slides principales
+                # Solo registrar en log
+                logging.info(f"[SlideManual] Variante eliminada (orden {deleted_order}), no se reordenan slides principales")
             
             return APIRoute.success(
                 data={"deleted_count": deleted_count, "reordered": True},
