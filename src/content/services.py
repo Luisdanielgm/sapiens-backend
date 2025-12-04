@@ -880,6 +880,16 @@ class ContentService(VerificationBaseService):
                     kwargs["slide_plan"] = slide_plan
 
 
+            # Determinar render_engine: usar el proporcionado o 'raw_html' si hay content_html
+            render_engine = content_data.get("render_engine")
+            if render_engine is None and content_type == "slide":
+                # Si la slide tiene content_html, usar raw_html por defecto
+                ch = slide_fields.get("content_html") or content_data.get("content_html")
+                if ch:
+                    render_engine = "raw_html"
+                else:
+                    render_engine = "legacy"
+            
             content = TopicContent(
                 topic_id=topic_id,
                 content=content_data.get("content", ""),
@@ -892,6 +902,7 @@ class ContentService(VerificationBaseService):
                 generation_prompt=content_data.get("generation_prompt"),
                 ai_credits=content_data.get("ai_credits", True),
                 personalization_markers=markers,
+                render_engine=render_engine or "legacy",  # Pasar render_engine al constructor
                 learning_mix=content_data.get("learning_mix"),
                 baseline_mix=baseline_mix,
                 status=initial_status,

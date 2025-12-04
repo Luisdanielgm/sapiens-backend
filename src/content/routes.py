@@ -2189,8 +2189,8 @@ def delete_slide_manual(slide_id):
             # Reordenar slides restantes del topic (ajustar orden secuencial)
             if topic_id:
                 try:
-                    # Obtener slides restantes ordenadas
-                    remaining_slides = list(db.virtual_topic_contents.find({
+                    # Obtener slides principales restantes ordenadas (orden < 1000 o múltiplos de 1000)
+                    remaining_main_slides = list(db.virtual_topic_contents.find({
                         'topic_id': ObjectId(topic_id),
                         'content_type': 'slide',
                         '$or': [
@@ -2199,15 +2199,64 @@ def delete_slide_manual(slide_id):
                         ]
                     }).sort('order', 1))
                     
-                    # Reasignar orden secuencial
-                    for idx, slide in enumerate(remaining_slides):
-                        if slide.get('order') != idx:
+                    # Mapeo del viejo orden al nuevo orden
+                    old_to_new_order = {}
+                    
+                    # Reasignar orden secuencial a slides principales (empezando en 1)
+                    for idx, slide in enumerate(remaining_main_slides):
+                        new_order = idx + 1  # Empezar desde 1, no desde 0
+                        old_order = slide.get('order', 0)
+                        
+                        # Guardar mapeo para variantes
+                        old_main_index = old_order if old_order < 1000 else old_order // 1000
+                        old_to_new_order[old_main_index] = new_order
+                        
+                        if old_order != new_order:
+                            # Actualizar el orden en la raíz y en content.order
                             db.virtual_topic_contents.update_one(
                                 {'_id': slide['_id']},
-                                {'$set': {'order': idx, 'updated_at': datetime.datetime.utcnow()}}
+                                {'$set': {
+                                    'order': new_order,
+                                    'content.order': new_order,
+                                    'updated_at': datetime.datetime.utcnow()
+                                }}
                             )
                     
-                    logging.info(f"[SlideManual] Slides reordenadas para topic {topic_id}")
+                    # Reordenar variantes: actualizar el orden basándose en el nuevo orden del padre
+                    variants = list(db.virtual_topic_contents.find({
+                        'topic_id': ObjectId(topic_id),
+                        'content_type': 'slide',
+                        'parent_content_id': {'$exists': True, '$ne': None}
+                    }))
+                    
+                    for variant in variants:
+                        old_variant_order = variant.get('order', 0)
+                        if old_variant_order >= 1000:
+                            old_parent_index = old_variant_order // 1000
+                            variant_suffix = old_variant_order % 1000
+                            
+                            if old_parent_index in old_to_new_order:
+                                new_parent_index = old_to_new_order[old_parent_index]
+                                new_variant_order = new_parent_index * 1000 + variant_suffix
+                                
+                                if new_variant_order != old_variant_order:
+                                    update_fields = {
+                                        'order': new_variant_order,
+                                        'content.order': new_variant_order,
+                                        'updated_at': datetime.datetime.utcnow()
+                                    }
+                                    
+                                    # Actualizar parent_order en variant si existe
+                                    variant_meta = variant.get('content', {}).get('variant', {})
+                                    if variant_meta and 'parent_order' in variant_meta:
+                                        update_fields['content.variant.parent_order'] = new_parent_index
+                                    
+                                    db.virtual_topic_contents.update_one(
+                                        {'_id': variant['_id']},
+                                        {'$set': update_fields}
+                                    )
+                    
+                    logging.info(f"[SlideManual] Slides principales y variantes reordenadas para topic {topic_id}")
                 except Exception as e:
                     logging.warning(f"[SlideManual] No se pudo reordenar: {e}")
             
