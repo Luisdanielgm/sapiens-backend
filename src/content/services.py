@@ -314,11 +314,14 @@ class ContentService(VerificationBaseService):
                 return False, "HTML contiene expresiones CSS potencialmente peligrosas"
 
             # Comprobar equilibrio básico de <> para detectar HTML truncado
-            lt_count = raw.count("<")
-            gt_count = raw.count(">")
-            if abs(lt_count - gt_count) > 5:  # allow small imbalance for fragments, but not large mismatches
-                logging.debug(f"validate_slide_html_content: desequilibrio en etiquetas (<: {lt_count}, >: {gt_count})")
-                return False, "HTML parece estar mal formado (desequilibrio de etiquetas)"
+            # Nota: Para documentos completos (allow_full_document), omitir este check porque
+            # el JavaScript puede contener muchos operadores < y > que no son etiquetas HTML
+            if not allow_full_document:
+                lt_count = raw.count("<")
+                gt_count = raw.count(">")
+                if abs(lt_count - gt_count) > 5:  # allow small imbalance for fragments, but not large mismatches
+                    logging.debug(f"validate_slide_html_content: desequilibrio en etiquetas (<: {lt_count}, >: {gt_count})")
+                    return False, "HTML parece estar mal formado (desequilibrio de etiquetas)"
 
             # Comprobar número de etiquetas para evitar payloads excesivos
             tag_count = len(re.findall(r"<[a-zA-Z]+[^\>]*>", raw))
