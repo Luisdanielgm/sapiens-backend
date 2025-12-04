@@ -34,6 +34,10 @@ SLIDE_PLAN_TYPE_ERROR_MSG = "El campo 'slide_plan' debe ser una cadena de texto 
 SLIDE_SCRIPT_WHITELIST = [
     # Permitir cualquier version del framework de slides publicada en jsDelivr
     "https://cdn.jsdelivr.net/gh/Luisdanielgm/framework_slide",
+    # CDNs para templates interactivos (Video Interactivo, Juegos, etc.)
+    "https://cdn.tailwindcss.com",          # Tailwind CSS CDN
+    "https://unpkg.com/lucide",             # Lucide Icons
+    "https://www.youtube.com/iframe_api",   # YouTube Iframe API
 ]
 
 # Allowlist de CDNs permitidos para <link> (stylesheets, fonts, etc.)
