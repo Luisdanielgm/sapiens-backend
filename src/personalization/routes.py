@@ -4,9 +4,11 @@ Rutas para el sistema de personalización adaptativa
 
 from flask import Blueprint, request
 from flask_jwt_extended import get_jwt_identity
+from bson import ObjectId
 import logging
 
 from src.shared.standardization import APIRoute, ErrorCodes
+from src.shared.database import get_db
 from .services import AdaptivePersonalizationService
 
 personalization_bp = Blueprint('personalization', __name__, url_prefix='/api/personalization')
@@ -349,18 +351,66 @@ def compare_student_analytics(student_id):
             }
 
         elif comparison_type == "class_average":
+            # Si no se proporciona class_id, buscar la primera clase del estudiante
             if not class_id:
-                return APIRoute.error(
-                    ErrorCodes.VALIDATION_ERROR,
-                    "class_id es requerido para comparación con promedio de clase",
-                    status_code=400
-                )
+                db = get_db()
+                student_class = db.class_members.find_one({
+                    "user_id": ObjectId(student_id),
+                    "role": "STUDENT"
+                })
+                if student_class:
+                    class_id = str(student_class.get("class_id"))
+                else:
+                    return APIRoute.error(
+                        ErrorCodes.NOT_FOUND,
+                        "El estudiante no está inscrito en ninguna clase",
+                        status_code=404
+                    )
 
-            # TODO: Implementar comparación con promedio de clase
+            # Obtener estadísticas de la clase
+            class_students = list(get_db().class_members.find({
+                "class_id": ObjectId(class_id),
+                "role": "STUDENT"
+            }))
+            
+            class_vakr_totals = {"V": 0, "A": 0, "K": 0, "R": 0}
+            class_count = 0
+            
+            for member in class_students:
+                member_id = str(member.get("user_id"))
+                if member_id == student_id:
+                    continue  # Excluir al estudiante actual del promedio
+                    
+                success_member, member_stats = personalization_service.get_vakr_statistics(member_id)
+                if success_member and member_stats.get("vakr_scores"):
+                    vakr = member_stats.get("vakr_scores", {})
+                    class_vakr_totals["V"] += vakr.get("V", 0)
+                    class_vakr_totals["A"] += vakr.get("A", 0)
+                    class_vakr_totals["K"] += vakr.get("K", 0)
+                    class_vakr_totals["R"] += vakr.get("R", 0)
+                    class_count += 1
+            
+            class_average_vakr = {
+                "V": round(class_vakr_totals["V"] / class_count, 2) if class_count > 0 else 0,
+                "A": round(class_vakr_totals["A"] / class_count, 2) if class_count > 0 else 0,
+                "K": round(class_vakr_totals["K"] / class_count, 2) if class_count > 0 else 0,
+                "R": round(class_vakr_totals["R"] / class_count, 2) if class_count > 0 else 0,
+            }
+            
+            # Obtener nombre de la clase
+            class_info = get_db().classes.find_one({"_id": ObjectId(class_id)})
+            class_name = class_info.get("name", "Mi Clase") if class_info else "Mi Clase"
+            
             comparison_result = {
                 "comparison_type": "class_average",
                 "student_stats": student_stats,
-                "message": "Comparación con promedio de clase - funcionalidad pendiente"
+                "class_stats": {
+                    "vakr_scores": class_average_vakr,
+                    "class_name": class_name,
+                    "student_count": class_count
+                },
+                "percentile_ranking": _calculate_percentile_ranking(student_stats),
+                "insights": _generate_comparison_insights(student_stats, "class_average", class_average_vakr)
             }
 
         elif comparison_type == "similar_students":
@@ -553,9 +603,14 @@ def _calculate_percentile_ranking(student_stats):
         return {"V": 50, "A": 50, "K": 50, "R": 50}
 
 
-def _generate_comparison_insights(student_stats, comparison_type):
+def _generate_comparison_insights(student_stats, comparison_type, comparison_data=None):
     """
     Genera insights basados en la comparación
+    
+    Args:
+        student_stats: Estadísticas del estudiante
+        comparison_type: Tipo de comparación (benchmark, class_average, similar_students)
+        comparison_data: Datos de comparación (opcional, ej: promedio de clase)
     """
     try:
         insights = []
@@ -573,11 +628,25 @@ def _generate_comparison_insights(student_stats, comparison_type):
             insights.append(f"Área de oportunidad: desarrollar estilos {', '.join(low_styles)}")
 
         # Insights sobre balance
-        score_range = max(vakr_scores.values()) - min(vakr_scores.values())
-        if score_range > 0.4:
-            insights.append("Se recomienda equilibrar los estilos de aprendizaje para mejorar la adaptabilidad")
-        elif score_range < 0.2:
-            insights.append("Buen balance general en estilos de aprendizaje")
+        if vakr_scores:
+            score_range = max(vakr_scores.values()) - min(vakr_scores.values())
+            if score_range > 0.4:
+                insights.append("Se recomienda equilibrar los estilos de aprendizaje para mejorar la adaptabilidad")
+            elif score_range < 0.2:
+                insights.append("Buen balance general en estilos de aprendizaje")
+        
+        # Insights específicos para comparación con clase
+        if comparison_type == "class_average" and comparison_data:
+            style_names = {"V": "Visual", "A": "Auditivo", "K": "Kinestésico", "R": "Lectura/Escritura"}
+            for style in ["V", "A", "K", "R"]:
+                student_score = vakr_scores.get(style, 0)
+                class_score = comparison_data.get(style, 0)
+                diff = student_score - class_score
+                
+                if diff > 0.15:
+                    insights.append(f"Destacas por encima del promedio de tu clase en estilo {style_names.get(style, style)}")
+                elif diff < -0.15:
+                    insights.append(f"Podrías mejorar en estilo {style_names.get(style, style)} respecto a tu clase")
 
         return insights
 
