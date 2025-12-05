@@ -645,6 +645,9 @@ class ProgressService(VerificationBaseService):
             progress = round(completed_contents / total_contents * 100, 1) if total_contents > 0 else 0
             last_activity = results[0].get("recorded_at").isoformat() if results else None
             
+            # Obtener perfil VARK del estudiante
+            vark_profile = self._get_vark_profile(student_id)
+            
             return {
                 "student_id": student_id,
                 "student_name": student_name,
@@ -653,7 +656,8 @@ class ProgressService(VerificationBaseService):
                 "current_topic": current_topic,
                 "activities_completed": completed_contents,
                 "total_activities": total_contents,
-                "last_activity": last_activity
+                "last_activity": last_activity,
+                "vark_profile": vark_profile
             }
             
         except Exception as e:
