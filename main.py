@@ -55,6 +55,8 @@ from src.content.template_routes import template_bp, preview_bp
 from src.shared.cascade_routes import cascade_bp
 # Sistema de validación de LLM
 from src.llm.routes import llm_bp
+# Sistema de progreso
+from src.progress.routes import progress_bp
 
 def create_app(config_object=active_config):
     """
@@ -269,6 +271,9 @@ def create_app(config_object=active_config):
     # Sistema de plantillas
     app.register_blueprint(template_bp)  # Ya incluye url_prefix='/api/templates'
     app.register_blueprint(preview_bp)   # Ya incluye url_prefix='/preview'
+    
+    # Sistema de progreso
+    app.register_blueprint(progress_bp)  # Ya incluye url_prefix='/api/progress'
     
     # Sistema de eliminación en cascada
     app.register_blueprint(cascade_bp, url_prefix='/api/cascade')
