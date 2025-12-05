@@ -275,7 +275,7 @@ def get_vakr_statistics_legacy(student_id):
 
 
 @personalization_bp.route('/analytics/compare/<student_id>', methods=['GET'])
-@APIRoute.standard(auth_required_flag=True, required_fields=['comparison_type'])
+@APIRoute.standard(auth_required_flag=True)
 def compare_student_analytics(student_id):
     """
     Compara las estadísticas del estudiante con benchmarks o grupos similares.
@@ -307,6 +307,14 @@ def compare_student_analytics(student_id):
         comparison_type = request.args.get('comparison_type')
         class_id = request.args.get('class_id')
         subject_filter = request.args.get('subject_filter')
+        
+        # Validar que comparison_type está presente (es query param, no JSON body)
+        if not comparison_type:
+            return APIRoute.error(
+                ErrorCodes.VALIDATION_ERROR,
+                "El parámetro 'comparison_type' es requerido",
+                status_code=400
+            )
 
         # Verificar permisos
         if current_user_id != student_id:
