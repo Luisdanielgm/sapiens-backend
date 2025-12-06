@@ -1,4 +1,4 @@
-from flask import request, jsonify
+from flask import request, jsonify, redirect
 from typing import Optional
 from src.shared.standardization import APIBlueprint, APIRoute, ErrorCodes
 from src.profiles.services import ProfileService
@@ -45,6 +45,32 @@ resource_service = ResourceService()
 evaluation_resource_service = EvaluationResourceService()
 folder_service = ResourceFolderService()
 topic_readiness_service = TopicReadinessService()
+
+# ==================== Alias /api/study-plan/evaluation* -> /api/evaluations* ====================
+
+@study_plan_bp.route('/evaluation', methods=['POST'])
+def proxy_create_evaluation():
+    return redirect('/api/evaluations/', code=307)
+
+@study_plan_bp.route('/evaluation/<evaluation_id>', methods=['GET', 'PUT', 'DELETE'])
+def proxy_evaluation_crud(evaluation_id):
+    return redirect(f'/api/evaluations/{evaluation_id}', code=307)
+
+@study_plan_bp.route('/evaluations/<evaluation_id>/resources', methods=['GET', 'POST'])
+def proxy_resources(evaluation_id):
+    return redirect(f'/api/evaluations/{evaluation_id}/resources', code=307)
+
+@study_plan_bp.route('/evaluations/<evaluation_id>/resources/<resource_id>', methods=['DELETE'])
+def proxy_resource_delete(evaluation_id, resource_id):
+    return redirect(f'/api/evaluations/{evaluation_id}/resources/{resource_id}', code=307)
+
+@study_plan_bp.route('/evaluations/<evaluation_id>/submissions', methods=['GET', 'POST'])
+def proxy_submissions(evaluation_id):
+    return redirect(f'/api/evaluations/{evaluation_id}/submissions', code=307)
+
+@study_plan_bp.route('/evaluation/submission/<submission_id>', methods=['PUT'])
+def proxy_grade_submission(submission_id):
+    return redirect(f'/api/evaluations/submissions/{submission_id}/grade', code=307)
 
 # Rutas para Plan de Estudio
 @study_plan_bp.route('/', methods=['POST'])

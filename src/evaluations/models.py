@@ -17,11 +17,19 @@ class Evaluation:
                  use_quiz_score: bool = False,
                  requires_submission: bool = False,
                  linked_quiz_id: Optional[str] = None,
-                 auto_grading: bool = False,
+                 auto_grading: Optional[Dict] = None,
                  weightings: Optional[Dict[str, float]] = None,
                  rubric: Optional[Dict] = None,
                  max_attempts: int = 1,
                  time_limit: Optional[int] = None,  # in minutes
+                 score_source: Optional[str] = None,  # manual | quiz_linked | topic_result | module_result | interactive_result | deliverable
+                 blocking_scope: Optional[str] = None,  # none | topic_virtual | module_virtual
+                 blocking_condition: Optional[str] = None,  # submission_received | graded | auto_graded_ok
+                 pass_score: Optional[float] = None,  # 0-100 threshold for auto_graded_ok
+                 virtual_topic_id: Optional[str] = None,
+                 virtual_module_id: Optional[str] = None,
+                 resource_templates: Optional[List[str]] = None,
+                 allow_manual_override: bool = True,
                  _id: Optional[ObjectId] = None,
                  created_at: Optional[datetime] = None,
                  updated_at: Optional[datetime] = None,
@@ -42,6 +50,14 @@ class Evaluation:
         self.rubric = rubric or {}  # Rubric configuration or reference
         self.max_attempts = max_attempts
         self.time_limit = time_limit
+        self.score_source = score_source
+        self.blocking_scope = blocking_scope
+        self.blocking_condition = blocking_condition
+        self.pass_score = pass_score
+        self.virtual_topic_id = ObjectId(virtual_topic_id) if virtual_topic_id else None
+        self.virtual_module_id = ObjectId(virtual_module_id) if virtual_module_id else None
+        self.resource_templates = resource_templates or []
+        self.allow_manual_override = allow_manual_override
         self.created_at = created_at or datetime.now()
         self.updated_at = updated_at or datetime.now()
         self.status = status
@@ -64,6 +80,14 @@ class Evaluation:
             "rubric": self.rubric,
             "max_attempts": self.max_attempts,
             "time_limit": self.time_limit,
+            "score_source": self.score_source,
+            "blocking_scope": self.blocking_scope,
+            "blocking_condition": self.blocking_condition,
+            "pass_score": self.pass_score,
+            "virtual_topic_id": self.virtual_topic_id,
+            "virtual_module_id": self.virtual_module_id,
+            "resource_templates": self.resource_templates,
+            "allow_manual_override": self.allow_manual_override,
             "created_at": self.created_at,
             "updated_at": self.updated_at,
             "status": self.status
@@ -136,6 +160,7 @@ class EvaluationSubmission:
                  file_path: Optional[str] = None,
                  url: Optional[str] = None,
                  grade: Optional[float] = None,
+                 final_grade: Optional[float] = None,
                  feedback: Optional[str] = None,
                  graded_by: Optional[str] = None,
                  graded_at: Optional[datetime] = None,
@@ -147,17 +172,21 @@ class EvaluationSubmission:
                  ai_corrected_at: Optional[datetime] = None,
                  topic_scores: Optional[Dict[str, float]] = None,  # For multi-topic evaluations
                  submission_metadata: Optional[Dict] = None,
+                 resource_id: Optional[str] = None,
+                 confirmed_by_teacher: bool = False,
+                 override_reason: Optional[str] = None,
                  _id: Optional[ObjectId] = None,
                  created_at: Optional[datetime] = None,
                  updated_at: Optional[datetime] = None):
         self._id = _id or ObjectId()
         self.evaluation_id = ObjectId(evaluation_id)
-        self.student_id = student_id  # Keep as string to match database storage
+        self.student_id = ObjectId(student_id) if isinstance(student_id, str) else student_id
         self.submission_type = submission_type
         self.content = content
         self.file_path = file_path
         self.url = url
         self.grade = grade
+        self.final_grade = final_grade if final_grade is not None else grade
         self.feedback = feedback
         self.graded_by = ObjectId(graded_by) if graded_by else None
         self.graded_at = graded_at
@@ -169,6 +198,9 @@ class EvaluationSubmission:
         self.ai_corrected_at = ai_corrected_at
         self.topic_scores = topic_scores or {}  # Dict[topic_id: score]
         self.submission_metadata = submission_metadata or {}
+        self.resource_id = ObjectId(resource_id) if resource_id else None
+        self.confirmed_by_teacher = confirmed_by_teacher
+        self.override_reason = override_reason
         self.created_at = created_at or datetime.now()
         self.updated_at = updated_at or datetime.now()
 
@@ -182,6 +214,7 @@ class EvaluationSubmission:
             "file_path": self.file_path,
             "url": self.url,
             "grade": self.grade,
+            "final_grade": self.final_grade,
             "feedback": self.feedback,
             "graded_by": self.graded_by,
             "graded_at": self.graded_at,
@@ -193,6 +226,9 @@ class EvaluationSubmission:
             "ai_corrected_at": self.ai_corrected_at,
             "topic_scores": self.topic_scores,
             "submission_metadata": self.submission_metadata,
+            "resource_id": self.resource_id,
+            "confirmed_by_teacher": self.confirmed_by_teacher,
+            "override_reason": self.override_reason,
             "created_at": self.created_at,
             "updated_at": self.updated_at
         }
@@ -329,3 +365,43 @@ class EvaluationRubric:
         
         total_points = sum(criterion.get("points", 0) for criterion in self.criteria)
         return abs(total_points - self.total_points) < 0.001
+
+
+class EvaluationResult:
+    """
+    Resultado consolidado de una evaluación por estudiante.
+    """
+    def __init__(
+        self,
+        evaluation_id: str,
+        student_id: str,
+        score: float,
+        source: str = "manual",  # manual | ai | content_result
+        status: str = "completed",
+        submission_id: Optional[str] = None,
+        recorded_at: Optional[datetime] = None,
+        class_id: Optional[str] = None,
+        _id: Optional[ObjectId] = None,
+    ):
+        self._id = _id or ObjectId()
+        self.evaluation_id = ObjectId(evaluation_id)
+        self.student_id = ObjectId(student_id) if isinstance(student_id, str) else student_id
+        self.score = score
+        self.source = source
+        self.status = status
+        self.submission_id = ObjectId(submission_id) if submission_id else None
+        self.recorded_at = recorded_at or datetime.now()
+        self.class_id = ObjectId(class_id) if class_id else None
+
+    def to_dict(self) -> dict:
+        return {
+            "_id": self._id,
+            "evaluation_id": self.evaluation_id,
+            "student_id": self.student_id,
+            "score": self.score,
+            "source": self.source,
+            "status": self.status,
+            "submission_id": self.submission_id,
+            "recorded_at": self.recorded_at,
+            "class_id": self.class_id,
+        }

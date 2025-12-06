@@ -6,7 +6,8 @@ from src.evaluations.models import (
     Evaluation,
     EvaluationSubmission,
     EvaluationResource,
-    EvaluationRubric
+    EvaluationRubric,
+    EvaluationResult,
 )
 from src.shared.database import get_db
 from src.shared.constants import STATUS
@@ -24,6 +25,7 @@ class EvaluationService:
         self.rubrics_collection = self.db.evaluation_rubrics
         self.topics_collection = self.db.topics
         self.content_results_collection = self.db.content_results
+        self.results_collection = self.db.evaluation_results
 
     # ==================== CRUD Operations ====================
     
@@ -171,7 +173,7 @@ class EvaluationService:
         try:
             submissions = list(self.submissions_collection.find({
                 "evaluation_id": ObjectId(evaluation_id),
-                "student_id": student_id
+                "student_id": ObjectId(student_id) if isinstance(student_id, str) else student_id
             }).sort("created_at", -1))
             return submissions
         except Exception as e:
@@ -194,8 +196,13 @@ class EvaluationService:
             topic_scores: Calificaciones por tema para evaluaciones multi-tema
         """
         try:
+            submission = self.submissions_collection.find_one({"_id": ObjectId(submission_id)})
+            if not submission:
+                return False
+
             update_data = {
                 "grade": grade,
+                "final_grade": grade,
                 "feedback": feedback,
                 "graded_by": ObjectId(graded_by) if graded_by else None,
                 "graded_at": datetime.now(),
@@ -210,7 +217,18 @@ class EvaluationService:
                 {"_id": ObjectId(submission_id)},
                 {"$set": update_data}
             )
-            return result.modified_count > 0
+            updated = result.modified_count > 0
+
+            if updated:
+                self._upsert_evaluation_result(
+                    evaluation_id=str(submission["evaluation_id"]),
+                    student_id=submission["student_id"],
+                    score=grade,
+                    source="manual",
+                    submission_id=submission_id,
+                    status="graded"
+                )
+            return updated
             
         except Exception as e:
             raise Exception(f"Error al calificar entrega: {str(e)}")
@@ -330,9 +348,10 @@ class EvaluationService:
             evaluation = Evaluation(**evaluation_data)
             
             # Obtener resultados de contenido para los temas de la evaluación
+            student_obj_id = ObjectId(student_id) if isinstance(student_id, str) else student_id
             content_results = list(self.content_results_collection.find({
                 "topic_id": {"$in": evaluation.topic_ids},
-                "student_id": student_id
+                "student_id": student_obj_id
             }))
             
             if not content_results:
@@ -368,6 +387,7 @@ class EvaluationService:
                 "student_id": student_id,
                 "submission_type": "content_result",
                 "grade": total_weighted_score,
+                "final_grade": total_weighted_score,
                 "topic_scores": topic_scores,
                 "status": "auto_graded",
                 "ai_score": total_weighted_score,
@@ -388,6 +408,16 @@ class EvaluationService:
             else:
                 # Crear nueva entrega
                 submission_id = self.create_submission(submission_data)
+
+            # Guardar resultado consolidado
+            self._upsert_evaluation_result(
+                evaluation_id=evaluation_id,
+                student_id=student_id,
+                score=total_weighted_score,
+                source="content_result",
+                submission_id=submission_id,
+                status="completed"
+            )
             
             return {
                 "success": True,
@@ -555,6 +585,57 @@ class EvaluationService:
             
         except Exception as e:
             raise Exception(f"Error al obtener resumen de evaluaciones: {str(e)}")
+
+    # ==================== Evaluation Results ====================
+
+    def _upsert_evaluation_result(
+        self,
+        evaluation_id: str,
+        student_id: str,
+        score: float,
+        source: str,
+        submission_id: Optional[str],
+        status: str = "completed",
+    ) -> None:
+        """
+        Crea o actualiza el resultado consolidado de una evaluación.
+        """
+        try:
+            result = EvaluationResult(
+                evaluation_id=evaluation_id,
+                student_id=student_id,
+                score=score,
+                source=source,
+                status=status,
+                submission_id=submission_id,
+            )
+            self.results_collection.update_one(
+                {"evaluation_id": result.evaluation_id, "student_id": result.student_id},
+                {"$set": result.to_dict()},
+                upsert=True,
+            )
+        except Exception as exc:
+            raise Exception(f"Error al guardar evaluation_result: {str(exc)}")
+    
+    def get_results_by_evaluation(self, evaluation_id: str) -> List[Dict]:
+        """
+        Obtener resultados consolidados de una evaluaciИn.
+        """
+        try:
+            results = list(self.results_collection.find({
+                "evaluation_id": ObjectId(evaluation_id)
+            }).sort("recorded_at", -1))
+            for r in results:
+                r["_id"] = str(r["_id"])
+                r["evaluation_id"] = str(r["evaluation_id"])
+                r["student_id"] = str(r["student_id"])
+                if r.get("submission_id"):
+                    r["submission_id"] = str(r["submission_id"])
+                if r.get("class_id"):
+                    r["class_id"] = str(r["class_id"])
+            return results
+        except Exception as e:
+            raise Exception(f"Error al obtener evaluation_results: {str(e)}")
     
     # ==================== Helper Methods ====================
     
