@@ -477,7 +477,7 @@ def submit_content_result():
                                 )
                                 
                                 # Actualizar progreso del módulo
-                                virtual_topic_service._update_module_progress_from_topic(virtual_topic)
+                                virtual_module_service._update_module_progress_from_topic(virtual_topic)
                                 
                                 # Trigger para actualización de perfil adaptativo
                                 try:
@@ -1388,7 +1388,7 @@ def update_module_progress(module_id):
                             try:
                                 updated_topic = get_db().virtual_topics.find_one({"_id": ObjectId(topic_id)})
                                 if updated_topic:
-                                    virtual_topic_service._update_module_progress_from_topic(updated_topic)
+                                    virtual_module_service._update_module_progress_from_topic(updated_topic)
                             except Exception as update_err:
                                 logging.warning(f"Error recalculando progreso de módulo: {str(update_err)}")
                     except Exception as topic_error:

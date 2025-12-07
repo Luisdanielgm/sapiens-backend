@@ -3632,6 +3632,8 @@ class ContentResultService:
         self.virtual_contents = self.db.virtual_topic_contents
         self.virtual_topics = self.db.virtual_topics
         self.topic_contents = self.db.topic_contents
+        # ThreadPoolExecutor para procesamiento asíncrono de evaluaciones
+        self._eval_executor = ThreadPoolExecutor(max_workers=2, thread_name_prefix="content_result_eval")
 
     # ---------------------------------------------------------------------
     # Public API
