@@ -2,6 +2,7 @@ from flask import Blueprint, request, jsonify
 from datetime import datetime
 from bson import ObjectId
 from src.evaluations.services import EvaluationService
+from src.correction.services import CorrectionService
 from src.evaluations.models import EvaluationResource
 from src.evaluations.weighted_grading_service import weighted_grading_service
 from src.shared.decorators import auth_required
@@ -12,6 +13,7 @@ from werkzeug.utils import secure_filename
 # Crear blueprint para las rutas de evaluaciones
 evaluation_routes = Blueprint('evaluations', __name__, url_prefix='/api/evaluations')
 evaluation_service = EvaluationService()
+correction_service = CorrectionService()
 
 # ==================== CRUD Operations ====================
 
@@ -31,6 +33,11 @@ def list_evaluations(current_user):
         blocking_condition = request.args.get('blocking_condition')
         virtual_topic_id = request.args.get('virtual_topic_id')
         virtual_module_id = request.args.get('virtual_module_id')
+        plan_id = request.args.get('plan_id')
+        module_id = request.args.get('module_id')
+        class_id = request.args.get('class_id')
+        date_from = request.args.get('date_from')
+        date_to = request.args.get('date_to')
 
         if topic_id and validate_object_id(topic_id):
             query['topic_ids'] = ObjectId(topic_id)
@@ -48,6 +55,20 @@ def list_evaluations(current_user):
             query['virtual_topic_id'] = ObjectId(virtual_topic_id)
         if virtual_module_id and validate_object_id(virtual_module_id):
             query['virtual_module_id'] = ObjectId(virtual_module_id)
+        if plan_id and validate_object_id(plan_id):
+            query['plan_id'] = ObjectId(plan_id)
+        if module_id and validate_object_id(module_id):
+            query['module_id'] = ObjectId(module_id)
+        if class_id and validate_object_id(class_id):
+            query['class_id'] = ObjectId(class_id)
+        if date_from or date_to:
+            query['due_date'] = {}
+            if date_from:
+                query['due_date']['$gte'] = datetime.fromisoformat(date_from)
+            if date_to:
+                query['due_date']['$lte'] = datetime.fromisoformat(date_to)
+            if not query['due_date']:
+                query.pop('due_date', None)
 
         evaluations = list(evaluation_service.evaluations_collection.find(query).sort("created_at", -1))
         for ev in evaluations:
@@ -294,16 +315,39 @@ def get_student_submissions(current_user, evaluation_id, student_id):
 @auth_required
 def list_submissions(current_user, evaluation_id):
     """
-    Listar entregas de una evaluaciИn. Filtros: student_id.
+    Listar entregas de una evaluaciИn. Filtros: student_id, status, late. Soporta paginación y orden.
     """
     try:
         if not validate_object_id(evaluation_id):
             return jsonify({'error': 'ID de evaluaciИn invケlido'}), 400
         student_id = request.args.get('student_id')
+        status = request.args.get('status')
+        late = request.args.get('late')
+        page = request.args.get('page', default=1, type=int)
+        page_size = request.args.get('page_size', default=20, type=int)
+        sort_by = request.args.get('sort_by', default='created_at')
+        sort_dir = request.args.get('sort_dir', default='desc')
+        page = max(page, 1)
+        page_size = min(max(page_size, 1), 100)
         query = {"evaluation_id": ObjectId(evaluation_id)}
         if student_id and validate_object_id(student_id):
             query["student_id"] = ObjectId(student_id)
-        submissions = list(evaluation_service.submissions_collection.find(query).sort("created_at", -1))
+        if status:
+            query["status"] = status
+        if late is not None:
+            if late.lower() in ["true", "1", "yes"]:
+                query["is_late"] = True
+            elif late.lower() in ["false", "0", "no"]:
+                query["is_late"] = False
+        total = evaluation_service.submissions_collection.count_documents(query)
+        direction = -1 if sort_dir.lower() == 'desc' else 1
+        if sort_by not in ["created_at", "updated_at", "status", "graded_at"]:
+            sort_by = "created_at"
+        cursor = (evaluation_service.submissions_collection.find(query)
+                  .sort(sort_by, direction)
+                  .skip((page - 1) * page_size)
+                  .limit(page_size))
+        submissions = list(cursor)
         for submission in submissions:
             submission['_id'] = str(submission['_id'])
             submission['evaluation_id'] = str(submission['evaluation_id'])
@@ -313,7 +357,14 @@ def list_submissions(current_user, evaluation_id):
                 submission['student_id'] = str(submission['student_id'])
             if submission.get('resource_id'):
                 submission['resource_id'] = str(submission['resource_id'])
-        return jsonify({"submissions": submissions}), 200
+        return jsonify({
+            "submissions": submissions,
+            "pagination": {
+                "page": page,
+                "page_size": page_size,
+                "total": total
+            }
+        }), 200
     except Exception as e:
         return jsonify({'error': f'Error interno: {str(e)}'}), 500
 
@@ -353,6 +404,68 @@ def grade_submission(current_user, submission_id):
         
         return jsonify({'message': 'Entrega calificada exitosamente'}), 200
         
+    except Exception as e:
+        return jsonify({'error': f'Error interno: {str(e)}'}), 500
+
+
+@evaluation_routes.route('/submissions/<submission_id>/ai-grade', methods=['POST'])
+@auth_required
+def ai_grade_submission(current_user, submission_id):
+    """
+    Solicitar calificación con IA.
+    Crea correction_task y marca la submission como ai_pending.
+    Body opcional: rubric_resource_id.
+    """
+    try:
+        if not validate_object_id(submission_id):
+            return jsonify({'error': 'ID de entrega inválido'}), 400
+
+        data = request.get_json() or {}
+        rubric_resource_id = data.get("rubric_resource_id")
+
+        submission = evaluation_service.submissions_collection.find_one({"_id": ObjectId(submission_id)})
+        if not submission:
+            return jsonify({'error': 'Entrega no encontrada'}), 404
+
+        evaluation_id = submission.get("evaluation_id")
+        if not evaluation_id:
+            return jsonify({'error': 'Entrega sin evaluation_id'}), 400
+
+        submission_resource_id = submission.get("resource_id")
+        if not submission_resource_id:
+            return jsonify({'error': 'La entrega no tiene resource_id para procesar con IA'}), 400
+
+        # Crear tarea de corrección
+        success, task_id = correction_service.start_correction_task(
+            evaluation_id=str(evaluation_id),
+            submission_resource_id=str(submission_resource_id),
+            rubric_resource_id=rubric_resource_id,
+            teacher_id=current_user["_id"]
+        )
+        if not success:
+            return jsonify({'error': 'No se pudo iniciar la tarea de corrección'}), 500
+
+        # Marcar submission como pendiente de IA
+        evaluation_service.submissions_collection.update_one(
+            {"_id": ObjectId(submission_id)},
+            {"$set": {"status": "ai_pending", "updated_at": datetime.now()}}
+        )
+
+        # Registrar resultado pendiente en evaluation_results
+        try:
+            evaluation_service._upsert_evaluation_result(
+                evaluation_id=str(evaluation_id),
+                student_id=submission.get("student_id"),
+                score=0.0,
+                source="ai_pending",
+                submission_id=submission_id,
+                status="pending"
+            )
+        except Exception as _:
+            # no bloquear por error de resultado
+            pass
+
+        return jsonify({"message": "Corrección IA iniciada", "task_id": task_id}), 202
     except Exception as e:
         return jsonify({'error': f'Error interno: {str(e)}'}), 500
 
@@ -441,12 +554,12 @@ def get_rubric(current_user, evaluation_id):
             return jsonify({'error': 'ID de evaluaciИn invケlido'}), 400
         rubric = evaluation_service.rubrics_collection.find_one({"evaluation_id": ObjectId(evaluation_id)})
         if not rubric:
-            return jsonify({'error': 'Rカbrica no encontrada'}), 404
+            return jsonify({'error': 'Rúbrica no encontrada'}), 404
         rubric["_id"] = str(rubric["_id"])
         rubric["evaluation_id"] = str(rubric["evaluation_id"])
         if rubric.get("created_by"):
             rubric["created_by"] = str(rubric["created_by"])
-        return jsonify(rubric), 200
+        return jsonify({"rubric": rubric}), 200
     except Exception as e:
         return jsonify({'error': f'Error interno: {str(e)}'}), 500
 
@@ -464,7 +577,7 @@ def create_or_update_rubric(current_user, evaluation_id):
             return jsonify({'error': 'criteria y total_points requeridos'}), 400
         rubric = EvaluationRubric(
             evaluation_id=evaluation_id,
-            title=data.get("title", "Rカbrica"),
+            title=data.get("title", "Rúbrica"),
             description=data.get("description", ""),
             criteria=data.get("criteria", []),
             total_points=data.get("total_points", 100.0),
@@ -473,12 +586,13 @@ def create_or_update_rubric(current_user, evaluation_id):
             rubric_type=data.get("rubric_type", "standard")
         )
         self_ref = evaluation_service.rubrics_collection
-        self_ref.update_one(
+        res = self_ref.update_one(
             {"evaluation_id": rubric.evaluation_id},
             {"$set": rubric.to_dict()},
             upsert=True
         )
-        return jsonify({"message": "Rカbrica guardada"}), 200
+        rubric_doc = self_ref.find_one({"evaluation_id": rubric.evaluation_id})
+        return jsonify({"message": "Rúbrica guardada", "rubric_id": str(rubric_doc["_id"])}), 200
     except Exception as e:
         return jsonify({'error': f'Error interno: {str(e)}'}), 500
 
@@ -671,14 +785,118 @@ def get_student_evaluation_summary(current_user, student_id):
 @auth_required
 def list_evaluation_results(current_user, evaluation_id):
     """
-    Obtener resultados consolidados de una evaluaciИn.
+    Obtener resultados consolidados de una evaluaciИn. Soporta filtros y paginación básica.
     """
     try:
         if not validate_object_id(evaluation_id):
             return jsonify({'error': 'ID de evaluaciИn invケlido'}), 400
-        
-        results = evaluation_service.get_results_by_evaluation(evaluation_id)
-        return jsonify({"results": results}), 200
+        student_id = request.args.get('student_id')
+        status = request.args.get('status')
+        date_from = request.args.get('date_from')
+        date_to = request.args.get('date_to')
+        page = request.args.get('page', default=1, type=int)
+        page_size = request.args.get('page_size', default=20, type=int)
+        sort_by = request.args.get('sort_by', default='recorded_at')
+        sort_dir = request.args.get('sort_dir', default='desc')
+        page = max(page, 1)
+        page_size = min(max(page_size, 1), 100)
+
+        query = {"evaluation_id": ObjectId(evaluation_id)}
+        if student_id and validate_object_id(student_id):
+            query["student_id"] = ObjectId(student_id)
+        if status:
+            query["status"] = status
+        if date_from or date_to:
+            query["recorded_at"] = {}
+            if date_from:
+                query["recorded_at"]["$gte"] = datetime.fromisoformat(date_from)
+            if date_to:
+                query["recorded_at"]["$lte"] = datetime.fromisoformat(date_to)
+            if not query["recorded_at"]:
+                query.pop("recorded_at", None)
+
+        total = evaluation_service.results_collection.count_documents(query)
+        direction = -1 if sort_dir.lower() == 'desc' else 1
+        if sort_by not in ["recorded_at", "score", "status"]:
+            sort_by = "recorded_at"
+        cursor = (evaluation_service.results_collection.find(query)
+                  .sort(sort_by, direction)
+                  .skip((page - 1) * page_size)
+                  .limit(page_size))
+        results = list(cursor)
+        for r in results:
+            r["_id"] = str(r["_id"])
+            r["evaluation_id"] = str(r["evaluation_id"])
+            r["student_id"] = str(r["student_id"])
+            if r.get("submission_id"):
+                r["submission_id"] = str(r["submission_id"])
+            if r.get("class_id"):
+                r["class_id"] = str(r["class_id"])
+        return jsonify({
+            "results": results,
+            "pagination": {
+                "page": page,
+                "page_size": page_size,
+                "total": total
+            }
+        }), 200
+    except Exception as e:
+        return jsonify({'error': f'Error interno: {str(e)}'}), 500
+
+
+@evaluation_routes.route('/<evaluation_id>/results', methods=['POST', 'PUT'])
+@auth_required
+def upsert_evaluation_result(current_user, evaluation_id):
+    """
+    Crear o actualizar un resultado de evaluación (unificado).
+    Body: student_id (req), score (req), source (opcional), status (opcional), submission_id, class_id.
+    """
+    try:
+        if not validate_object_id(evaluation_id):
+            return jsonify({'error': 'ID de evaluaciИn invケlido'}), 400
+        data = request.get_json() or {}
+        student_id = data.get("student_id")
+        score = data.get("score")
+        if not student_id or not validate_object_id(student_id):
+            return jsonify({'error': 'student_id requerido y válido'}), 400
+        try:
+            score_val = float(score)
+        except Exception:
+            return jsonify({'error': 'score debe ser numérico'}), 400
+        source = data.get("source", "manual")
+        status = data.get("status", "completed")
+        submission_id = data.get("submission_id")
+        class_id = data.get("class_id")
+
+        doc = {
+            "evaluation_id": ObjectId(evaluation_id),
+            "student_id": ObjectId(student_id),
+            "score": score_val,
+            "source": source,
+            "status": status,
+            "recorded_at": datetime.now()
+        }
+        if submission_id and validate_object_id(submission_id):
+            doc["submission_id"] = ObjectId(submission_id)
+        if class_id and validate_object_id(class_id):
+            doc["class_id"] = ObjectId(class_id)
+
+        evaluation_service.results_collection.update_one(
+            {"evaluation_id": doc["evaluation_id"], "student_id": doc["student_id"]},
+            {"$set": doc},
+            upsert=True
+        )
+
+        # Responder con vista normalizada
+        doc["_id"] = str(doc.get("_id")) if doc.get("_id") else None
+        doc["evaluation_id"] = str(doc["evaluation_id"])
+        doc["student_id"] = str(doc["student_id"])
+        if doc.get("submission_id"):
+            doc["submission_id"] = str(doc["submission_id"])
+        if doc.get("class_id"):
+            doc["class_id"] = str(doc["class_id"])
+
+        return jsonify({"message": "Resultado registrado", "result": doc}), 200
     except Exception as e:
         return jsonify({'error': f'Error interno: {str(e)}'}), 500
 
@@ -715,8 +933,10 @@ def evaluation_progress_lock(current_user, evaluation_id):
             "student_id": ObjectId(student_id)
         })
         score = None
+        result_status = None
         if result:
             score = result.get("score")
+            result_status = result.get("status")
 
         blocked = True
         reason = "CondiciИn de bloqueo no cumplida"
@@ -725,13 +945,23 @@ def evaluation_progress_lock(current_user, evaluation_id):
             blocked = latest is None
             reason = None if not blocked else "Falta entregar"
         elif blocking_condition == "graded":
-            blocked = not latest or latest.get("status") != "graded"
-            reason = None if not blocked else "Pendiente de calificar"
+            blocked = not latest or latest.get("status") not in ["graded"]
+            # IA en proceso
+            if latest and latest.get("status") == "ai_pending":
+                blocked = True
+                reason = "Corrección IA en proceso"
+            else:
+                reason = None if not blocked else "Pendiente de calificar"
         elif blocking_condition == "auto_graded_ok":
             threshold = pass_score if pass_score is not None else 0
             score_to_check = score if score is not None else (latest.get("final_grade") if latest else None)
-            blocked = score_to_check is None or score_to_check < threshold
-            reason = None if not blocked else f"Requiere puntaje >= {threshold}"
+            # Si está en IA pendiente, bloquear
+            if latest and latest.get("status") == "ai_pending":
+                blocked = True
+                reason = "Corrección IA en proceso"
+            else:
+                blocked = score_to_check is None or score_to_check < threshold
+                reason = None if not blocked else f"Requiere puntaje >= {threshold}"
         else:
             # fallback: no bloqueo
             blocked = False

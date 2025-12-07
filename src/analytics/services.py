@@ -538,52 +538,73 @@ class ClassAnalyticsService(BaseService):
                     "average_score": 0,
                     "distribution": {},
                     "per_evaluation": [],
-                    "passing_rate": 0
+                    "passing_rate": 0,
+                    "pending_count": 0,
+                    "graded_count": 0,
+                    "total_results": 0,
+                    "status_distribution": {}
                 }
-                
-            # Calcular promedio general
+
+            pending_statuses = {"pending", "submitted", "ai_pending", "in_progress"}
+            graded_statuses = {"graded", "completed"}
+
+            total_results = len(evaluation_results)
             total_score = sum(result.get("score", 0) for result in evaluation_results)
-            average_score = total_score / len(evaluation_results) if evaluation_results else 0
-            
-            # Calcular distribución de calificaciones
+            average_score = total_score / total_results if total_results else 0
+
             distribution = {}
+            status_distribution = {}
+            pending_count = 0
+            graded_count = 0
+
             for result in evaluation_results:
                 score = result.get("score", 0)
                 range_key = f"{int(score // 10) * 10}-{int(score // 10) * 10 + 9}"
-                
-                if range_key in distribution:
-                    distribution[range_key] += 1
-                else:
-                    distribution[range_key] = 1
-                    
-            # Calcular estadísticas por evaluación
+                distribution[range_key] = distribution.get(range_key, 0) + 1
+
+                status = result.get("status") or "completed"
+                status_distribution[status] = status_distribution.get(status, 0) + 1
+                if status in pending_statuses:
+                    pending_count += 1
+                if status in graded_statuses:
+                    graded_count += 1
+
             per_evaluation = []
             for evaluation in evaluations:
                 eval_id = evaluation["_id"]
                 eval_results = [r for r in evaluation_results if r.get("evaluation_id") == eval_id]
-                
+
                 if eval_results:
-                    eval_avg = sum(r.get("score", 0) for r in eval_results) / len(eval_results)
-                    passing_count = sum(1 for r in eval_results if r.get("score", 0) >= 60)  # Umbral de aprobación
-                    passing_rate = (passing_count / len(eval_results)) * 100 if eval_results else 0
-                    
+                    eval_total = len(eval_results)
+                    eval_avg = sum(r.get("score", 0) for r in eval_results) / eval_total
+                    passing_count = sum(1 for r in eval_results if r.get("score", 0) >= 60)
+                    passing_rate = (passing_count / eval_total) * 100 if eval_total else 0
+                    eval_pending = sum(1 for r in eval_results if (r.get("status") or "completed") in pending_statuses)
+                    eval_graded = sum(1 for r in eval_results if (r.get("status") or "completed") in graded_statuses)
+
                     per_evaluation.append({
                         "evaluation_id": str(eval_id),
                         "title": evaluation.get("title", ""),
                         "average_score": eval_avg,
                         "passing_rate": passing_rate,
-                        "submission_rate": (len(eval_results) / len(evaluation.get("students", []))) * 100 if evaluation.get("students") else 0
+                        "submission_rate": (len(eval_results) / len(evaluation.get("students", []))) * 100 if evaluation.get("students") else 0,
+                        "pending_count": eval_pending,
+                        "graded_count": eval_graded,
+                        "total_results": eval_total,
                     })
-                    
-            # Calcular tasa de aprobación general
-            passing_count = sum(1 for r in evaluation_results if r.get("score", 0) >= 60)  # Umbral de aprobación
-            passing_rate = (passing_count / len(evaluation_results)) * 100 if evaluation_results else 0
-            
+
+            passing_count_global = sum(1 for r in evaluation_results if r.get("score", 0) >= 60)
+            passing_rate = (passing_count_global / total_results) * 100 if total_results else 0
+
             return {
                 "average_score": average_score,
                 "distribution": distribution,
                 "per_evaluation": per_evaluation,
-                "passing_rate": passing_rate
+                "passing_rate": passing_rate,
+                "pending_count": pending_count,
+                "graded_count": graded_count,
+                "total_results": total_results,
+                "status_distribution": status_distribution
             }
             
         except Exception as e:

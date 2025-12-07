@@ -518,71 +518,99 @@ class EvaluationService:
     
     def get_student_evaluation_summary(self, student_id: str, topic_ids: List[str] = None) -> Dict:
         """
-        Obtener resumen de evaluaciones para un estudiante.
-        
-        Args:
-            student_id: ID del estudiante
-            topic_ids: Lista opcional de temas para filtrar
-            
-        Returns:
-            Resumen de evaluaciones del estudiante
+        Obtener resumen de evaluaciones para un estudiante usando resultados consolidados.
+        Prioriza `evaluation_results` para promedio/estado y cae a submissions sólo si no hay resultado.
         """
         try:
-            # Construir filtro
             eval_filter = {"status": {"$ne": "deleted"}}
             if topic_ids:
                 eval_filter["topic_ids"] = {"$in": [ObjectId(tid) for tid in topic_ids]}
-            
-            # Obtener evaluaciones
+
             evaluations = list(self.evaluations_collection.find(eval_filter))
-            
+            evaluation_ids = [e["_id"] for e in evaluations]
+
+            # Traer resultados consolidados del estudiante para estas evaluaciones
+            results_filter = {"student_id": student_id}
+            if evaluation_ids:
+                results_filter["evaluation_id"] = {"$in": evaluation_ids}
+            results = list(self.results_collection.find(results_filter))
+            results_by_eval = {str(r["evaluation_id"]): r for r in results}
+
             summary = {
                 "student_id": student_id,
                 "total_evaluations": len(evaluations),
                 "completed_evaluations": 0,
                 "pending_evaluations": 0,
                 "average_grade": 0.0,
-                "evaluations_detail": []
+                "evaluations_detail": [],
             }
-            
+
             total_grade = 0.0
             graded_count = 0
-            
+
+            graded_statuses = {"graded", "completed"}
+            pending_statuses = {"submitted", "ai_pending", "pending", "in_progress"}
+
             for evaluation in evaluations:
                 eval_id = str(evaluation["_id"])
-                submissions = self.get_student_submissions(eval_id, student_id)
-                
-                eval_detail = {
-                    "evaluation_id": eval_id,
-                    "title": evaluation["title"],
-                    "due_date": evaluation["due_date"],
-                    "has_submission": len(submissions) > 0,
-                    "grade": None,
-                    "status": "pending"
-                }
-                
-                if submissions:
-                    latest_submission = submissions[0]
-                    if latest_submission.get("grade") is not None:
-                        eval_detail["grade"] = latest_submission["grade"]
-                        eval_detail["status"] = "graded"
-                        total_grade += latest_submission["grade"]
-                        graded_count += 1
+                result = results_by_eval.get(eval_id)
+
+                # Si no hay resultado, revisamos submissions para reflejar "submitted"
+                submissions = [] if result else self.get_student_submissions(eval_id, student_id)
+
+                grade = None
+                status = "pending"
+                source = None
+                submission_id = None
+                has_submission = bool(submissions) or bool(result)
+
+                if result:
+                    grade = result.get("score")
+                    status = result.get("status", "completed")
+                    source = result.get("source")
+                    submission_id = result.get("submission_id")
+
+                    if status in graded_statuses or grade is not None:
                         summary["completed_evaluations"] += 1
-                    else:
-                        eval_detail["status"] = "submitted"
+                        if grade is not None:
+                            total_grade += grade
+                            graded_count += 1
+                    elif status in pending_statuses:
                         summary["pending_evaluations"] += 1
+                    else:
+                        summary["pending_evaluations"] += 1
+                elif submissions:
+                    latest_submission = submissions[0]
+                    # Sin resultado pero con envío: lo marcamos como submitted/pending
+                    status = "submitted"
+                    submission_id = str(latest_submission.get("_id")) if latest_submission.get("_id") else None
+                    summary["pending_evaluations"] += 1
+                    if latest_submission.get("grade") is not None:
+                        grade = latest_submission["grade"]
+                        status = "graded"
+                        summary["completed_evaluations"] += 1
+                        total_grade += grade
+                        graded_count += 1
                 else:
                     summary["pending_evaluations"] += 1
-                
+
+                eval_detail = {
+                    "evaluation_id": eval_id,
+                    "title": evaluation.get("title"),
+                    "due_date": evaluation.get("due_date"),
+                    "has_submission": has_submission,
+                    "grade": grade,
+                    "status": status,
+                    "source": source,
+                    "submission_id": submission_id,
+                }
                 summary["evaluations_detail"].append(eval_detail)
-            
-            # Calcular promedio
+
             if graded_count > 0:
                 summary["average_grade"] = round(total_grade / graded_count, 2)
-            
+
             return summary
-            
+
         except Exception as e:
             raise Exception(f"Error al obtener resumen de evaluaciones: {str(e)}")
 

@@ -776,22 +776,34 @@ def delete_evaluation(evaluation_id):
 @study_plan_bp.route('/evaluation/result', methods=['POST'])
 @APIRoute.standard(auth_required_flag=True, roles=[ROLES["TEACHER"]], required_fields=['evaluation_id', 'student_id', 'score'])
 def record_evaluation_result():
-    """Registra el resultado de una evaluación"""
-    data = request.get_json()
-    success, result = evaluation_service.record_result(data)
-    if success:
-        return APIRoute.success({"id": result}, message="Resultado registrado exitosamente", status_code=201)
-    return APIRoute.error(ErrorCodes.CREATION_ERROR, result)
+    """
+    Registra el resultado de una evaluación.
+    Alias temporal hacia /api/evaluations/<id>/results para unificar el flujo.
+    """
+    data = request.get_json() or {}
+    evaluation_id = data.get("evaluation_id")
+    if not evaluation_id:
+        return APIRoute.error(ErrorCodes.MISSING_FIELD, "evaluation_id requerido")
+    try:
+        return redirect(f'/api/evaluations/{evaluation_id}/results', code=307)
+    except Exception as e:
+        return APIRoute.error(ErrorCodes.SERVER_ERROR, str(e))
 
 @study_plan_bp.route('/evaluation/result/<result_id>', methods=['PUT'])
 @APIRoute.standard(auth_required_flag=True, roles=[ROLES["TEACHER"]])
 def update_evaluation_result(result_id):
-    """Actualiza el resultado de una evaluación"""
-    data = request.get_json()
-    success, message = evaluation_service.update_result(result_id, data)
-    if success:
-        return APIRoute.success(data={"message": message}, message=message)
-    return APIRoute.error(ErrorCodes.UPDATE_ERROR, message)
+    """
+    Actualiza el resultado de una evaluación.
+    Alias temporal hacia /api/evaluations/<id>/results (requiere evaluation_id en body).
+    """
+    data = request.get_json() or {}
+    evaluation_id = data.get("evaluation_id")
+    if not evaluation_id:
+        return APIRoute.error(ErrorCodes.MISSING_FIELD, "evaluation_id requerido")
+    try:
+        return redirect(f'/api/evaluations/{evaluation_id}/results', code=307)
+    except Exception as e:
+        return APIRoute.error(ErrorCodes.SERVER_ERROR, str(e))
 
 @study_plan_bp.route('/evaluation/result/<result_id>', methods=['DELETE'])
 @APIRoute.standard(auth_required_flag=True, roles=[ROLES["TEACHER"]])
@@ -856,71 +868,15 @@ def remove_resource_from_evaluation_route(evaluation_id, resource_id):
 @study_plan_bp.route('/evaluations/<evaluation_id>/submissions', methods=['POST'])
 @APIRoute.standard(auth_required_flag=True, roles=[ROLES["STUDENT"]])
 def upload_evaluation_submission(evaluation_id):
-    """Permite a un estudiante subir un archivo como entregable para una evaluación."""
-    student_id = request.user_id
-
-    if 'file' not in request.files:
-        return APIRoute.error(ErrorCodes.MISSING_FIELD, "No se encontró el archivo en la solicitud", status_code=400)
-
-    file = request.files['file']
-    if file.filename == '':
-        return APIRoute.error(ErrorCodes.INVALID_DATA, "No se seleccionó ningún archivo", status_code=400)
-
-    try:
-        filename = secure_filename(file.filename)
-        upload_dir = os.path.join('uploads', 'evaluations')
-        os.makedirs(upload_dir, exist_ok=True)
-        file_path = os.path.join(upload_dir, filename)
-        file.save(file_path)
-
-        resource_data = {
-            'name': filename,
-            'type': 'file',
-            'url': file_path,
-            'created_by': student_id
-        }
-
-        success, resource_id = resource_service.create_resource(resource_data)
-        if not success:
-            return APIRoute.error(ErrorCodes.CREATION_ERROR, resource_id, status_code=400)
-
-        submission_data = {
-            'evaluation_id': evaluation_id,
-            'student_id': student_id,
-            'submission_type': 'file',
-            'file_path': file_path
-        }
-
-        success, submission_id = evaluation_service.create_submission(submission_data)
-        if success:
-            evaluation_resource_service.link_resource_to_evaluation(
-                evaluation_id=evaluation_id,
-                resource_id=resource_id,
-                role='submission',
-                created_by=student_id
-            )
-
-            evaluation = evaluation_service.get_evaluation(evaluation_id)
-            if evaluation and evaluation.get('auto_grading'):
-                grading_service = AutomaticGradingService()
-                grade_info = grading_service.grade_submission(resource_id, evaluation_id)
-                evaluation_service.grade_submission(submission_id, {
-                    'grade': grade_info.get('grade'),
-                    'feedback': grade_info.get('feedback'),
-                    'graded_by': student_id,
-                    'graded_at': grade_info.get('graded_at')
-                })
-
-            return APIRoute.success(
-                data={"submission_id": submission_id},
-                message="Entregable subido correctamente",
-                status_code=201
-            )
-        return APIRoute.error(ErrorCodes.OPERATION_FAILED, submission_id, status_code=400)
-
-    except Exception as e:
-        log_error(f"Error subiendo entregable: {e}")
-        return APIRoute.error(ErrorCodes.SERVER_ERROR, str(e), status_code=500)
+    """
+    Legacy de subida de entregables. Deshabilitado para evitar escritura en disco.
+    Usar `/api/evaluations/<id>/submissions` con `ResourceService` (resource_id/url).
+    """
+    return APIRoute.error(
+        ErrorCodes.OPERATION_FAILED,
+        "Subida legacy deshabilitada. Usa /api/evaluations/<id>/submissions con ResourceService.",
+        status_code=410
+    )
 
 
 @study_plan_bp.route('/evaluations/<evaluation_id>/submissions', methods=['GET'])

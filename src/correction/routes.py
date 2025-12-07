@@ -1,4 +1,4 @@
-from flask import request, g
+from flask import request, g, jsonify
 from flask_jwt_extended import get_jwt_identity
 from bson import ObjectId
 import logging
@@ -8,9 +8,12 @@ from src.shared.standardization import APIBlueprint, APIRoute, ErrorCodes
 from src.shared.decorators import auth_required, role_required
 from src.shared.constants import ROLES
 from .services import CorrectionService
+from src.evaluations.services import EvaluationService
+from bson import ObjectId
 
 correction_bp = APIBlueprint('correction', __name__)
 correction_service = CorrectionService()
+evaluation_service = EvaluationService()
 
 @correction_bp.route('/submission/<submission_id>/ai-result', methods=['PUT'])
 @auth_required
@@ -34,6 +37,30 @@ def record_ai_correction(submission_id):
         )
 
         if success:
+            # Actualizar submission a graded y persistir evaluation_result
+            try:
+                submission = evaluation_service.submissions_collection.find_one({"_id": ObjectId(submission_id)})
+                if submission:
+                    evaluation_id = submission.get("evaluation_id")
+                    evaluation_service._upsert_evaluation_result(
+                        evaluation_id=str(evaluation_id),
+                        student_id=submission.get("student_id"),
+                        score=data["ai_score"],
+                        source="ai",
+                        submission_id=submission_id,
+                        status="graded"
+                    )
+                    evaluation_service.submissions_collection.update_one(
+                        {"_id": ObjectId(submission_id)},
+                        {"$set": {
+                            "status": "graded",
+                            "ai_corrected_at": datetime.now(),
+                            "updated_at": datetime.now()
+                        }}
+                    )
+            except Exception as e:
+                # No bloquear la respuesta por fallo en persistencia secundaria
+                pass
             return APIRoute.success(
                 data=result,
                 message="Resultado de la corrección IA guardado exitosamente."
@@ -150,6 +177,82 @@ def update_correction_task(task_id):
             
     except Exception as e:
         logging.error(f"Error en endpoint update_correction_task: {str(e)}")
+        return APIRoute.error(ErrorCodes.SERVER_ERROR, "Error interno del servidor.")
+
+@correction_bp.route('/task/<task_id>/ai-result', methods=['PUT'])
+@auth_required
+def record_ai_result_for_task(task_id):
+    """
+    Callback por task_id: registra resultado IA, actualiza submission y evaluation_results.
+    Body requerido: ai_score, ai_feedback.
+    """
+    try:
+        data = request.get_json() or {}
+        ai_score = data.get("ai_score")
+        ai_feedback = data.get("ai_feedback")
+        if ai_score is None or ai_feedback is None:
+            return APIRoute.error(ErrorCodes.MISSING_FIELDS, "Faltan campos requeridos (ai_score, ai_feedback).")
+
+        # Obtener tarea
+        task = correction_service.get_task_status(task_id)
+        if not task:
+            return APIRoute.error(ErrorCodes.NOT_FOUND, "Tarea de corrección no encontrada.")
+
+        # Encontrar submission por resource_id asociado
+        submission = evaluation_service.submissions_collection.find_one({
+            "resource_id": ObjectId(task["submission_resource_id"])
+        })
+        if not submission:
+            return APIRoute.error(ErrorCodes.NOT_FOUND, "Submission no encontrada para esta tarea.")
+
+        submission_id = str(submission["_id"])
+        evaluation_id = submission.get("evaluation_id")
+
+        # Actualizar submission con resultado IA
+        evaluation_service.submissions_collection.update_one(
+            {"_id": ObjectId(submission_id)},
+            {"$set": {
+                "ai_score": ai_score,
+                "ai_feedback": ai_feedback,
+                "ai_corrected_at": datetime.now(),
+                "status": "graded",
+                "grade": ai_score,
+                "final_grade": ai_score,
+                "updated_at": datetime.now()
+            }}
+        )
+
+        # Upsert evaluation_result
+        evaluation_service._upsert_evaluation_result(
+            evaluation_id=str(evaluation_id),
+            student_id=submission.get("student_id"),
+            score=ai_score,
+            source="ai",
+            submission_id=submission_id,
+            status="graded"
+        )
+
+        # Actualizar tarea con resultado
+        correction_service.update_task(task_id, {
+            "status": "completed",
+            "suggested_grade": ai_score,
+            "feedback": ai_feedback,
+            "updated_at": datetime.now()
+        })
+
+        return APIRoute.success(
+            data={
+                "task_id": task_id,
+                "submission_id": submission_id,
+                "evaluation_id": str(evaluation_id),
+                "status": "graded",
+                "ai_score": ai_score,
+                "ai_feedback": ai_feedback
+            },
+            message="Resultado IA registrado y submission actualizada."
+        )
+    except Exception as e:
+        logging.error(f"Error en callback AI por task_id {task_id}: {str(e)}")
         return APIRoute.error(ErrorCodes.SERVER_ERROR, "Error interno del servidor.")
 
 @correction_bp.route('/process-next', methods=['POST'])

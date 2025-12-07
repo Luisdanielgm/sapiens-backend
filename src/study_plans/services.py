@@ -2488,6 +2488,29 @@ class EvaluationService(VerificationBaseService):
                 if evaluation and evaluation.get("linked_quiz_id"):
                     self._create_content_result_from_submission(submission, grade_update)
                 
+                # Persistir evaluation_results para dashboards/analytics
+                try:
+                    db.evaluation_results.update_one(
+                        {
+                            "evaluation_id": submission["evaluation_id"],
+                            "student_id": submission["student_id"]
+                        },
+                        {
+                            "$set": {
+                                "evaluation_id": submission["evaluation_id"],
+                                "student_id": submission["student_id"],
+                                "score": grade_update.get("grade"),
+                                "source": "manual",
+                                "status": "graded",
+                                "submission_id": ObjectId(submission_id),
+                                "recorded_at": datetime.now()
+                            }
+                        },
+                        upsert=True
+                    )
+                except Exception as e:
+                    logging.error(f"Error guardando evaluation_results (study_plans.grade_submission): {str(e)}")
+                
                 return True, "Entrega calificada exitosamente"
             
             return False, "No se pudo calificar la entrega"
