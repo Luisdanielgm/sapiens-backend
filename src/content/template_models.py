@@ -27,11 +27,12 @@ class Template:
                  subject_tags: List[str] = None,
                  description: str = "",
                  template_config: Optional[Dict] = None,
+                 personalization: Optional[Dict] = None,
                  _id: Optional[ObjectId] = None,
                  created_at: Optional[datetime] = None,
                  updated_at: Optional[datetime] = None,
-                  versions: Optional[List[Dict]] = None,
-                  **kwargs):
+                 versions: Optional[List[Dict]] = None,
+                 **kwargs):
         self._id = _id or ObjectId()
         self.name = name
         self.owner_id = ObjectId(owner_id)
@@ -53,11 +54,14 @@ class Template:
         self.updated_at = updated_at or datetime.now()
         
         # Campos adicionales para tracking
-        self.personalization = {
+        base_personalization = {
             "is_extracted": False,  # Si ya se extrajeron los marcadores
             "last_extraction": None,
             "extraction_version": None
         }
+        if isinstance(personalization, dict):
+            base_personalization.update(personalization)
+        self.personalization = base_personalization
         
         # Manejo de versiones: lista de {version_number:int, html:str, status:str, created_at:datetime}
         # Compatibilidad: si no vienen versiones pero viene html, crear la v1

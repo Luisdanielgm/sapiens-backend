@@ -102,6 +102,8 @@ class TemplateService:
             cleaned['style_tags'] = template_data.get('style_tags', [])
             cleaned['subject_tags'] = template_data.get('subject_tags', [])
             cleaned['versions'] = template_data.get('versions', [])
+            # Propagar metadata de personalización si existe (estado de extracción de marcadores, etc.)
+            cleaned['personalization'] = template_data.get('personalization', {})
             cleaned['template_config'] = template_data.get('template_config', {})
 
             # Campos de fecha
