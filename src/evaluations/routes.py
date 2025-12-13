@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime
 from typing import Any, Dict, List, Optional
+from collections import defaultdict
 
 from bson import ObjectId
 from flask import request
@@ -123,6 +124,71 @@ def _enrich_submissions(submissions: List[Dict[str, Any]]) -> List[Dict[str, Any
             submission["file_size"] = submission.get("file_size") or resource.get("size")
         enriched.append(submission)
     return enriched
+
+
+def _attach_deliverable_attempts(*, evaluation_id: str, submissions: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    if not submissions or not validate_object_id(evaluation_id):
+        return submissions
+
+    student_ids: List[ObjectId] = []
+    for submission in submissions:
+        sid = submission.get("student_id")
+        if isinstance(sid, ObjectId):
+            student_ids.append(sid)
+        elif isinstance(sid, str) and validate_object_id(sid):
+            student_ids.append(ObjectId(sid))
+
+    if not student_ids:
+        return submissions
+
+    links = list(
+        evaluation_service.resources_collection.find(
+            {
+                "evaluation_id": ObjectId(evaluation_id),
+                "role": "submission",
+                "created_by": {"$in": list(set(student_ids))},
+            }
+        ).sort("created_at", -1)
+    )
+
+    resource_ids: List[ObjectId] = []
+    for link in links:
+        rid = link.get("resource_id")
+        if isinstance(rid, ObjectId):
+            resource_ids.append(rid)
+
+    resource_map: Dict[str, Dict[str, Any]] = {}
+    if resource_ids:
+        resources = list(evaluation_service.db.resources.find({"_id": {"$in": list(set(resource_ids))}}))
+        for resource in resources:
+            resource_map[str(resource["_id"])] = resource
+
+    by_student: Dict[str, List[Dict[str, Any]]] = defaultdict(list)
+    for link in links:
+        rid = link.get("resource_id")
+        sid = link.get("created_by")
+        if not isinstance(rid, ObjectId) or not isinstance(sid, ObjectId):
+            continue
+        resource = resource_map.get(str(rid))
+        if not resource:
+            continue
+        by_student[str(sid)].append(
+            {
+                "link_id": str(link.get("_id")),
+                "created_at": link.get("created_at"),
+                "resource": resource,
+            }
+        )
+
+    out: List[Dict[str, Any]] = []
+    for submission in submissions:
+        sid = submission.get("student_id")
+        sid_str = str(sid) if isinstance(sid, ObjectId) else (sid if isinstance(sid, str) else "")
+        item = dict(submission)
+        item["deliverable_attempts"] = by_student.get(sid_str, [])
+        out.append(item)
+
+    return out
 
 
 def _safe_folder_name(value: str, *, max_len: int = 64) -> str:
@@ -611,6 +677,7 @@ def get_student_submissions(evaluation_id: str, student_id: str):
 
     submissions = evaluation_service.get_student_submissions(evaluation_id, student_id)
     submissions = _enrich_submissions(submissions)
+    submissions = _attach_deliverable_attempts(evaluation_id=evaluation_id, submissions=submissions)
     return APIRoute.success(data={"submissions": submissions})
 
 
@@ -652,6 +719,7 @@ def list_submissions(evaluation_id: str):
     )
     submissions = list(cursor)
     submissions = _enrich_submissions(submissions)
+    submissions = _attach_deliverable_attempts(evaluation_id=evaluation_id, submissions=submissions)
     return APIRoute.success(
         data={
             "submissions": submissions,
