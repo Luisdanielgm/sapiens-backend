@@ -1,4 +1,4 @@
-from flask import request, g, jsonify
+from flask import request
 from flask_jwt_extended import get_jwt_identity
 from bson import ObjectId
 import logging
@@ -9,11 +9,47 @@ from src.shared.decorators import auth_required, role_required
 from src.shared.constants import ROLES
 from .services import CorrectionService
 from src.evaluations.services import EvaluationService
-from bson import ObjectId
-
 correction_bp = APIBlueprint('correction', __name__)
 correction_service = CorrectionService()
 evaluation_service = EvaluationService()
+
+@correction_bp.route('/submission/<submission_id>/ai-result', methods=['GET'])
+@auth_required
+def get_ai_correction_result(submission_id):
+    try:
+        user_id = get_jwt_identity()
+        actor_role = getattr(request, "workspace_role", None)
+        actor_roles = getattr(request, "user_roles", None)
+
+        success, result = correction_service.get_ai_correction(
+            submission_id=submission_id,
+            user_id=user_id,
+            actor_role=actor_role,
+            actor_roles=actor_roles
+        )
+
+        if success:
+            return APIRoute.success(data=result)
+
+        status_code = 400
+        message = "Operation failed"
+        details = None
+        if isinstance(result, dict):
+            status_code = result.get("status_code", status_code)
+            message = result.get("error") or result.get("message") or message
+            details = {k: v for k, v in result.items() if k not in ("status_code", "error", "message")}
+
+        error_code = ErrorCodes.OPERATION_FAILED
+        if status_code == 404:
+            error_code = ErrorCodes.NOT_FOUND
+        elif status_code == 403:
+            error_code = ErrorCodes.PERMISSION_DENIED
+
+        return APIRoute.error(error_code, message, details=details, status_code=status_code)
+    except Exception as e:
+        logging.error(f"Error in endpoint get_ai_correction_result: {str(e)}")
+        return APIRoute.error(ErrorCodes.SERVER_ERROR, "Error interno del servidor.")
+
 
 @correction_bp.route('/submission/<submission_id>/ai-result', methods=['PUT'])
 @auth_required
@@ -22,18 +58,44 @@ def record_ai_correction(submission_id):
     Endpoint para que el frontend guarde el resultado de una corrección hecha por IA.
     """
     try:
-        data = request.json
+        data = request.get_json(silent=True) or {}
         user_id = get_jwt_identity()
+        actor_role = getattr(request, "workspace_role", None)
+        actor_roles = getattr(request, "user_roles", None)
 
-        required_fields = ["ai_score", "ai_feedback"]
-        if not all(field in data for field in required_fields):
-            return APIRoute.error(ErrorCodes.MISSING_FIELDS, "Faltan campos requeridos (ai_score, ai_feedback).")
+        # Compat: FE puede enviar ai_grade; backend canónico es ai_score
+        ai_score = data.get("ai_score", None)
+        if ai_score is None:
+            ai_score = data.get("ai_grade", None)
+        ai_feedback = data.get("ai_feedback", None)
+        if ai_score is None or ai_feedback is None:
+            return APIRoute.error(
+                ErrorCodes.MISSING_FIELDS,
+                "Faltan campos requeridos (ai_score/ai_grade, ai_feedback)."
+            )
+
+        extra_fields = {}
+        if "confidence_score" in data:
+            extra_fields["ai_confidence_score"] = data.get("confidence_score")
+        if "rubric_analysis" in data:
+            extra_fields["ai_rubric_analysis"] = data.get("rubric_analysis")
+        if "suggestions" in data:
+            extra_fields["ai_suggestions"] = data.get("suggestions")
+        if "detected_issues" in data:
+            extra_fields["ai_detected_issues"] = data.get("detected_issues")
+        if "processing_time_ms" in data:
+            extra_fields["ai_processing_time_ms"] = data.get("processing_time_ms")
+        if "processing_metadata" in data:
+            extra_fields["ai_processing_metadata"] = data.get("processing_metadata")
 
         success, result = correction_service.save_ai_correction(
             submission_id=submission_id,
-            ai_score=data["ai_score"],
-            ai_feedback=data["ai_feedback"],
-            user_id=user_id
+            ai_score=ai_score,
+            ai_feedback=ai_feedback,
+            user_id=user_id,
+            actor_role=actor_role,
+            actor_roles=actor_roles,
+            extra_fields=extra_fields or None
         )
 
         if success:
@@ -45,7 +107,7 @@ def record_ai_correction(submission_id):
                     evaluation_service._upsert_evaluation_result(
                         evaluation_id=str(evaluation_id),
                         student_id=submission.get("student_id"),
-                        score=data["ai_score"],
+                        score=ai_score,
                         source="ai",
                         submission_id=submission_id,
                         status="graded"
@@ -66,7 +128,23 @@ def record_ai_correction(submission_id):
                 message="Resultado de la corrección IA guardado exitosamente."
             )
         else:
-            return APIRoute.error(ErrorCodes.OPERATION_FAILED, result)
+            status_code = 400
+            message = "Operation failed"
+            details = None
+            if isinstance(result, dict):
+                status_code = result.get("status_code", status_code)
+                message = result.get("error") or result.get("message") or message
+                details = {k: v for k, v in result.items() if k not in ("status_code", "error", "message")}
+            else:
+                message = str(result)
+
+            error_code = ErrorCodes.OPERATION_FAILED
+            if status_code == 404:
+                error_code = ErrorCodes.NOT_FOUND
+            elif status_code == 403:
+                error_code = ErrorCodes.PERMISSION_DENIED
+
+            return APIRoute.error(error_code, message, details=details, status_code=status_code)
             
     except Exception as e:
         logging.error(f"Error en endpoint record_ai_correction: {str(e)}")
@@ -87,7 +165,7 @@ def start_correction():
     }
     """
     try:
-        data = request.json
+        data = request.get_json(silent=True) or {}
         teacher_id = get_jwt_identity()
 
         required_fields = ["evaluation_id", "submission_resource_id"]
@@ -126,9 +204,15 @@ def get_correction_task_status(task_id):
         if task_status:
             # Verificar permisos: solo el profesor que la creó o un admin pueden verla.
             user_id = get_jwt_identity()
-            user_roles = getattr(g, 'user_roles', [])
-            
-            if str(task_status.get('teacher_id')) != user_id and ROLES["ADMIN"] not in user_roles:
+            user_roles = getattr(request, 'user_roles', []) or []
+            workspace_role = getattr(request, 'workspace_role', None)
+            is_admin = (
+                ROLES["ADMIN"] in user_roles
+                or ROLES["ADMIN"].upper() in user_roles
+                or workspace_role in (ROLES["ADMIN"], ROLES["ADMIN"].upper())
+            )
+
+            if str(task_status.get('teacher_id')) != user_id and not is_admin:
                 return APIRoute.error(ErrorCodes.PERMISSION_DENIED, "No tienes permiso para ver esta tarea.")
 
             return APIRoute.success(data=task_status)
@@ -147,7 +231,7 @@ def update_correction_task(task_id):
     Esencial para el flujo donde el frontend realiza las llamadas a la IA.
     """
     try:
-        data = request.json
+        data = request.get_json(silent=True) or {}
         user_id = get_jwt_identity()
         
         # Validar que la tarea exista
@@ -189,9 +273,11 @@ def record_ai_result_for_task(task_id):
     try:
         data = request.get_json() or {}
         ai_score = data.get("ai_score")
+        if ai_score is None:
+            ai_score = data.get("ai_grade")
         ai_feedback = data.get("ai_feedback")
         if ai_score is None or ai_feedback is None:
-            return APIRoute.error(ErrorCodes.MISSING_FIELDS, "Faltan campos requeridos (ai_score, ai_feedback).")
+            return APIRoute.error(ErrorCodes.MISSING_FIELDS, "Faltan campos requeridos (ai_score/ai_grade, ai_feedback).")
 
         # Obtener tarea
         task = correction_service.get_task_status(task_id)

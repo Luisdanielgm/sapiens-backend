@@ -3646,6 +3646,7 @@ class ContentResultService:
             normalized = self._normalize_payload(result_data)
             content_result = ContentResult(**normalized)
             insert_result = self.collection.insert_one(content_result.to_dict())
+            self._update_linked_content_evaluations_best_effort(normalized)
             self._refresh_vakr_async(str(content_result.student_id))
             self._trigger_evaluation_processing_async(
                 str(content_result.student_id),
@@ -3658,6 +3659,158 @@ class ContentResultService:
         except Exception as exc:
             logging.error(f"Error guardando ContentResult: {exc}")
             return False, "Error interno al guardar el resultado"
+
+    def _update_linked_content_evaluations_best_effort(self, normalized: Dict[str, Any]) -> None:
+        """
+        Propaga resultados de contenido a evaluaciones vinculadas a un contenido especÌfico.
+
+        Importante:
+        - ContentResult.score se almacena normalizado en 0..1.
+        - Evaluations.score se maneja en 0..100.
+        - No debe fallar el registro del ContentResult si esta propagaciÛn falla.
+        """
+        try:
+            content_type = (normalized.get("content_type") or "").strip().lower()
+            is_interactive = bool(normalized.get("is_interactive"))
+
+            student_id = normalized.get("student_id")
+            content_id = normalized.get("content_id")
+            if not student_id or not content_id:
+                return
+
+            try:
+                content_oid = ObjectId(str(content_id))
+                student_oid = ObjectId(str(student_id))
+            except Exception:
+                return
+
+            raw_score = normalized.get("score")
+            try:
+                score_0_1 = float(raw_score) if raw_score is not None else None
+            except Exception:
+                score_0_1 = None
+            if score_0_1 is None:
+                return
+            score_pct = max(0.0, min(100.0, score_0_1 * 100.0))
+
+            from src.evaluations.services import evaluation_service
+
+            evaluations = list(
+                evaluation_service.evaluations_collection.find(
+                    {
+                        "$or": [
+                            {"linked_content_id": content_oid},
+                            {"linked_quiz_id": content_oid},  # compat
+                        ],
+                        "status": {"$ne": "deleted"},
+                    }
+                )
+            )
+            if not evaluations:
+                return
+
+            for ev in evaluations:
+                if ev.get("requires_submission"):
+                    continue
+
+                ev_score_source = ev.get("score_source") or ("quiz_linked" if ev.get("use_quiz_score") else None)
+                if ev_score_source == "quiz_linked":
+                    if content_type != "quiz":
+                        continue
+                elif ev_score_source == "interactive_result":
+                    if not is_interactive:
+                        continue
+                else:
+                    continue
+
+                existing = evaluation_service.results_collection.find_one(
+                    {"evaluation_id": ev["_id"], "student_id": student_oid}
+                )
+                if existing and existing.get("source") == "manual":
+                    continue
+
+                evaluation_service._upsert_evaluation_result(
+                    evaluation_id=str(ev["_id"]),
+                    student_id=str(student_id),
+                    score=score_pct,
+                    source=ev_score_source,
+                    submission_id=None,
+                    status="completed",
+                )
+        except Exception as exc:
+            logging.error(f"Error propagando linked-content evaluation_results: {exc}")
+
+    def _update_quiz_linked_evaluations_best_effort(self, normalized: Dict[str, Any]) -> None:
+        """
+        Si el ContentResult corresponde a un quiz, propaga el resultado a evaluaciones con `linked_quiz_id`.
+
+        Importante:
+        - ContentResult.score se almacena normalizado en 0..1.
+        - Evaluations.score se maneja en 0..100.
+        - No debe fallar el registro del ContentResult si esta propagaciÇün falla.
+        """
+        try:
+            content_type = (normalized.get("content_type") or "").strip().lower()
+            if content_type != "quiz":
+                return
+
+            student_id = normalized.get("student_id")
+            quiz_content_id = normalized.get("content_id")
+            if not student_id or not quiz_content_id:
+                return
+
+            try:
+                quiz_oid = ObjectId(str(quiz_content_id))
+                student_oid = ObjectId(str(student_id))
+            except Exception:
+                return
+
+            raw_score = normalized.get("score")
+            try:
+                score_0_1 = float(raw_score) if raw_score is not None else None
+            except Exception:
+                score_0_1 = None
+            if score_0_1 is None:
+                return
+            score_pct = max(0.0, min(100.0, score_0_1 * 100.0))
+
+            from src.evaluations.services import evaluation_service
+
+            evaluations = list(
+                evaluation_service.evaluations_collection.find(
+                    {
+                        "linked_quiz_id": quiz_oid,
+                        "status": {"$ne": "deleted"},
+                    }
+                )
+            )
+            if not evaluations:
+                return
+
+            for ev in evaluations:
+                if ev.get("requires_submission"):
+                    continue
+
+                ev_score_source = ev.get("score_source")
+                if ev_score_source and ev_score_source != "quiz_linked":
+                    continue
+
+                existing = evaluation_service.results_collection.find_one(
+                    {"evaluation_id": ev["_id"], "student_id": student_oid}
+                )
+                if existing and existing.get("source") == "manual":
+                    continue
+
+                evaluation_service._upsert_evaluation_result(
+                    evaluation_id=str(ev["_id"]),
+                    student_id=str(student_id),
+                    score=score_pct,
+                    source="quiz_linked",
+                    submission_id=None,
+                    status="completed",
+                )
+        except Exception as exc:
+            logging.error(f"Error propagando quiz_linked evaluation_results: {exc}")
 
     def get_student_results(
         self,

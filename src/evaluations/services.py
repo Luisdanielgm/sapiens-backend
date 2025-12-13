@@ -41,7 +41,7 @@ class EvaluationService:
         """
         try:
             evaluation = Evaluation(**evaluation_data)
-            
+
             # Validar que los topic_ids existen
             if not self._validate_topic_ids(evaluation.topic_ids):
                 raise ValueError("Uno o más topic_ids no son válidos")
@@ -360,6 +360,8 @@ class EvaluationService:
             # Calcular calificaciones por tema
             topic_scores = {}
             total_weighted_score = 0.0
+
+            include_quiz = bool(score_source == "content_result")
             
             for topic_id in evaluation.topic_ids:
                 topic_id_str = str(topic_id)
@@ -368,8 +370,7 @@ class EvaluationService:
                 topic_results = [r for r in content_results if str(r["topic_id"]) == topic_id_str]
                 
                 if topic_results:
-                    # Calcular promedio de resultados para el tema
-                    avg_score = sum(r.get("score", 0) for r in topic_results) / len(topic_results)
+                    avg_score = _topic_score_from_results(topic_results, include_quiz=include_quiz)
                     topic_scores[topic_id_str] = avg_score
                     
                     # Aplicar ponderación si es multi-tema
@@ -414,7 +415,7 @@ class EvaluationService:
                 evaluation_id=evaluation_id,
                 student_id=student_id,
                 score=total_weighted_score,
-                source="content_result",
+                source=score_source,
                 submission_id=submission_id,
                 status="completed"
             )
@@ -530,7 +531,8 @@ class EvaluationService:
             evaluation_ids = [e["_id"] for e in evaluations]
 
             # Traer resultados consolidados del estudiante para estas evaluaciones
-            results_filter = {"student_id": student_id}
+            student_obj_id = ObjectId(student_id) if isinstance(student_id, str) else student_id
+            results_filter = {"student_id": student_obj_id}
             if evaluation_ids:
                 results_filter["evaluation_id"] = {"$in": evaluation_ids}
             results = list(self.results_collection.find(results_filter))

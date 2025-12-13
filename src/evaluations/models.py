@@ -13,10 +13,14 @@ class Evaluation:
                  weight: float,
                  criteria: List[Dict],
                  due_date: datetime,
+                 module_id: Optional[str] = None,
+                 plan_id: Optional[str] = None,
+                 class_id: Optional[str] = None,
                  evaluation_type: str = "assignment",  # "assignment", "quiz", "project", "exam"
                  use_quiz_score: bool = False,
                  requires_submission: bool = False,
                  linked_quiz_id: Optional[str] = None,
+                 linked_content_id: Optional[str] = None,
                  auto_grading: Optional[Dict] = None,
                  weightings: Optional[Dict[str, float]] = None,
                  rubric: Optional[Dict] = None,
@@ -31,11 +35,16 @@ class Evaluation:
                  resource_templates: Optional[List[str]] = None,
                  allow_manual_override: bool = True,
                  _id: Optional[ObjectId] = None,
+                 created_by: Optional[str] = None,
                  created_at: Optional[datetime] = None,
                  updated_at: Optional[datetime] = None,
                  status: str = "pending"):
         self._id = _id or ObjectId()
-        self.topic_ids = [ObjectId(tid) for tid in topic_ids]
+        self.module_id = ObjectId(module_id) if module_id else None
+        self.plan_id = ObjectId(plan_id) if plan_id else None
+        self.class_id = ObjectId(class_id) if class_id else None
+        self.topic_ids = [tid if isinstance(tid, ObjectId) else ObjectId(tid) for tid in topic_ids]
+        self.created_by = ObjectId(created_by) if created_by else None
         self.title = title
         self.description = description
         self.weight = weight
@@ -45,8 +54,17 @@ class Evaluation:
         self.use_quiz_score = use_quiz_score
         self.requires_submission = requires_submission
         self.linked_quiz_id = ObjectId(linked_quiz_id) if linked_quiz_id else None
+        self.linked_content_id = ObjectId(linked_content_id) if linked_content_id else None
+        if self.linked_content_id is None and self.linked_quiz_id is not None:
+            # Compatibilidad: evaluaciones antiguas usan linked_quiz_id para vincular el contenido
+            self.linked_content_id = self.linked_quiz_id
         self.auto_grading = auto_grading
-        self.weightings = weightings or {}  # Dict[topic_id: weight] for multi-topic evaluations
+        # Dict[topic_id: weight] for multi-topic evaluations
+        self.weightings = weightings or {}
+        if self.is_multi_topic() and not self.weightings:
+            # Por defecto, si no se proveen ponderaciones, usamos pesos iguales.
+            equal_weight = 1.0 / max(len(self.topic_ids), 1)
+            self.weightings = {str(tid): equal_weight for tid in self.topic_ids}
         self.rubric = rubric or {}  # Rubric configuration or reference
         self.max_attempts = max_attempts
         self.time_limit = time_limit
@@ -65,7 +83,11 @@ class Evaluation:
     def to_dict(self) -> dict:
         return {
             "_id": self._id,
+            "module_id": self.module_id,
+            "plan_id": self.plan_id,
+            "class_id": self.class_id,
             "topic_ids": self.topic_ids,
+            "created_by": self.created_by,
             "title": self.title,
             "description": self.description,
             "weight": self.weight,
@@ -75,6 +97,7 @@ class Evaluation:
             "use_quiz_score": self.use_quiz_score,
             "requires_submission": self.requires_submission,
             "linked_quiz_id": self.linked_quiz_id,
+            "linked_content_id": self.linked_content_id,
             "auto_grading": self.auto_grading,
             "weightings": self.weightings,
             "rubric": self.rubric,
