@@ -15,6 +15,7 @@ from src.shared.database import get_db
 from src.shared.logging import log_error, log_info, log_warning
 from src.profiles.services import ProfileService
 from src.members.services import MembershipService
+from src.shared.limiter import limiter
 
 users_bp = APIBlueprint('users', __name__)
 user_service = UserService()
@@ -22,6 +23,7 @@ profile_service = ProfileService()
 membership_service = MembershipService()
 
 @users_bp.route('/register', methods=['POST'])
+@limiter.limit("5 per hour")
 @APIRoute.standard(required_fields=['email', 'password', 'name', 'role'])
 def register():
     """Registro de un nuevo usuario con email y contraseña."""
@@ -61,6 +63,7 @@ def register():
         return APIRoute.error(ErrorCodes.SERVER_ERROR, "Ocurrió un error inesperado durante el registro.")
 
 @users_bp.route('/login', methods=['POST'])
+@limiter.limit("5 per minute")
 @APIRoute.standard(required_fields=['email'])
 def login():
     """
@@ -243,6 +246,7 @@ def switch_institute(institute_id):
 
 
 @users_bp.route('/forgot-password', methods=['POST'])
+@limiter.limit("3 per hour")
 @APIRoute.standard(required_fields=['email'])
 def forgot_password():
     """Inicia el proceso de recuperación de contraseña."""
