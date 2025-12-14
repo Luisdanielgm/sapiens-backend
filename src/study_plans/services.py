@@ -22,10 +22,9 @@ from src.content.models import (
 )
 from src.resources.services import ResourceService, ResourceFolderService
 from src.content.services import ContentService
-# from src.content.services import ContentResultService  # No existe aún
+from src.content.services import ContentResultService
 from src.virtual.services import ContentChangeDetector
 from src.shared.logging import log_error
-import inspect # <--- Añadir import
 
 class StudyPlanService(VerificationBaseService):
     def __init__(self):
@@ -2102,12 +2101,10 @@ class EvaluationService(VerificationBaseService):
             if submission_resource_id:
                 unified_result_data["metrics"]["submission_resource_id"] = submission_resource_id
             
-            # TODO: Implementar ContentResultService
-            # content_result_service = ContentResultService()
-            # success, result_id_or_msg = content_result_service.record_result(unified_result_data)
+            content_result_service = ContentResultService()
+            success, result_id_or_msg = content_result_service.record_result(unified_result_data)
             
-            # Temporal hasta implementar ContentResultService
-            return True, "result_id_placeholder"
+            return success, result_id_or_msg
 
         except Exception as e:
             logging.error(f"Error registrando resultado de evaluación: {str(e)}")
@@ -2116,20 +2113,18 @@ class EvaluationService(VerificationBaseService):
     def update_result(self, result_id: str, update_data: dict) -> Tuple[bool, str]:
         """Actualiza un resultado de evaluación existente en la colección de ContentResult."""
         try:
-            # TODO: Implementar ContentResultService
-            # content_result_service = ContentResultService()
-            # 
-            # # Asegurarse de que el update_data no cambie el student_id o evaluation_id
-            # update_data.pop("student_id", None)
-            # update_data.pop("evaluation_id", None)
-            # 
-            # result = content_result_service.collection.update_one(
-            #     {"_id": ObjectId(result_id)},
-            #     {"$set": update_data}
-            # )
+            content_result_service = ContentResultService()
             
-            # Temporal hasta implementar ContentResultService
-            if True:
+            # Asegurarse de que el update_data no cambie el student_id o evaluation_id
+            update_data.pop("student_id", None)
+            update_data.pop("evaluation_id", None)
+
+            result = content_result_service.collection.update_one(
+                {"_id": ObjectId(result_id)},
+                {"$set": update_data}
+            )
+
+            if result.modified_count > 0:
                 return True, "Resultado actualizado exitosamente"
             
             return False, "No se encontró el resultado o no hubo cambios"
@@ -2139,15 +2134,11 @@ class EvaluationService(VerificationBaseService):
     def delete_result(self, result_id: str) -> Tuple[bool, str]:
         """Elimina un resultado de la colección de ContentResult."""
         try:
-            # TODO: Implementar ContentResultService
-            # content_result_service = ContentResultService()
-            # result = content_result_service.collection.delete_one({"_id": ObjectId(result_id)})
-            # if result.deleted_count > 0:
-            #     return True, "Resultado eliminado exitosamente"
-            # return False, "No se encontró el resultado"
-            
-            # Temporal hasta implementar ContentResultService
-            return True, "Resultado eliminado exitosamente"
+            content_result_service = ContentResultService()
+            result = content_result_service.collection.delete_one({"_id": ObjectId(result_id)})
+            if result.deleted_count > 0:
+                return True, "Resultado eliminado exitosamente"
+            return False, "No se encontró el resultado"
         except Exception as e:
             return False, str(e)
 
@@ -2167,20 +2158,16 @@ class EvaluationService(VerificationBaseService):
             if not evaluation_ids:
                 return []
 
-            # TODO: Implementar ContentResultService
-            # content_result_service = ContentResultService()
-            # all_results = []
-            # 
-            # # Buscar un resultado para cada evaluación
-            # for eval_id in evaluation_ids:
-            #     results_for_eval = content_result_service.get_student_results(
-            #         student_id=student_id,
-            #         evaluation_id=eval_id
-            #     )
-            #     all_results.extend(results_for_eval)
-            
-            # Temporal hasta implementar ContentResultService
+            content_result_service = ContentResultService()
             all_results = []
+
+            # Buscar un resultado para cada evaluación
+            for eval_id in evaluation_ids:
+                results_for_eval = content_result_service.get_student_results(
+                    student_id=student_id,
+                    evaluation_id=eval_id
+                )
+                all_results.extend(results_for_eval)
 
             return all_results
         except Exception as e:
@@ -2602,9 +2589,6 @@ class EvaluationService(VerificationBaseService):
         Integra las evaluaciones con el sistema de contenidos virtuales.
         """
         try:
-            # TODO: Implementar ContentResultService
-            # from src.content.services import ContentResultService
-            
             # Solo crear si hay calificación válida
             if grade_data.get("grade") is None:
                 return
@@ -2624,17 +2608,13 @@ class EvaluationService(VerificationBaseService):
                 "session_type": "evaluation_submission"
             }
             
-            # TODO: Implementar ContentResultService
-            # content_result_service = ContentResultService()
-            # success, result_id = content_result_service.record_result(content_result_data)
-            # 
-            # if success:
-            #     logging.info(f"ContentResult creado: {result_id} para submission {submission['_id']}")
-            # else:
-            #     logging.warning(f"No se pudo crear ContentResult: {result_id}")
+            content_result_service = ContentResultService()
+            success, result_id = content_result_service.record_result(content_result_data)
             
-            # Temporal hasta implementar ContentResultService
-            logging.info(f"ContentResult temporal para submission {submission['_id']}")
+            if success:
+                logging.info(f"ContentResult creado: {result_id} para submission {submission['_id']}")
+            else:
+                logging.warning(f"No se pudo crear ContentResult: {result_id}")
                 
         except Exception as e:
             logging.error(f"Error creando ContentResult desde submission: {str(e)}")
