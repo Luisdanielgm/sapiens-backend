@@ -57,6 +57,7 @@ from src.shared.cascade_routes import cascade_bp
 from src.llm.routes import llm_bp
 # Sistema de progreso
 from src.progress.routes import progress_bp
+from src.shared.limiter import limiter
 
 def create_app(config_object=active_config):
     """
@@ -64,6 +65,9 @@ def create_app(config_object=active_config):
     """
     app = Flask(APP_NAME)
     
+    # Inicializar Rate Limiter
+    limiter.init_app(app)
+
     # Aplicar configuración
     app.config.from_object(config_object)
     
@@ -213,6 +217,14 @@ def create_app(config_object=active_config):
             "error": "NOT_FOUND",
             "message": "Recurso no encontrado"
         }), 404
+
+    @app.errorhandler(429)
+    def handle_too_many_requests(error):
+        return jsonify({
+            "success": False,
+            "error": "TOO_MANY_REQUESTS",
+            "message": str(error.description)
+        }), 429
         
     # Registrar handler para AppException para capturar excepciones no manejadas por handle_errors
     @app.errorhandler(Exception)
