@@ -1518,7 +1518,9 @@ class ContentService(VerificationBaseService):
             # Validar orden secuencial si se proporciona
             self._validate_sequential_order(contents_data)
             
-            # Crear contenidos uno por uno dentro de la transacción
+            # Preparar documentos para inserción masiva
+            documents_to_insert = []
+
             for i, content_data in enumerate(contents_data):
                 # Garantizar un solo quiz por topic en bulk creation
                 if content_data.get("content_type") == "quiz":
@@ -1650,13 +1652,22 @@ class ContentService(VerificationBaseService):
                     **kwargs
                 )
                 
-                # Insertar en la base de datos
-                result = self.collection.insert_one(content.to_dict(), session=session)
-                created_ids.append(str(result.inserted_id))
+                documents_to_insert.append(content.to_dict())
 
-                # Logging para cada slide creado con campos HTML/narrativa
-                if content_data.get("content_type") == "slide":
-                    logging.info(f"Bulk: Slide creado para topic {content_data.get('topic_id')} con id {result.inserted_id}. status={initial_status}, has_html={'content_html' in content_data}, has_narrative={'narrative_text' in content_data}")
+            # Insertar masivamente si hay documentos
+            if documents_to_insert:
+                result = self.collection.insert_many(documents_to_insert, session=session)
+                created_ids = [str(id) for id in result.inserted_ids]
+
+                # Logging para cada slide insertada
+                # Iteramos sobre documents_to_insert para logging, asumiendo orden preservado
+                for i, doc in enumerate(documents_to_insert):
+                    if doc.get("content_type") == "slide":
+                        content_id = created_ids[i] if i < len(created_ids) else "unknown"
+                        has_html = bool(doc.get("content", {}).get("content_html"))
+                        has_narrative = bool(doc.get("content", {}).get("narrative_text"))
+                        initial_status = doc.get("status")
+                        logging.info(f"Bulk: Slide creado para topic {doc.get('topic_id')} con id {content_id}. status={initial_status}, has_html={has_html}, has_narrative={has_narrative}")
             
             # Actualizar métricas de tipos de contenido
             for content_type, count in content_types_usage.items():
