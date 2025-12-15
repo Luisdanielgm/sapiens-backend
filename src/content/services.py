@@ -1656,7 +1656,9 @@ class ContentService(VerificationBaseService):
 
             # Insertar masivamente si hay documentos
             if documents_to_insert:
-                result = self.collection.insert_many(documents_to_insert, session=session)
+                # ordered=True (default) se define explícitamente para garantizar que inserted_ids preserve el orden
+                # de documents_to_insert, ya que el frontend mapea por índice.
+                result = self.collection.insert_many(documents_to_insert, ordered=True, session=session)
                 created_ids = [str(id) for id in result.inserted_ids]
 
                 # Logging para cada slide insertada
